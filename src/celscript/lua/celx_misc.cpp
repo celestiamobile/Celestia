@@ -198,8 +198,8 @@ static int font_render(lua_State* l)
     const char* s = celx.safeGetString(2, AllErrors, "First argument to font:render must be a string");
     auto font = *celx.getThis<std::shared_ptr<TextureFont>>();
     Eigen::Matrix4f p, m;
-    glGetFloatv(GL_PROJECTION_MATRIX, p.data());
-    glGetFloatv(GL_MODELVIEW_MATRIX, m.data());
+    fpcGetFloatv(GL_PROJECTION_MATRIX, p.data());
+    fpcGetFloatv(GL_MODELVIEW_MATRIX, m.data());
     TextLayout layout;
     layout.setFont(font);
     layout.begin(p, m);

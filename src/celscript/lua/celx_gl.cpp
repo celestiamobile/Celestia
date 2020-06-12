@@ -186,7 +186,7 @@ static int gl_Enable(lua_State* l)
     CelxLua celx(l);
     celx.checkArgs(1, 1, "One argument expected for gl.Enable()");
     int i = (int)celx.safeGetNumber(1, WrongType, "argument 1 to gl.Enable must be a number", 0.0);
-    glEnable(i);
+    fpcEnable(i);
     return 0;
 }
 
@@ -195,7 +195,7 @@ static int gl_Disable(lua_State* l)
     CelxLua celx(l);
     celx.checkArgs(1, 1, "One argument expected for gl.Disable()");
     int i = (int)celx.safeGetNumber(1, WrongType, "argument 1 to gl.Disable must be a number", 0.0);
-    glDisable(i);
+    fpcDisable(i);
     return 0;
 }
 
