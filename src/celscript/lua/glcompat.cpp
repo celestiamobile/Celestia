@@ -482,7 +482,7 @@ void fpcGetFloatv(GLenum pname, GLfloat *params) noexcept
         memcpy(params, g_projectionStack[g_projectionPosition].data(), 16*sizeof(float));
         break;
     default:
-        orig_glGetFloatv(pname, params);
+        glGetFloatv(pname, params);
         break;
     }
 }
@@ -495,7 +495,7 @@ void fpcEnable(GLenum param) noexcept
     case GL_LINE_SMOOTH:
 #endif
     case GL_BLEND:
-        orig_glEnable(param);
+        glEnable(param);
     default:
         break;
     }
@@ -509,7 +509,7 @@ void fpcDisable(GLenum param) noexcept
     case GL_LINE_SMOOTH:
 #endif
     case GL_BLEND:
-        orig_glDisable(param);
+        glDisable(param);
     default:
         break;
     }
