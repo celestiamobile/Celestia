@@ -11,10 +11,6 @@
 
 #pragma once
 
-#ifndef EPOXY_GL_H
-#error "glcompat.h must be included after epoxy/gl.h"
-#endif
-
 #ifndef GL_PROJECTION
 #define GL_PROJECTION 0x1701
 #endif
@@ -87,27 +83,6 @@
 #undef glOrtho
 #endif
 #define glOrtho(l,r,b,t,n,f) fpcOrtho(l,r,b,t,n,f)
-
-#define orig_glGetFloatv(n,m) epoxy_glGetFloatv(n,m)
-
-#ifdef glGetFloatv
-#undef glGetFloatv
-#endif
-#define glGetFloatv(n,m) fpcGetFloatv(n,m)
-
-#define orig_glEnable(i) epoxy_glEnable(i)
-
-#ifdef glEnable
-#undef glEnable
-#endif
-#define glEnable(i) fpcEnable(i)
-
-#define orig_glDisable(i) epoxy_glDisable(i)
-
-#ifdef glDisable
-#undef glDisable
-#endif
-#define glDisable(i) fpcDisable(i)
 
 #ifdef glBegin
 #undef glBegin
