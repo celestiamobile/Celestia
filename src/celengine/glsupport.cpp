@@ -4,6 +4,10 @@
 
 namespace celestia::gl
 {
+static int
+epoxy_gl_version(void);
+static bool
+epoxy_has_gl_extension(const char *ext);
 
 #ifdef GL_ES
 CELAPI bool OES_vertex_array_object        = false;
@@ -137,4 +141,100 @@ void disableGeomShaders() noexcept
     EnableGeomShaders = false;
 }
 
+// Taken from libepoxy
+static int
+epoxy_internal_gl_version(GLenum version_string, int error_version, int factor);
+static bool
+epoxy_internal_has_gl_extension(const char *ext, bool invalid_op_mode);
+
+static int
+epoxy_gl_version(void)
+{
+    return epoxy_internal_gl_version(GL_VERSION, 0, 10);
+}
+
+bool
+epoxy_has_gl_extension(const char *ext)
+{
+    return epoxy_internal_has_gl_extension(ext, false);
+}
+
+static int
+epoxy_internal_gl_version(GLenum version_string, int error_version, int factor)
+{
+    const char *version = (const char *)glGetString(version_string);
+    GLint major, minor;
+    int scanf_count;
+
+    if (!version)
+        return error_version;
+
+    /* skip to version number */
+    while (!isdigit(*version) && *version != '\0')
+        version++;
+
+    /* Interpret version number */
+    scanf_count = sscanf(version, "%i.%i", &major, &minor);
+    if (scanf_count != 2) {
+        fprintf(stderr, "Unable to interpret GL_VERSION string: %s\n",
+                version);
+        abort();
+    }
+
+    return factor * major + minor;
+}
+
+static bool
+epoxy_extension_in_string(const char *extension_list, const char *ext)
+{
+    const char *ptr = extension_list;
+    int len;
+
+    if (!ext)
+        return false;
+
+    len = strlen(ext);
+
+    if (extension_list == NULL || *extension_list == '\0')
+        return false;
+
+    /* Make sure that don't just find an extension with our name as a prefix. */
+    while (true) {
+        ptr = strstr(ptr, ext);
+        if (!ptr)
+            return false;
+
+        if (ptr[len] == ' ' || ptr[len] == 0)
+            return true;
+        ptr += len;
+    }
+}
+
+static bool
+epoxy_internal_has_gl_extension(const char *ext, bool invalid_op_mode)
+{
+    if (epoxy_gl_version() < 30) {
+        const char *exts = (const char *)glGetString(GL_EXTENSIONS);
+        if (!exts)
+            return invalid_op_mode;
+        return epoxy_extension_in_string(exts, ext);
+    } else {
+        int num_extensions;
+        int i;
+
+        glGetIntegerv(GL_NUM_EXTENSIONS, &num_extensions);
+        if (num_extensions == 0)
+            return invalid_op_mode;
+
+        for (i = 0; i < num_extensions; i++) {
+            const char *gl_ext = (const char *)glGetStringi(GL_EXTENSIONS, i);
+            if (!gl_ext)
+                return false;
+            if (strcmp(ext, gl_ext) == 0)
+                return true;
+        }
+
+        return false;
+    }
+}
 } // end namespace celestia::gl
