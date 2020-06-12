@@ -6,7 +6,14 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
-#include <epoxy/gl.h>
+#ifdef GL_ES
+#define GL_GLEXT_PROTOTYPES
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include <GLES3/gl3.h>
+#include <GLES3/gl31.h>
+#include <GLES3/gl32.h>
+#endif
 
 #ifdef GL_ES
 #ifdef glDepthRange
