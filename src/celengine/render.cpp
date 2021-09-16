@@ -86,7 +86,9 @@ std::ofstream hdrlog;
 #endif
 #ifdef _MSC_VER
 #include <malloc.h>
+#ifndef alloca
 #define alloca(s) _alloca(s)
+#endif
 #endif
 
 using namespace cmod;
@@ -5533,6 +5535,7 @@ bool Renderer::captureFrame(int x, int y, int w, int h, PixelFormat format, unsi
     if (!gl::MESA_pack_invert)
     {
         int realWidth = w * formatWidth(format);
+        realWidth = (realWidth + 3) & ~0x3;
 #if defined(__GNUC__) && !defined(__STRICT_ANSI__)
         uint8_t tempLine[realWidth]; // G++ supports VLA as an extension
 #else
