@@ -2,9 +2,6 @@
 # Copyright (C) 2001-2020 Celestia Development Team
 # This file is distributed under the same license as the celestia package.
 #
-# Translators
-# Georgi Georgiev (Жоро) <g.georgiev.shumen@gmail.com> 2020, 2021
-#
 #, fuzzy
 msgid ""
 msgstr ""
@@ -29,6 +26,11 @@ msgstr "%.2f дни"
 #, c-format
 msgid "%.2f hours"
 msgstr "%.2f часа"
+
+# Android/iOS
+#, c-format
+msgid "%d FPS"
+msgstr ""
 
 # Android/iOS/Mac/Windows, Unit kilometer
 #, c-format
@@ -604,6 +606,10 @@ msgstr "Формат:"
 msgid "Forward"
 msgstr "Напред"
 
+# Android/iOS, Frame rate of simulation
+msgid "Frame Rate"
+msgstr ""
+
 # Windows, Freeze time
 msgid "Freeze"
 msgstr "Замрази"
@@ -896,6 +902,11 @@ msgstr "Маркери"
 # Mac, Mass of an object
 msgid "Mass"
 msgstr "Маса"
+
+# Android/iOS
+#, c-format
+msgid "Maximum (%d FPS)"
+msgstr ""
 
 # Android/iOS/Mac/Windows, Medium resolution
 msgid "Medium"

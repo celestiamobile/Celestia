@@ -27,6 +27,11 @@ msgstr "%.2f dias"
 msgid "%.2f hours"
 msgstr "%.2f horas"
 
+# Android/iOS
+#, c-format
+msgid "%d FPS"
+msgstr ""
+
 # Android/iOS/Mac/Windows, Unit kilometer
 #, c-format
 msgid "%d km"
@@ -601,6 +606,10 @@ msgstr "Formato:"
 msgid "Forward"
 msgstr "Adiante"
 
+# Android/iOS, Frame rate of simulation
+msgid "Frame Rate"
+msgstr ""
+
 # Windows, Freeze time
 msgid "Freeze"
 msgstr "Pausar"
@@ -893,6 +902,11 @@ msgstr "Marcadores"
 # Mac, Mass of an object
 msgid "Mass"
 msgstr "Massa"
+
+# Android/iOS
+#, c-format
+msgid "Maximum (%d FPS)"
+msgstr ""
 
 # Android/iOS/Mac/Windows, Medium resolution
 msgid "Medium"

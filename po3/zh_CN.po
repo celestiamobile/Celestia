@@ -27,6 +27,11 @@ msgstr "%.2f 天"
 msgid "%.2f hours"
 msgstr "%.2f 小时"
 
+# Android/iOS
+#, c-format
+msgid "%d FPS"
+msgstr "%d FPS"
+
 # Android/iOS/Mac/Windows, Unit kilometer
 #, c-format
 msgid "%d km"
@@ -601,6 +606,10 @@ msgstr "格式: "
 msgid "Forward"
 msgstr "前进"
 
+# Android/iOS, Frame rate of simulation
+msgid "Frame Rate"
+msgstr "帧率"
+
 # Windows, Freeze time
 msgid "Freeze"
 msgstr "停止"
@@ -893,6 +902,11 @@ msgstr "标记"
 # Mac, Mass of an object
 msgid "Mass"
 msgstr "质量"
+
+# Android/iOS
+#, c-format
+msgid "Maximum (%d FPS)"
+msgstr "最大值（%d FPS）"
 
 # Android/iOS/Mac/Windows, Medium resolution
 msgid "Medium"
