@@ -31,6 +31,11 @@ msgstr ""
 msgid "%d FPS"
 msgstr ""
 
+# Android/iOS, Unit foot
+#, c-format
+msgid "%d ft"
+msgstr ""
+
 # Android/iOS/Mac/Windows, Unit kilometer
 #, c-format
 msgid "%d km"
@@ -39,6 +44,11 @@ msgstr ""
 # Android/iOS/Mac/Windows, Unit meter
 #, c-format
 msgid "%d m"
+msgstr ""
+
+# Android/iOS, Unit mile
+#, c-format
+msgid "%d mi"
 msgstr ""
 
 # Mac, Speed unit
@@ -725,6 +735,10 @@ msgstr "Seçenekleri Göster…"
 msgid "Image"
 msgstr ""
 
+# Android/iOS, Imperial measurement system
+msgid "Imperial"
+msgstr ""
+
 # Android/iOS
 msgid ""
 "In camera mode, drag to move field of view.\n"
@@ -901,9 +915,21 @@ msgstr ""
 msgid "Maximum (%d FPS)"
 msgstr ""
 
+# Android/iOS, Measurement system
+msgid "Measure Units"
+msgstr ""
+
+# Android/iOS, Measurement system
+msgid "Measure Units:"
+msgstr ""
+
 # Android/iOS/Mac/Windows, Medium resolution
 msgid "Medium"
 msgstr "Orta"
+
+# Android/iOS, Metric measurement system
+msgid "Metric"
+msgstr ""
 
 # Mac, System menu item, minimize window
 msgid "Minimize"
@@ -1576,7 +1602,7 @@ msgstr ""
 msgid "Tour Guide"
 msgstr "Tur Rehberi"
 
-# Mac/Windows, Track an object
+# Android/iOS/Mac/Windows, Track an object
 msgid "Track"
 msgstr ""
 

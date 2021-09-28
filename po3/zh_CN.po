@@ -32,6 +32,11 @@ msgstr "%.2f 小时"
 msgid "%d FPS"
 msgstr "%d FPS"
 
+# Android/iOS, Unit foot
+#, c-format
+msgid "%d ft"
+msgstr "%d ft"
+
 # Android/iOS/Mac/Windows, Unit kilometer
 #, c-format
 msgid "%d km"
@@ -41,6 +46,11 @@ msgstr "%d 千米"
 #, c-format
 msgid "%d m"
 msgstr "%d 米"
+
+# Android/iOS, Unit mile
+#, c-format
+msgid "%d mi"
+msgstr "%d mi"
 
 # Mac, Speed unit
 msgid "1 AU/s"
@@ -726,6 +736,10 @@ msgstr "地平座标系"
 msgid "Image"
 msgstr "图片"
 
+# Android/iOS, Imperial measurement system
+msgid "Imperial"
+msgstr "英制"
+
 # Android/iOS
 msgid ""
 "In camera mode, drag to move field of view.\n"
@@ -908,9 +922,21 @@ msgstr "质量"
 msgid "Maximum (%d FPS)"
 msgstr "最大值（%d FPS）"
 
+# Android/iOS, Measurement system
+msgid "Measure Units"
+msgstr "测量单位"
+
+# Android/iOS, Measurement system
+msgid "Measure Units:"
+msgstr "测量单位："
+
 # Android/iOS/Mac/Windows, Medium resolution
 msgid "Medium"
 msgstr "中"
+
+# Android/iOS, Metric measurement system
+msgid "Metric"
+msgstr "公制"
 
 # Mac, System menu item, minimize window
 msgid "Minimize"
@@ -1585,7 +1611,7 @@ msgstr "切换FPS显示"
 msgid "Tour Guide"
 msgstr "向导"
 
-# Mac/Windows, Track an object
+# Android/iOS/Mac/Windows, Track an object
 msgid "Track"
 msgstr "保持居中"
 

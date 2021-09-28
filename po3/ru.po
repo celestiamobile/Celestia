@@ -32,6 +32,11 @@ msgstr "%.2f ч."
 msgid "%d FPS"
 msgstr ""
 
+# Android/iOS, Unit foot
+#, c-format
+msgid "%d ft"
+msgstr ""
+
 # Android/iOS/Mac/Windows, Unit kilometer
 #, c-format
 msgid "%d km"
@@ -41,6 +46,11 @@ msgstr "%d км"
 #, c-format
 msgid "%d m"
 msgstr "%d м"
+
+# Android/iOS, Unit mile
+#, c-format
+msgid "%d mi"
+msgstr ""
 
 # Mac, Speed unit
 msgid "1 AU/s"
@@ -726,6 +736,10 @@ msgstr "Горизонтальная"
 msgid "Image"
 msgstr "Изображение"
 
+# Android/iOS, Imperial measurement system
+msgid "Imperial"
+msgstr ""
+
 # Android/iOS
 msgid ""
 "In camera mode, drag to move field of view.\n"
@@ -908,9 +922,21 @@ msgstr "Масса"
 msgid "Maximum (%d FPS)"
 msgstr ""
 
+# Android/iOS, Measurement system
+msgid "Measure Units"
+msgstr ""
+
+# Android/iOS, Measurement system
+msgid "Measure Units:"
+msgstr ""
+
 # Android/iOS/Mac/Windows, Medium resolution
 msgid "Medium"
 msgstr "Среднее"
+
+# Android/iOS, Metric measurement system
+msgid "Metric"
+msgstr ""
 
 # Mac, System menu item, minimize window
 msgid "Minimize"
@@ -1585,7 +1611,7 @@ msgstr "Показать/скрыть FPS"
 msgid "Tour Guide"
 msgstr "Путеводитель"
 
-# Mac/Windows, Track an object
+# Android/iOS/Mac/Windows, Track an object
 msgid "Track"
 msgstr "Следовать"
 

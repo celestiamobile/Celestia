@@ -29,6 +29,11 @@ msgstr "%.2f 小時"
 # Android/iOS
 #, c-format
 msgid "%d FPS"
+msgstr "%d FPS"
+
+# Android/iOS, Unit foot
+#, c-format
+msgid "%d ft"
 msgstr ""
 
 # Android/iOS/Mac/Windows, Unit kilometer
@@ -40,6 +45,11 @@ msgstr "%d 千米"
 #, c-format
 msgid "%d m"
 msgstr "%d 米"
+
+# Android/iOS, Unit mile
+#, c-format
+msgid "%d mi"
+msgstr ""
 
 # Mac, Speed unit
 msgid "1 AU/s"
@@ -607,7 +617,7 @@ msgstr "往前"
 
 # Android/iOS, Frame rate of simulation
 msgid "Frame Rate"
-msgstr ""
+msgstr "幀率"
 
 # Windows, Freeze time
 msgid "Freeze"
@@ -724,6 +734,10 @@ msgstr "水平分割檢視"
 # Android/iOS, Sharing option, image
 msgid "Image"
 msgstr "圖片"
+
+# Android/iOS, Imperial measurement system
+msgid "Imperial"
+msgstr ""
 
 # Android/iOS
 msgid ""
@@ -905,11 +919,23 @@ msgstr "質量"
 # Android/iOS
 #, c-format
 msgid "Maximum (%d FPS)"
+msgstr "最大值（%d FPS）"
+
+# Android/iOS, Measurement system
+msgid "Measure Units"
+msgstr ""
+
+# Android/iOS, Measurement system
+msgid "Measure Units:"
 msgstr ""
 
 # Android/iOS/Mac/Windows, Medium resolution
 msgid "Medium"
 msgstr "中"
+
+# Android/iOS, Metric measurement system
+msgid "Metric"
+msgstr ""
 
 # Mac, System menu item, minimize window
 msgid "Minimize"
@@ -1584,7 +1610,7 @@ msgstr "切換FPS顯示"
 msgid "Tour Guide"
 msgstr "遊歷指導"
 
-# Mac/Windows, Track an object
+# Android/iOS/Mac/Windows, Track an object
 msgid "Track"
 msgstr "追蹤"
 
