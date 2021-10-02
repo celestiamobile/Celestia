@@ -8,7 +8,7 @@ msgstr ""
 "Project-Id-Version: celestia 1.7.0\n"
 "Report-Msgid-Bugs-To: team@celestia.space\n"
 "POT-Creation-Date: 2020-04-15 20:22+0800\n"
-"PO-Revision-Date: 2021-06-12 15:50+0300\n"
+"PO-Revision-Date: 2021-10-02 12:42+0300\n"
 "Last-Translator: Georgi Georgiev (Жоро) <g.georgiev.shumen@gmail.com>\n"
 "Language-Team: Bulgarian <g.georgiev.shumen@gmail.com>\n"
 "Language: bg\n"
@@ -30,12 +30,12 @@ msgstr "%.2f часа"
 # Android/iOS
 #, c-format
 msgid "%d FPS"
-msgstr ""
+msgstr "%d ЧКС"
 
 # Android/iOS, Unit foot
 #, c-format
 msgid "%d ft"
-msgstr ""
+msgstr "%d фт"
 
 # Android/iOS/Mac/Windows, Unit kilometer
 #, c-format
@@ -50,7 +50,7 @@ msgstr "%d м"
 # Android/iOS, Unit mile
 #, c-format
 msgid "%d mi"
-msgstr ""
+msgstr "%d ми"
 
 # Mac, Speed unit
 msgid "1 AU/s"
@@ -106,7 +106,7 @@ msgstr "Добави нова…"
 
 # iOS
 msgid "Add-on directory does not exist."
-msgstr "Директорията за добавки не съществува."
+msgstr "Папката на добавките не съществува."
 
 # Android/iOS/Windows
 msgid "Add-ons"
@@ -356,7 +356,7 @@ msgstr "Персонализирано"
 
 # Android/iOS/Mac, Directory to load data from
 msgid "Data Directory"
-msgstr "Директория на данните"
+msgstr "Папка на данните"
 
 # Android/iOS, Title for celestia.cfg, data location setting
 msgid "Data Location"
@@ -453,11 +453,11 @@ msgstr "Искате ли да премахнете тази добавка?"
 
 # Mac, In eclipse finder
 msgid "Double click on item to go"
-msgstr "Натисни два пъти за да отидеш до елемента"
+msgstr "Натиснете два пъти за да отидете до елемента"
 
 # Mac, In bookmark organizer
 msgid "Double-click item to open or control-click for contextual menu. Drag items to reorganize."
-msgstr "Натисни два пъти върху елемент за да го отвориш или натисни заедно с Ctrl за контекстното меню. Премести елементите, чрез влачене."
+msgstr "Натиснете два пъти върху елемент за да го отворите или заедно с клавиша „Ctrl“ за отваряне на контекстното меню. Сортирайте елементите, чрез влачене."
 
 # Mac, Pitch angle down
 msgid "Down"
@@ -618,7 +618,7 @@ msgstr "Напред"
 
 # Android/iOS, Frame rate of simulation
 msgid "Frame Rate"
-msgstr ""
+msgstr "Честота на кадрите"
 
 # Windows, Freeze time
 msgid "Freeze"
@@ -662,7 +662,7 @@ msgstr "Общи"
 
 # Android/iOS
 msgid "Generating sharing link…"
-msgstr "Генериране на споделяща връзка…"
+msgstr "Създаване на споделяща връзка…"
 
 # Android/iOS/Mac/Windows
 msgid "Globulars"
@@ -738,7 +738,7 @@ msgstr "Изображение"
 
 # Android/iOS, Imperial measurement system
 msgid "Imperial"
-msgstr ""
+msgstr "Имперски"
 
 # Android/iOS
 msgid ""
@@ -746,9 +746,9 @@ msgid ""
 "\n"
 "Pinch to zoom in/out field of view."
 msgstr ""
-"В режим наблюдение, влачи за преместване на зрителното поле.\n"
+"В режим наблюдение, влачете за преместване на зрителното поле.\n"
 "\n"
-"Влачи с два пръста за увеличаване или намаляване на зрителното поле."
+"Влачете с два пръста за увеличаване или намаляване на зрителното поле."
 
 # Android/iOS
 msgid ""
@@ -756,9 +756,9 @@ msgid ""
 "\n"
 "Pinch to zoom in/out on an object."
 msgstr ""
-"В режим обекти, влачи за завъртане около обекта.\n"
+"В режим обекти, влачете за завъртане около обекта.\n"
 "\n"
-"Влачи с два пръста за увеличаване или намаляване на обекта."
+"Влачете с два пръста за увеличаване или намаляване на обекта."
 
 # Mac, HUD display
 msgid "Info"
@@ -920,15 +920,15 @@ msgstr "Маса"
 # Android/iOS
 #, c-format
 msgid "Maximum (%d FPS)"
-msgstr ""
+msgstr "Максимум (%d ЧКС)"
 
 # Android/iOS, Measurement system
 msgid "Measure Units"
-msgstr ""
+msgstr "Мерни единици"
 
 # Android/iOS, Measurement system
 msgid "Measure Units:"
-msgstr ""
+msgstr "Мерни единици:"
 
 # Android/iOS/Mac/Windows, Medium resolution
 msgid "Medium"
@@ -936,7 +936,7 @@ msgstr "Средна"
 
 # Android/iOS, Metric measurement system
 msgid "Metric"
-msgstr ""
+msgstr "Метрични"
 
 # Mac, System menu item, minimize window
 msgid "Minimize"
@@ -1136,7 +1136,7 @@ msgstr "Постави връзката"
 
 # Mac, Pause time
 msgid "Pause"
-msgstr "Паузирай"
+msgstr "Прекъсни"
 
 # Android/iOS/Mac, Camera control
 msgid "Pitch"
@@ -1173,11 +1173,11 @@ msgstr "Моля, въведете наименованието на обект�
 # Android/iOS
 #, c-format
 msgid "Please enter the time in \"%s\" format."
-msgstr "Моля, въведете времето във формат \"%s\"."
+msgstr "Моля, въведете времето във формат „%s“."
 
 # Android, Possibly due to memory issue, Celestia needs to be restarted
 msgid "Please restart Celestia"
-msgstr "Моля, рестартирайте Celestia"
+msgstr "Моля, рестартирайте „Celestia“"
 
 # Android/iOS/Mac/Windows, Marker
 msgid "Plus"
@@ -1210,11 +1210,11 @@ msgstr "Изход от „Celestia“"
 # Android/iOS/Mac, Equatorial coordinate
 #, c-format
 msgid "RA: %dh %dm %.2fs"
-msgstr "α: %dh %dm %.2fs"
+msgstr "α: %dч %dм %.2fс"
 
 # Windows
 msgid "RA: {0}h {1}m {2:N2}s"
-msgstr "α: {0}h {1}m {2:N2}s"
+msgstr "α: {0}ч {1}м {2:N2}с"
 
 # Android/iOS/Mac/Windows, In Go to, specify the distance based on the object radius
 msgid "radii"
@@ -1234,11 +1234,11 @@ msgstr "Получател"
 
 # Android/iOS/Mac/Windows, Reference vectors for an object
 msgid "Reference Vectors"
-msgstr "Референтни вектори"
+msgstr "Отправни вектори"
 
 # Android/iOS
 msgid "Reference vectors are only visible for the current selected solar system object."
-msgstr "Референтните вектори са видими само за текущия обект от Слънчевата система."
+msgstr "Отправни вектори са видими само за текущия обект от Слънчевата система."
 
 # Android/iOS, Button to refresh this list
 msgid "Refresh"
@@ -1553,7 +1553,7 @@ msgstr "Синхронизирай с избраната орбита"
 
 # Android/iOS
 msgid "Tap the mode button on the sidebar to switch between object mode and camera mode."
-msgstr "Докосни бутона в страничната лента за превключване между режимите."
+msgstr "Докоснете бутона в страничната лента за превключване между режимите."
 
 # Android/iOS/Mac/Windows, Location labels
 msgid "Terrae (Land masses)"
@@ -1613,7 +1613,7 @@ msgstr "Екскурзовод"
 
 # Android/iOS/Mac/Windows, Track an object
 msgid "Track"
-msgstr "Последвай"
+msgstr "Следвай"
 
 # Mac/Windows, Track selected object
 msgid "Track Selection"
