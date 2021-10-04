@@ -8,14 +8,12 @@ msgstr ""
 "Project-Id-Version: celestia 1.7.0\n"
 "Report-Msgid-Bugs-To: team@celestia.space\n"
 "POT-Creation-Date: 2020-04-15 20:22+0800\n"
-"PO-Revision-Date: 2021-05-17 22:45+0300\n"
-"Last-Translator: Askaniy Anpilogov <aaskaniy@gmail.com>\n"
+"PO-Revision-Date: 2021-10-03 22:55+0300\n"
+"Last-Translator: Askaniy Anpilogov <askaniy1625@gmail.com>\n"
 "Language: ru\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Language-Team: \n"
-"X-Generator: Poedit 2.4.3\n"
 
 # Android/iOS/Mac/Windows
 #, c-format
@@ -30,12 +28,12 @@ msgstr "%.2f ч."
 # Android/iOS
 #, c-format
 msgid "%d FPS"
-msgstr ""
+msgstr "%d FPS"
 
 # Android/iOS, Unit foot
 #, c-format
 msgid "%d ft"
-msgstr ""
+msgstr "%d фут"
 
 # Android/iOS/Mac/Windows, Unit kilometer
 #, c-format
@@ -50,7 +48,7 @@ msgstr "%d м"
 # Android/iOS, Unit mile
 #, c-format
 msgid "%d mi"
-msgstr ""
+msgstr "%d миль"
 
 # Mac, Speed unit
 msgid "1 AU/s"
@@ -176,7 +174,7 @@ msgstr "B: %d° %d′ %.2f″"
 
 # Windows
 msgid "B: {0}° {1}′ {2:N2}″"
-msgstr ""
+msgstr "B: {0}° {1}′ {2:N2}″"
 
 # Mac, Undo an operation
 msgid "Back"
@@ -381,7 +379,7 @@ msgstr "Склонение: %d° %d′ %.2f″"
 
 # Windows
 msgid "DEC: {0}° {1}′ {2:N2}″"
-msgstr ""
+msgstr "Склонение: {0}° {1}′ {2:N2}″"
 
 # Android/iOS/Mac
 msgid "Deep Sky Objects"
@@ -618,7 +616,7 @@ msgstr "Вперёд"
 
 # Android/iOS, Frame rate of simulation
 msgid "Frame Rate"
-msgstr ""
+msgstr "Частота кадров"
 
 # Windows, Freeze time
 msgid "Freeze"
@@ -738,7 +736,7 @@ msgstr "Изображение"
 
 # Android/iOS, Imperial measurement system
 msgid "Imperial"
-msgstr ""
+msgstr "Английская"
 
 # Android/iOS
 msgid ""
@@ -803,7 +801,7 @@ msgstr "L: %d° %d′ %.2f″"
 
 # Windows
 msgid "L: {0}° {1}′ {2:N2}″"
-msgstr ""
+msgstr "L: {0}° {1}′ {2:N2}″"
 
 # Mac/Windows, Labels to display
 msgid "Labels"
@@ -920,15 +918,15 @@ msgstr "Масса"
 # Android/iOS
 #, c-format
 msgid "Maximum (%d FPS)"
-msgstr ""
+msgstr "Максимальная (%d FPS)"
 
 # Android/iOS, Measurement system
 msgid "Measure Units"
-msgstr ""
+msgstr "Система мер"
 
 # Android/iOS, Measurement system
 msgid "Measure Units:"
-msgstr ""
+msgstr "Система мер:"
 
 # Android/iOS/Mac/Windows, Medium resolution
 msgid "Medium"
@@ -936,7 +934,7 @@ msgstr "Среднее"
 
 # Android/iOS, Metric measurement system
 msgid "Metric"
-msgstr ""
+msgstr "Метрическая"
 
 # Mac, System menu item, minimize window
 msgid "Minimize"
@@ -1210,11 +1208,11 @@ msgstr "Выйти из Celestia"
 # Android/iOS/Mac, Equatorial coordinate
 #, c-format
 msgid "RA: %dh %dm %.2fs"
-msgstr "Прямое восхождение: %dh %dm %.2fs"
+msgstr "Прямое восхождение: %dч %dм %.2fс"
 
 # Windows
 msgid "RA: {0}h {1}m {2:N2}s"
-msgstr ""
+msgstr "Прямое восхождение: {0}ч {1}м {2:N2}с"
 
 # Android/iOS/Mac/Windows, In Go to, specify the distance based on the object radius
 msgid "radii"
@@ -1427,7 +1425,7 @@ msgstr "Показывать оси каркаса"
 
 # Mac/Windows, Show info for an object
 msgid "Show Info"
-msgstr "Показывать информацию"
+msgstr "Информация"
 
 # Android/iOS/Mac/Windows
 msgid "Show Locations"
