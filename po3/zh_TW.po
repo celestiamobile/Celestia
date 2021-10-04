@@ -34,7 +34,7 @@ msgstr "%d FPS"
 # Android/iOS, Unit foot
 #, c-format
 msgid "%d ft"
-msgstr ""
+msgstr "%d ft"
 
 # Android/iOS/Mac/Windows, Unit kilometer
 #, c-format
@@ -49,7 +49,7 @@ msgstr "%d 米"
 # Android/iOS, Unit mile
 #, c-format
 msgid "%d mi"
-msgstr ""
+msgstr "%d mi"
 
 # Mac, Speed unit
 msgid "1 AU/s"
@@ -737,7 +737,7 @@ msgstr "圖片"
 
 # Android/iOS, Imperial measurement system
 msgid "Imperial"
-msgstr ""
+msgstr "英制"
 
 # Android/iOS
 msgid ""
@@ -923,11 +923,11 @@ msgstr "最大值（%d FPS）"
 
 # Android/iOS, Measurement system
 msgid "Measure Units"
-msgstr ""
+msgstr "測量單位"
 
 # Android/iOS, Measurement system
 msgid "Measure Units:"
-msgstr ""
+msgstr "測量單位："
 
 # Android/iOS/Mac/Windows, Medium resolution
 msgid "Medium"
@@ -935,7 +935,7 @@ msgstr "中"
 
 # Android/iOS, Metric measurement system
 msgid "Metric"
-msgstr ""
+msgstr "公制"
 
 # Mac, System menu item, minimize window
 msgid "Minimize"
