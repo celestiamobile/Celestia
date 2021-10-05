@@ -52,23 +52,23 @@ msgstr "%d m"
 msgid "%d mi"
 msgstr ""
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1 AU/s"
 msgstr "1 UA/s"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1 km/s"
 msgstr "1 km/s"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1 ly/s"
 msgstr "1 ano-luz/s"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1000 km/s"
 msgstr "1000 km/s"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "10c"
 msgstr "10c"
 
@@ -206,7 +206,7 @@ msgstr "Trazer Todos à Frente"
 msgid "Browser"
 msgstr "Navegador"
 
-# Mac
+# Android/iOS/Mac
 msgid "c (lightspeed)"
 msgstr "c (velocidade da luz)"
 
@@ -1289,7 +1289,7 @@ msgstr "Redefinir para Padrão"
 msgid "Resolution:"
 msgstr "Resolução:"
 
-# Android/iOS, Reverse camera direction
+# Android/iOS/Mac, Reverse camera direction, reverse travel direction
 msgid "Reverse Direction"
 msgstr "Reverter Direção"
 
@@ -1487,6 +1487,10 @@ msgstr "Sistema Solar"
 msgid "Spacecraft"
 msgstr "Naves Espaciais"
 
+# Android/iOS, Speed control
+msgid "Speed Control"
+msgstr ""
+
 # Mac/Windows, Split view
 msgid "Split Horizontally"
 msgstr "Dividir na Horizontal"
@@ -1523,7 +1527,7 @@ msgstr "Iníciar em tele cheia"
 msgid "Start time:"
 msgstr ""
 
-# Mac, Interupt the process of finding eclipse
+# Mac, Interupt the process of finding eclipse/Set traveling speed to 0
 msgid "Stop"
 msgstr "Parar"
 

@@ -52,23 +52,23 @@ msgstr "%d 米"
 msgid "%d mi"
 msgstr "%d mi"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1 AU/s"
 msgstr "1 天文单位/秒"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1 km/s"
 msgstr "1 千米/秒"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1 ly/s"
 msgstr "1 光年/秒"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1000 km/s"
 msgstr "1000 千米/秒"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "10c"
 msgstr "10倍光速"
 
@@ -206,7 +206,7 @@ msgstr "前置全部窗口"
 msgid "Browser"
 msgstr "星体浏览器"
 
-# Mac
+# Android/iOS/Mac
 msgid "c (lightspeed)"
 msgstr "c (光速)"
 
@@ -1289,7 +1289,7 @@ msgstr "恢复默认"
 msgid "Resolution:"
 msgstr "分辨率:"
 
-# Android/iOS, Reverse camera direction
+# Android/iOS/Mac, Reverse camera direction, reverse travel direction
 msgid "Reverse Direction"
 msgstr "反转朝向"
 
@@ -1487,6 +1487,10 @@ msgstr "太阳系"
 msgid "Spacecraft"
 msgstr "航天器"
 
+# Android/iOS, Speed control
+msgid "Speed Control"
+msgstr "速度控制"
+
 # Mac/Windows, Split view
 msgid "Split Horizontally"
 msgstr "水平分割"
@@ -1523,7 +1527,7 @@ msgstr "开始时间"
 msgid "Start time:"
 msgstr "开始时间: "
 
-# Mac, Interupt the process of finding eclipse
+# Mac, Interupt the process of finding eclipse/Set traveling speed to 0
 msgid "Stop"
 msgstr "停止"
 

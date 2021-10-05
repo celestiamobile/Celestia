@@ -52,23 +52,23 @@ msgstr "%d м"
 msgid "%d mi"
 msgstr "%d ми"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1 AU/s"
 msgstr "1 АЕ"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1 km/s"
 msgstr "1 км/с"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1 ly/s"
 msgstr "1 сг/с"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1000 km/s"
 msgstr "1 000 км/с"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "10c"
 msgstr "10 c"
 
@@ -206,7 +206,7 @@ msgstr "Всички отпред"
 msgid "Browser"
 msgstr "Търсачка"
 
-# Mac
+# Android/iOS/Mac
 msgid "c (lightspeed)"
 msgstr "c (светлинна скорост)"
 
@@ -1289,7 +1289,7 @@ msgstr "По подразбиране"
 msgid "Resolution:"
 msgstr "Резолюция:"
 
-# Android/iOS, Reverse camera direction
+# Android/iOS/Mac, Reverse camera direction, reverse travel direction
 msgid "Reverse Direction"
 msgstr "Обърни посоката"
 
@@ -1487,6 +1487,10 @@ msgstr "Слънчева система"
 msgid "Spacecraft"
 msgstr "Космически апарати"
 
+# Android/iOS, Speed control
+msgid "Speed Control"
+msgstr ""
+
 # Mac/Windows, Split view
 msgid "Split Horizontally"
 msgstr "Раздели хоризонтално"
@@ -1523,7 +1527,7 @@ msgstr "Начално време"
 msgid "Start time:"
 msgstr "Начално време:"
 
-# Mac, Interupt the process of finding eclipse
+# Mac, Interupt the process of finding eclipse/Set traveling speed to 0
 msgid "Stop"
 msgstr "Спри"
 

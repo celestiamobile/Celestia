@@ -52,23 +52,23 @@ msgstr "%d m"
 msgid "%d mi"
 msgstr ""
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1 AU/s"
 msgstr "1 天文単位/s"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1 km/s"
 msgstr "1 km/s"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1 ly/s"
 msgstr "1 光年/s"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "1000 km/s"
 msgstr "1000 km/s"
 
-# Mac, Speed unit
+# Android/iOS/Mac, Speed unit
 msgid "10c"
 msgstr "光速の10倍"
 
@@ -206,7 +206,7 @@ msgstr "すべてを前面に表示"
 msgid "Browser"
 msgstr "天体ブラウザ"
 
-# Mac
+# Android/iOS/Mac
 msgid "c (lightspeed)"
 msgstr "光速"
 
@@ -1289,7 +1289,7 @@ msgstr "デフォルトへリセット"
 msgid "Resolution:"
 msgstr "解像度: "
 
-# Android/iOS, Reverse camera direction
+# Android/iOS/Mac, Reverse camera direction, reverse travel direction
 msgid "Reverse Direction"
 msgstr "視点を180°切替"
 
@@ -1487,6 +1487,10 @@ msgstr "太陽系"
 msgid "Spacecraft"
 msgstr "人工天体"
 
+# Android/iOS, Speed control
+msgid "Speed Control"
+msgstr ""
+
 # Mac/Windows, Split view
 msgid "Split Horizontally"
 msgstr "ビューを左右に分割"
@@ -1523,7 +1527,7 @@ msgstr "開始日時"
 msgid "Start time:"
 msgstr ""
 
-# Mac, Interupt the process of finding eclipse
+# Mac, Interupt the process of finding eclipse/Set traveling speed to 0
 msgid "Stop"
 msgstr "停止"
 
