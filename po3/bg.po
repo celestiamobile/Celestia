@@ -1489,7 +1489,7 @@ msgstr "Космически апарати"
 
 # Android/iOS, Speed control
 msgid "Speed Control"
-msgstr ""
+msgstr "Контрол на скоростта"
 
 # Mac/Windows, Split view
 msgid "Split Horizontally"
