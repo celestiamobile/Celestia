@@ -59,9 +59,9 @@ ModelGeometry::ModelGeometry(unique_ptr<cmod::Model>&& model) :
 
 
 bool
-ModelGeometry::pick(const Ray3d& r, double& distance) const
+ModelGeometry::pick(const Eigen::ParametrizedLine<double, 3>& r, double& distance) const
 {
-    return m_model->pick(r.origin, r.direction, distance);
+    return m_model->pick(r.origin(), r.direction(), distance);
 }
 
 
@@ -225,15 +225,4 @@ ModelGeometry::loadTextures()
             GetTextureManager()->find(m->maps[Mesh::EmissiveMap]);
     }
 #endif
-}
-
-
-fs::path
-CelestiaTextureResource::source() const
-{
-    if (m_textureHandle == InvalidResource)
-        return fs::path();
-
-    const TextureInfo* t = GetTextureManager()->getResourceInfo(textureHandle());
-    return t ? t->source : fs::path();
 }

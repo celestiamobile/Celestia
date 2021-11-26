@@ -14,6 +14,7 @@
 #include <celmath/mathlib.h>
 #include <Eigen/Core>
 #include <algorithm>
+#include <iostream>
 #include <vector>
 #ifdef TRISTRIP
 #include <NvTriStrip.h>
@@ -1233,9 +1234,9 @@ cloneMaterial(const Material* other)
     material->blend    = other->blend;
     for (int i = 0; i < Material::TextureSemanticMax; ++i)
     {
-        if (other->maps[i])
+        if (other->maps[i] != InvalidResource)
         {
-            material->maps[i] = new Material::DefaultTextureResource(other->maps[i]->source());
+            material->maps[i] = other->maps[i];
         }
     }
 
@@ -1289,7 +1290,7 @@ GenerateModelNormals(const Model& model, float smoothAngle, bool weldVertices, f
 
 #ifdef TRISTRIP
 bool
-convertToStrips(Mesh& mesh)
+ConvertToStrips(Mesh& mesh)
 {
     vector<Mesh::PrimitiveGroup*> groups;
 

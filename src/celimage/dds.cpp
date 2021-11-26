@@ -8,6 +8,7 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
+#include <cstring>
 #include <iostream>
 #include <fstream>
 #include <algorithm>
@@ -143,16 +144,20 @@ Image* LoadDDSImage(const fs::path& filename)
     }
 
     char header[4];
-    in.read(header, sizeof header);
-    if (header[0] != 'D' || header[1] != 'D' ||
-        header[2] != 'S' || header[3] != ' ')
+    if (!in.read(header, sizeof(header)).good()
+        || header[0] != 'D' || header[1] != 'D'
+        || header[2] != 'S' || header[3] != ' ')
     {
         DPRINTF(LOG_LEVEL_ERROR, "DDS texture file %s has bad header.\n", filename);
         return nullptr;
     }
 
     DDSurfaceDesc ddsd;
-    in.read(reinterpret_cast<char*>(&ddsd), sizeof ddsd);
+    if (!in.read(reinterpret_cast<char*>(&ddsd), sizeof ddsd).good())
+    {
+        DPRINTF(LOG_LEVEL_ERROR, "DDS file %s has bad surface desc.\n", filename);
+        return nullptr;
+    }
     LE_TO_CPU_INT32(ddsd.size, ddsd.size);
     LE_TO_CPU_INT32(ddsd.pitch, ddsd.pitch);
     LE_TO_CPU_INT32(ddsd.width, ddsd.width);

@@ -14,8 +14,9 @@
 #include "vecgl.h"
 #include "texture.h"
 #include <celmath/mathlib.h>
-#include <celmath/perlin.h>
 #include <celmath/intersect.h>
+#include <celmath/ray.h>
+#include <celmath/randutils.h>
 #include <celutil/gettext.h>
 #include <celutil/debug.h>
 #include <celcompat/filesystem.h>
@@ -23,6 +24,7 @@
 #include <algorithm>
 #include <random>
 #include <cassert>
+#include <fmt/printf.h>
 
 using namespace Eigen;
 using namespace std;
@@ -226,7 +228,7 @@ const char* Galaxy::getObjTypeName() const
 static const float RADIUS_CORRECTION     = 0.025f;
 static const float MAX_SPIRAL_THICKNESS  = 0.06f;
 
-bool Galaxy::pick(const Ray3d& ray,
+bool Galaxy::pick(const Eigen::ParametrizedLine<double, 3>& ray,
                   double& distanceToPicker,
                   double& cosAngleToBoundCenter) const
 {
@@ -245,7 +247,8 @@ bool Galaxy::pick(const Ray3d& ray,
                            getRadius()*(form->scale.z() + RADIUS_CORRECTION));
 
     Matrix3d rotation = getOrientation().cast<double>().toRotationMatrix();
-    return testIntersection(Ray3d(ray.origin - getPosition(), ray.direction).transform(rotation),
+    return testIntersection(transformRay(Eigen::ParametrizedLine<double, 3>(ray.origin() - getPosition(), ray.direction()),
+                                          rotation),
                             Ellipsoidd(ellipsoidAxes),
                             distanceToPicker,
                             cosAngleToBoundCenter);
@@ -379,7 +382,7 @@ void Galaxy::renderGalaxyPointSprites(const Vector3f& offset,
     int pow2 = 1;
 
     BlobVector* points = form->blobs;
-    unsigned int nPoints = (unsigned int) (points->size() * clamp(getDetail()));
+    unsigned int nPoints = (unsigned int) (points->size() * celmath::clamp(getDetail()));
     // corrections to avoid excessive brightening if viewed e.g. edge-on
 
     float brightness_corr = 1.0f;
@@ -575,7 +578,7 @@ float Galaxy::getLightGain()
 
 void Galaxy::setLightGain(float lg)
 {
-    lightGain = clamp(lg);
+    lightGain = celmath::clamp(lg);
 }
 
 
@@ -599,6 +602,7 @@ GalacticForm* buildGalacticForms(const fs::path& filename)
     height = img->getHeight();
     rgb    = img->getComponents();
 
+    auto& rng = getRNG();
     for (int i = 0; i < width * height; i++)
     {
         value = img->getPixels()[rgb * i];
@@ -608,8 +612,8 @@ GalacticForm* buildGalacticForms(const fs::path& filename)
             z  = floor(i /(float) width);
             x  = (i - width * z - 0.5f * (width - 1)) / (float) width;
             z  = (0.5f * (height - 1) - z) / (float) height;
-            x  += sfrand<float>() * 0.008f;
-            z  += sfrand<float>() * 0.008f;
+            x  += RealDists<float>::SignedUnit(rng) * 0.008f;
+            z  += RealDists<float>::SignedUnit(rng) * 0.008f;
             r2 = x * x + z * z;
 
             if (filename != "models/E0.png")
@@ -623,10 +627,10 @@ GalacticForm* buildGalacticForms(const fs::path& filename)
                     // generate "thickness" y of spirals with emulation of a dust lane
                     // in galctic plane (y=0)
 
-                    yr =  sfrand<float>() * h;
+                    yr =  RealDists<float>::SignedUnit(rng) * h;
                     prob = (1.0f - B * exp(-yr * yr))/p0;
 
-                } while (frand<float>() > prob);
+                } while (RealDists<float>::Unit(rng) > prob);
                 b.brightness  = value * prob;
                 y = y0 * yr / h;
             }
@@ -635,10 +639,10 @@ GalacticForm* buildGalacticForms(const fs::path& filename)
                 // generate spherically symmetric distribution from E0.png
                 do
                 {
-                    yy = sfrand<float>();
+                    yy = RealDists<float>::SignedUnit(rng);
                     float ry2 = 1.0f - yy * yy;
                     prob = ry2 > 0? sqrt(ry2): 0.0f;
-                } while (frand<float>() > prob);
+                } while (RealDists<float>::Unit(rng) > prob);
                 y = yy * sqrt(0.25f - r2) ;
                 b.brightness  = value;
                 kmin = 12;
@@ -663,9 +667,7 @@ GalacticForm* buildGalacticForms(const fs::path& filename)
     // reshuffle the galaxy points randomly...except the first kmin+1 in the center!
     // the higher that number the stronger the central "glow"
 
-    std::random_device rng;
-    std::mt19937 urng(rng());
-    shuffle(galacticPoints->begin() + kmin, galacticPoints->end(), urng);
+    shuffle(galacticPoints->begin() + kmin, galacticPoints->end(), getRNG());
 
     auto* galacticForm  = new GalacticForm();
     galacticForm->blobs = galacticPoints;
@@ -724,14 +726,17 @@ void InitializeForms()
     BlobVector* irregularPoints = new BlobVector;
     irregularPoints->reserve(galaxySize);
 
+    auto& rng = getRNG();
     while (ip < galaxySize)
     {
-        p        = Vector3f(sfrand<float>(), sfrand<float>(), sfrand<float>());
+        p = Vector3f(RealDists<float>::SignedUnit(rng),
+                     RealDists<float>::SignedUnit(rng),
+                     RealDists<float>::SignedUnit(rng));
         float r  = p.norm();
         if (r < 1)
         {
             float prob = (1 - r) * (fractalsum(Vector3f(p.x() + 5, p.y() + 5, p.z() + 5), 8) + 1) * 0.5f;
-            if (frand<float>() < prob)
+            if (RealDists<float>::Unit(rng) < prob)
             {
                 b.position   = Vector4f(p.x(), p.y(), p.z(), 1.0f);
                 b.brightness = 64u;

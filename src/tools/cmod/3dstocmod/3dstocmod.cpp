@@ -18,6 +18,10 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <iostream>
+#include <memory>
+
+#include "pathmanager.h"
 
 using namespace cmod;
 using namespace std;
@@ -41,7 +45,7 @@ int main(int argc, char* argv[])
     string inputFileName = argv[1];
 
     cerr << "Reading...\n";
-    M3DScene* scene = Read3DSFile(inputFileName);
+    std::unique_ptr<M3DScene> scene = Read3DSFile(inputFileName);
     if (scene == nullptr)
     {
         cerr << "Error reading 3DS file '" << inputFileName << "'\n";
@@ -49,7 +53,7 @@ int main(int argc, char* argv[])
     }
 
     cerr << "Converting...\n";
-    Model* model = Convert3DSModel(*scene);
+    Model* model = Convert3DSModel(*scene, GetPathManager()->getHandle);
     if (!model)
     {
         cerr << "Error converting 3DS file to Celestia model\n";
@@ -91,7 +95,7 @@ int main(int argc, char* argv[])
     }
 #endif
 
-    SaveModelAscii(model, cout);
+    SaveModelAscii(model, cout, GetPathManager()->getSource);
 
     return 0;
 }

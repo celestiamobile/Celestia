@@ -11,6 +11,8 @@
 #include <cassert>
 #include <fstream>
 #include <iostream>
+#include <fmt/ostream.h>
+#include <fmt/printf.h>
 #include <celengine/glsupport.h>
 #include <celutil/debug.h>
 #include <celutil/filetype.h>
@@ -286,7 +288,7 @@ Image* LoadImageFromFile(const fs::path& filename)
     ContentType type = DetermineFileType(filename);
     Image* img = nullptr;
 
-    fmt::fprintf(clog, _("Loading image from file %s\n"), filename.string());
+    clog << fmt::sprintf(_("Loading image from file %s\n"), filename);
 
     switch (type)
     {
@@ -299,12 +301,17 @@ Image* LoadImageFromFile(const fs::path& filename)
     case Content_PNG:
         img = LoadPNGImage(filename);
         break;
+#ifdef USE_LIBAVIF
+    case Content_AVIF:
+        img = LoadAVIFImage(filename);
+        break;
+#endif
     case Content_DDS:
     case Content_DXT5NormalMap:
         img = LoadDDSImage(filename);
         break;
     default:
-        DPRINTF(LOG_LEVEL_ERROR, "%s: unrecognized or unsupported image file type.\n", filename.string());
+        DPRINTF(LOG_LEVEL_ERROR, "%s: unrecognized or unsupported image file type.\n", filename);
         break;
     }
 

@@ -8,4 +8,10 @@ set(CELIMAGE_SOURCES
   png.cpp
 )
 
+if(ENABLE_LIBAVIF)
+  list(APPEND CELIMAGE_SOURCES
+    avif.cpp
+  )
+endif()
+
 add_library(celimage OBJECT ${CELIMAGE_SOURCES})

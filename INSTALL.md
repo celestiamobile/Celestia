@@ -84,7 +84,7 @@ Clang 3.3 or later), CMake, GNU Make or Ninja.
 
 Then you need to have the following devel components installed before Celestia
 will build: OpenGL, libepoxy, fmtlib, Eigen3, freetype, libjpeg, and libpng.
-Optional packages are gettext, Qt5, Gtk2 or Gtk3, sdl2, ffmpeg, glu and glut.
+Optional packages are gettext, Qt5, Gtk2 or Gtk3, sdl2, ffmpeg, libavif, glu and glut.
 
 For example on modern Debian-derived system you need to install the following
 packages: libepoxy-dev, libjpeg-dev, libpng-dev, libgl1-mesa-dev,
@@ -94,7 +94,8 @@ libqt5opengl5-dev if you want to build with Qt5 interface; libgtk2.0-dev and
 libgtkglext1-dev to build with legacy Gtk2 interface; libgtk3.0-dev to build
 Gtk3 interface, libsdl2-dev to build SDL interface or freeglut3-dev to build
 with glut interface. libavcodec-dev, libavformat-dev, libavutil-dev and
-libswscale-dev are required to build with video capture support.
+libswscale-dev are required to build with video capture support. libavif-dev
+is required to build to AVIF texture support.
 
 
 OK, assuming you've collected all the necessary libraries, here's
@@ -161,7 +162,7 @@ vcpkg --triplet=TRIPLET install --recurse libpng libjpeg-turbo gettext luajit fm
 Install optional packages:
 
 ```
-vcpkg --triplet=TRIPLET install --recurse qt5-base ffmpeg cspice
+vcpkg --triplet=TRIPLET install --recurse qt5-base ffmpeg cspice libavif
 ```
 
 Replace TRIPLET with `x86-windows` to build 32-bit versions or `x64-windows`
@@ -281,13 +282,13 @@ Install Homebrew
 Install required packages:
 
 ```
-brew install pkg-config cmake fmt gettext libepoxy libpng lua qt5 jpeg eigen freetype ffmpeg
+brew install pkg-config cmake fmt gettext libepoxy libpng lua qt5 jpeg eigen freetype
 ```
 
 Install optional packages:
 
 ```
-brew install cspice
+brew install cspice ffmpeg libavif
 ```
 
 Follow common building instructions to fetch the source.
@@ -335,6 +336,7 @@ List of supported parameters (passed as `-DPARAMETER=VALUE`):
 | ENABLE_SDL           | bool | OFF     | Build SQL frontend
 | ENABLE_WIN           | bool | \*\*\*ON   | Build Windows native frontend
 | ENABLE_FFMPEG        | bool | \*\*ON    | Support video capture using ffmpeg
+| ENABLE_LIBAVIF       | bool | OFF     | Support AVIF texture using libavif
 | ENABLE_TOOLS         | bool | OFF     | Build tools for Celestia data files
 | ENABLE_DATA          | bool | OFF     | Use CelestiaContent submodule for data
 | ENABLE_GLES          | bool | OFF     | Use OpenGL ES 2.0 in rendering code

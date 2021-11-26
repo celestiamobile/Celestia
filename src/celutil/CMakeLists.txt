@@ -1,6 +1,8 @@
 set(CELUTIL_SOURCES
   bigfix.cpp
   bigfix.h
+  binaryread.h
+  binarywrite.h
   blockarray.h
   bytes.h
   color.cpp
@@ -23,6 +25,8 @@ set(CELUTIL_SOURCES
   strnatcmp.h
   timer.cpp
   timer.h
+  tokenizer.cpp
+  tokenizer.h
   utf8.cpp
   utf8.h
   util.cpp

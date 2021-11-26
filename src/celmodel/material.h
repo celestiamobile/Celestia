@@ -8,13 +8,13 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#ifndef _CELMODEL_MATERIAL_H_
-#define _CELMODEL_MATERIAL_H_
+#pragma once
 
 #include <Eigen/Core>
 #include <string>
 #include <array>
 #include <celutil/color.h>
+#include <celutil/reshandle.h>
 #include <celcompat/filesystem.h>
 
 
@@ -25,19 +25,19 @@ class Material
 {
 public:
     Material();
-    ~Material();
+    ~Material() = default;
 
     class Color
     {
     public:
-        Color() :
+        constexpr Color() :
             m_red(0.0f),
             m_green(0.0f),
             m_blue(0.0f)
         {
         }
 
-        Color(float r, float g, float b) :
+        constexpr Color(float r, float g, float b) :
             m_red(r),
             m_green(g),
             m_blue(b)
@@ -51,17 +51,17 @@ public:
         {
         }
 
-        float red() const
+        constexpr float red() const
         {
             return m_red;
         }
 
-        float green() const
+        constexpr float green() const
         {
             return m_green;
         }
 
-        float blue() const
+        constexpr float blue() const
         {
             return m_blue;
         }
@@ -71,37 +71,22 @@ public:
             return Eigen::Vector3f(m_red, m_green, m_blue);
         }
 
-        bool operator==(const Color& other) const
+        constexpr bool operator==(const Color& other) const
         {
             return m_red == other.m_red && m_green == other.m_green && m_blue == other.m_blue;
         }
 
-        bool operator!=(const Color& other) const
+        constexpr bool operator!=(const Color& other) const
         {
             return !(*this == other);
         }
+
+        friend bool operator<(const Color& c0, const Color& c1);
 
     private:
         float m_red;
         float m_green;
         float m_blue;
-    };
-
-    class TextureResource
-    {
-    public:
-        virtual ~TextureResource() = default;
-        virtual fs::path source() const = 0;
-    };
-
-    class DefaultTextureResource : public TextureResource
-    {
-    public:
-        DefaultTextureResource(const fs::path& source) : m_source(source) {};
-        fs::path source() const override { return m_source; }
-
-    private:
-        fs::path m_source;
     };
 
     enum BlendMode
@@ -129,10 +114,13 @@ public:
     float specularPower{ 1.0f };
     float opacity{ 1.0f };
     BlendMode blend{ NormalBlend };
-    std::array<TextureResource*, TextureSemanticMax> maps;
+    std::array<ResourceHandle, TextureSemanticMax> maps;
 };
 
+bool operator<(const Material::Color& c0, const Material::Color& c1);
+
+// Define an ordering for materials; required for elimination of duplicate
+// materials.
+bool operator<(const Material& m0, const Material& m1);
+
 } // namespace cmod
-
-#endif // _CELMODEL_MATERIAL_H_
-

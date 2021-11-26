@@ -5,8 +5,10 @@ strategy:
  matrix:
    Linux:
      imageName: 'ubuntu-latest'
+     enableLibavif: 'OFF'
    Mac:
      imageName: 'macos-latest'
+     enableLibavif: 'ON'
 
 pool:
   vmImage: $(imageName)
@@ -56,7 +58,8 @@ steps:
                  qt5 \
                  freetype \
                  libepoxy \
-                 sdl2
+                 sdl2 \
+                 libavif
     brew link gettext --force
     brew link lua --force
   displayName: 'Install macOS dependencies'
@@ -65,7 +68,7 @@ steps:
 - script: |
     mkdir build
     cd build
-    cmake -DENABLE_SPICE=ON -DENABLE_TOOLS=ON -DENABLE_TESTS=ON -DENABLE_SDL=ON -DENABLE_GTK=ON -DENABLE_FFMPEG=ON ..
+    cmake -DENABLE_SPICE=ON -DENABLE_TOOLS=ON -DENABLE_TESTS=ON -DENABLE_SDL=ON -DENABLE_GTK=ON -DENABLE_FFMPEG=ON -DENABLE_LIBAVIF=$(enableLibavif) ..
     make -j $(nproc || echo 4)
     CTEST_OUTPUT_ON_FAILURE=1 ctest
   workingDirectory: "$(system.defaultworkingdirectory)"

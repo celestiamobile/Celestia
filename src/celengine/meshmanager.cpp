@@ -21,13 +21,14 @@
 #include "texmanager.h"
 #include "meshmanager.h"
 #include "modelgeometry.h"
-#include "tokenizer.h"
+#include <celutil/tokenizer.h>
 
+#include <cel3ds/3dsmodel.h>
 #include <cel3ds/3dsread.h>
 #include <celmodel/modelfile.h>
 
 #include <celmath/mathlib.h>
-#include <celmath/perlin.h>
+#include <celmath/randutils.h>
 #include <celutil/debug.h>
 #include <celutil/filetype.h>
 #include <celutil/debug.h>
@@ -38,6 +39,8 @@
 #include <cassert>
 #include <utility>
 #include <memory>
+#include <fmt/ostream.h>
+#include <fmt/printf.h>
 
 
 using namespace cmod;
@@ -51,27 +54,6 @@ static Model* Convert3DSModel(const M3DScene& scene, const fs::path& texPath);
 static GeometryManager* geometryManager = nullptr;
 
 constexpr const fs::path::value_type UniqueSuffixChar = '!';
-
-
-class CelestiaTextureLoader : public cmod::TextureLoader
-{
-public:
-    CelestiaTextureLoader(const fs::path& texturePath) :
-        m_texturePath(texturePath)
-    {
-    }
-
-    ~CelestiaTextureLoader() = default;
-
-    Material::TextureResource* loadTexture(const std::string& name)
-    {
-        ResourceHandle tex = GetTextureManager()->getHandle(TextureInfo(name, m_texturePath, TextureInfo::WrapTexture));
-        return new CelestiaTextureResource(tex);
-    }
-
-private:
-    fs::path m_texturePath;
-};
 
 
 GeometryManager* GetGeometryManager()
@@ -117,13 +99,13 @@ Geometry* GeometryInfo::load(const fs::path& resolvedFilename)
     fs::path::string_type::size_type uniquifyingSuffixStart = resolvedFilename.native().rfind(UniqueSuffixChar);
     fs::path filename = resolvedFilename.native().substr(0, uniquifyingSuffixStart);
 
-    fmt::fprintf(clog, _("Loading model: %s\n"), filename.string());
+    clog << fmt::sprintf(_("Loading model: %s\n"), filename);
     Model* model = nullptr;
     ContentType fileType = DetermineFileType(filename);
 
     if (fileType == Content_3DStudio)
     {
-        M3DScene* scene = Read3DSFile(filename);
+        std::unique_ptr<M3DScene> scene = Read3DSFile(filename);
         if (scene != nullptr)
         {
             if (resolvedToPath)
@@ -135,8 +117,6 @@ Geometry* GeometryInfo::load(const fs::path& resolvedFilename)
                 model->normalize(center);
             else
                 model->transform(center, scale);
-
-            delete scene;
         }
     }
     else if (fileType == Content_CelestiaModel)
@@ -144,9 +124,12 @@ Geometry* GeometryInfo::load(const fs::path& resolvedFilename)
         ifstream in(filename.string(), ios::binary);
         if (in.good())
         {
-            CelestiaTextureLoader textureLoader(path);
-
-            model = LoadModel(in, &textureLoader);
+            model = LoadModel(in,
+                              [&](const fs::path& name)
+                              {
+                                  return GetTextureManager()
+                                         ->getHandle(TextureInfo(name, path, TextureInfo::WrapTexture));
+                              });
             if (model != nullptr)
             {
                 if (isNormalized)
@@ -197,7 +180,7 @@ Geometry* GeometryInfo::load(const fs::path& resolvedFilename)
         model->determineOpacity();
 
         // Display some statics for the model
-        fmt::fprintf(clog,
+        clog << fmt::sprintf(
                      _("   Model statistics: %u vertices, %u primitives, %u materials (%u unique)\n"),
                      model->getVertexCount(),
                      model->getPrimitiveCount(),
@@ -208,7 +191,7 @@ Geometry* GeometryInfo::load(const fs::path& resolvedFilename)
     }
     else
     {
-        fmt::fprintf(clog, _("Error loading model '%s'\n"), filename.string());
+        clog << fmt::sprintf(_("Error loading model '%s'\n"), filename);
         return nullptr;
     }
 }
@@ -237,7 +220,7 @@ static float NoiseDisplacementFunc(float u, float v, void* info)
     auto* params = (NoiseMeshParameters*) info;
 
     Vector3f p = Vector3f(x, y, z) + params->offset;
-    return fractalsum(p, params->octaves) * params->featureHeight;
+    return celmath::fractalsum(p, params->octaves) * params->featureHeight;
 }
 
 
@@ -568,7 +551,7 @@ Convert3DSModel(const M3DScene& scene, const fs::path& texPath)
         if (!material->getTextureMap().empty())
         {
             ResourceHandle tex = GetTextureManager()->getHandle(TextureInfo(material->getTextureMap(), texPath, TextureInfo::WrapTexture));
-            newMaterial->maps[Material::DiffuseMap] = new CelestiaTextureResource(tex);
+            newMaterial->maps[Material::DiffuseMap] = tex;
         }
 
         model->addMaterial(newMaterial);

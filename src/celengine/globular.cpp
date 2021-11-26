@@ -15,8 +15,10 @@
 #include <cassert>
 #include <cmath>
 #include <fstream>
-#include <celmath/perlin.h>
+#include <random>
 #include <celmath/intersect.h>
+#include <celmath/ray.h>
+#include <celmath/randutils.h>
 #include <celutil/debug.h>
 #include <celutil/gettext.h>
 #include "astro.h"
@@ -24,6 +26,7 @@
 #include "render.h"
 #include "texture.h"
 #include "vecgl.h"
+#include <fmt/printf.h>
 
 using namespace Eigen;
 using namespace std;
@@ -249,7 +252,7 @@ const char* Globular::getObjTypeName() const
 }
 
 constexpr const float RADIUS_CORRECTION = 0.025f;
-bool Globular::pick(const Ray3d& ray,
+bool Globular::pick(const Eigen::ParametrizedLine<double, 3>& ray,
                     double& distanceToPicker,
                     double& cosAngleToBoundCenter) const
 {
@@ -265,7 +268,8 @@ bool Globular::pick(const Ray3d& ray,
                            getRadius() * (form->scale.z() + RADIUS_CORRECTION));
 
     Vector3d p = getPosition();
-    return testIntersection(Ray3d(ray.origin - p, ray.direction).transform(getOrientation().cast<double>().toRotationMatrix()),
+    return testIntersection(transformRay(Eigen::ParametrizedLine<double, 3>(ray.origin() - p, ray.direction()),
+                                         getOrientation().cast<double>().toRotationMatrix()),
                             Ellipsoidd(ellipsoidAxes),
                             distanceToPicker,
                             cosAngleToBoundCenter);
@@ -486,9 +490,9 @@ void Globular::renderGlobularPointSprites(
      * or when distance from globular center decreases.
      */
 
-    GLsizei count = (GLsizei) (form->gblobs->size() * clamp(getDetail()));
+    GLsizei count = (GLsizei) (form->gblobs->size() * celmath::clamp(getDetail()));
     float t = pow(2, 1 + log2(minimumFeatureSize / brightness) / log2(1/1.25f));
-    count = min(count, (GLsizei) clamp(t, 128.0f, (float) max(count, 128)));
+    count = min(count, (GLsizei) celmath::clamp(t, 128.0f, (float) max(count, 128)));
 
     globProg->use();
 
@@ -559,6 +563,7 @@ GlobularForm* buildGlobularForms(float c)
      *  coreRadius r_c, tidalRadius r_t, King concentration c = log10(r_t/r_c).
      */
 
+    auto& rng = getRNG();
     while (i < GLOBULAR_POINTS)
     {
         /*!
@@ -570,7 +575,7 @@ GlobularForm* buildGlobularForms(float c)
          * parameters and variables!
          */
 
-        float uu = frand<float>();
+        float uu = RealDists<float>::Unit(rng);
 
         /* First step: eta distributed as inverse power distribution (~1/Z^2)
          * that majorizes the exact King profile. Compute eta in terms of uniformly
@@ -595,15 +600,15 @@ GlobularForm* buildGlobularForms(float c)
 
         k++;
 
-        if (frand<float>() < prob / cH)
+        if (RealDists<float>::Unit(rng) < prob / cH)
         {
             /* Generate 3d points of globular cluster stars in polar coordinates:
              * Distribution in eta (<=> r) according to King's profile.
              * Uniform distribution on any spherical surface for given eta.
              * Note: u = cos(phi) must be used as a stochastic variable to get uniformity in angle!
              */
-            float u = sfrand<float>();
-            float theta = 2 * (float) PI * frand<float>();
+            float u = RealDists<float>::SignedUnit(rng);
+            float theta = RealDists<float>::SignedFullAngle(rng);
             float sthetu2 = sin(theta) * sqrt(1.0f - u * u);
 
             // x,y,z points within -0.5..+0.5, as required for consistency:

@@ -8,11 +8,12 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#ifndef _TOKENIZER_H_
-#define _TOKENIZER_H_
+#pragma once
 
-#include <string>
+#include <cmath>
+#include <cstdint>
 #include <iosfwd>
+#include <string>
 
 class Tokenizer
 {
@@ -39,52 +40,27 @@ public:
     Tokenizer(std::istream*);
 
     TokenType nextToken();
-    TokenType getTokenType();
+    TokenType getTokenType() const;
     void pushBack();
-    double getNumberValue();
-    std::string getNameValue();
-    std::string getStringValue();
+    double getNumberValue() const;
+    bool isInteger() const;
+    std::int32_t getIntegerValue() const;
+    std::string getNameValue() const;
+    std::string getStringValue() const;
 
     int getLineNumber() const;
 
 private:
-    enum State
-    {
-        StartState          = 0,
-        NameState           = 1,
-        NumberState         = 2,
-        FractionState       = 3,
-        ExponentState       = 4,
-        ExponentFirstState  = 5,
-        DotState            = 6,
-        CommentState        = 7,
-        StringState         = 8,
-        ErrorState          = 9,
-        StringEscapeState   = 10,
-        UnicodeEscapeState  = 11,
-    };
-
     std::istream* in;
-
-    int nextChar { 0 };
     TokenType tokenType{ TokenBegin };
-    bool haveValidNumber{ false };
-    bool haveValidName{ false };
-    bool haveValidString{ false };
+    bool isStart{ true };
+    bool isPushedBack{ false };
+    std::string textToken{};
+    double tokenValue{ std::nan("") };
+    int lineNumber{ 1 };
+    char nextChar{ '\0' };
+    bool reprocess{ false };
+    bool hasUtf8Errors{ false };
 
-    unsigned int unicodeValue{ 0 };
-    unsigned int unicodeEscapeDigits{ 0 };
-
-    bool pushedBack{ false };
-
-    int readChar();
-    void syntaxError(const char*);
-
-    double numberValue{ 0.0 };
-
-    std::string textToken;
-
-    int lineNum{ 1 };
+    bool skipUtf8Bom();
 };
-
-#endif // _TOKENIZER_H_

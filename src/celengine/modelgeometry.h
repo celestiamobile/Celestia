@@ -8,33 +8,16 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#ifndef _CELENGINE_MODEL_GEOMETRY_H_
-#define _CELENGINE_MODEL_GEOMETRY_H_
+#pragma once
 
-#include "geometry.h"
-#include <celmodel/model.h>
-#include <celutil/resmanager.h>
 #include <memory>
 
+#include <Eigen/Geometry>
 
-class CelestiaTextureResource : public cmod::Material::TextureResource
-{
-public:
-    CelestiaTextureResource(ResourceHandle textureHandle) :
-        m_textureHandle(textureHandle)
-    {
-    }
+#include <celmodel/model.h>
+#include <celutil/resmanager.h>
+#include "geometry.h"
 
-    ResourceHandle textureHandle() const
-    {
-        return m_textureHandle;
-    }
-
-    fs::path source() const;
-
-private:
-    ResourceHandle m_textureHandle;
-};
 
 class ModelOpenGLData;
 
@@ -49,7 +32,7 @@ class ModelGeometry : public Geometry
      *  and set distance; otherwise return false and leave
      *  distance unmodified.
      */
-    virtual bool pick(const celmath::Ray3d& r, double& distance) const;
+    virtual bool pick(const Eigen::ParametrizedLine<double, 3>& r, double& distance) const;
 
     //! Render the model in the current OpenGL context
     virtual void render(RenderContext&, double t = 0.0);
@@ -65,5 +48,3 @@ class ModelGeometry : public Geometry
     bool m_vbInitialized{ false };
     std::unique_ptr<ModelOpenGLData> m_glData;
 };
-
-#endif // !_CELENGINE_MODEL_H_

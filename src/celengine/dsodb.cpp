@@ -14,6 +14,9 @@
 #include <cstdlib>
 #include <cassert>
 #include <algorithm>
+
+#include <fmt/printf.h>
+
 #include <celutil/debug.h>
 #include <celmath/mathlib.h>
 #include <celutil/gettext.h>
@@ -26,7 +29,7 @@
 #include "parseobject.h"
 #include "multitexture.h"
 #include "meshmanager.h"
-#include "tokenizer.h"
+#include <celutil/tokenizer.h>
 #include <celutil/debug.h>
 
 #include <celengine/galaxy.h>
@@ -370,7 +373,7 @@ void DSODatabase::finish()
             DSOs[i]->setAbsoluteMagnitude((float)avgAbsMag);
     }
     */
-    fmt::fprintf(clog, _("Loaded %i deep space objects\n"), nDSOs);
+    clog << fmt::sprintf(_("Loaded %i deep space objects\n"), nDSOs);
 }
 
 

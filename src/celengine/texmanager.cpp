@@ -26,8 +26,17 @@ static std::array<const char*, 3> directories =
     "hires"
 };
 
-static std::array<const char*, 6> extensions =
+#ifdef USE_LIBAVIF
+static constexpr size_t nExt = 7;
+#else
+static constexpr size_t nExt = 6;
+#endif
+
+static std::array<const char*, nExt> extensions =
 {
+#ifdef USE_LIBAVIF
+    "avif",
+#endif
     "png",
     "jpg",
     "jpeg",

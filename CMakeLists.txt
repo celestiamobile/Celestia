@@ -34,7 +34,7 @@ endif()
 
 # Remove leading and trailing whitespace from libraries linked
 if(POLICY CMP0004)
-  cmake_policy(SET CMP0004 OLD)
+  cmake_policy(SET CMP0004 NEW)
 endif()
 
 project(celestia VERSION 1.7.0 LANGUAGES C CXX)
@@ -86,7 +86,9 @@ endif()
 add_definitions(-D_USE_MATH_DEFINES)
 
 # Let CMake handle setting C++11 (since 3.1)
-set(CMAKE_CXX_STANDARD 14)
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 14)
+endif()
 set(CMAKE_C_STANDARD 11)
 
 # Use our cmake files
@@ -179,6 +181,13 @@ if(ENABLE_FFMPEG)
   add_definitions(-DUSE_FFMPEG)
 endif()
 
+if(ENABLE_LIBAVIF)
+  find_package(Libavif REQUIRED)
+  link_libraries(libavif::libavif)
+  include_directories(${LIBAVIF_INCLUDE_DIR})
+  add_definitions(-DUSE_LIBAVIF)
+endif()
+
 if(_UNIX)
   find_package(PkgConfig)
 endif()
@@ -201,7 +210,11 @@ find_package(Eigen3 3.3 REQUIRED NO_MODULE) # -DEigen3_DIR=...
 message(STATUS "Found Eigen3 ${EIGEN3_VERSION_STRING}")
 link_libraries(Eigen3::Eigen)
 
-find_package(fmt REQUIRED)
+find_package(fmt 6.1.0 CONFIG QUIET)
+if(NOT fmt_FOUND)
+  message(STATUS "Using fmt submodule")
+  add_subdirectory("${CMAKE_SOURCE_DIR}/thirdparty/fmt")
+endif()
 link_libraries(fmt::fmt)
 
 find_package(PNG REQUIRED)
@@ -336,40 +349,24 @@ include_directories("${CMAKE_SOURCE_DIR}/src" ${CMAKE_BINARY_DIR})
 include(CheckSymbolExists)
 check_symbol_exists(wordexp wordexp.h HAVE_WORDEXP)
 check_include_files(byteswap.h HAVE_BYTESWAP_H)
-try_compile(HAVE_FILESYSTEM ${CMAKE_BINARY_DIR} "${CMAKE_SOURCE_DIR}/checks/cxxfs.cpp")
-check_include_file_cxx(experimental/filesystem HAVE_EXPERIMENTAL_FILESYSTEM)
 
-if((NOT HAVE_FILESYSTEM) AND HAVE_EXPERIMENTAL_FILESYSTEM)
-  # Try compile without linking against any library
-  try_compile(CXXFSLIB ${CMAKE_BINARY_DIR} "${CMAKE_SOURCE_DIR}/checks/cxxfsexp.cpp")
-
-  if(CXXFSLIB)
-    # Nothing to do, linking is not explicitly required
+find_package(Filesystem)
+if(Filesystem_FOUND)
+  if(CXX_FILESYSTEM_IS_EXPERIMENTAL)
+    set(HAVE_EXPERIMENTAL_FILESYSTEM ON)
   else()
-    # Find the filesystem lib we need to link against
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      find_library(CLANG_FS_LIBRARY "c++fs")
-      if(CLANG_FS_LIBRARY)
-        set(FS_LIBRARY c++fs)
-      else()
-        set(FS_LIBRARY stdc++fs)
-      endif()
-    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      set(FS_LIBRARY stdc++fs)
-    endif()
-
-    try_compile(CXXFSLIB ${CMAKE_BINARY_DIR} "${CMAKE_SOURCE_DIR}/checks/cxxfs.cpp" LINK_LIBRARIES "${FS_LIBRARY}")
-    if(CXXFSLIB)
-      link_libraries("${FS_LIBRARY}")
-    else()
-      set(HAVE_EXPERIMENTAL_FILESYSTEM OFF)
-      message(WARNING "C++ experimental filesystem library is unusable!\nWill use own implementation.")
-    endif()
+    set(HAVE_FILESYSTEM ON)
   endif()
+  link_libraries(std::filesystem)
+else()
+  message(WARNING "C++ experimental filesystem library is unusable!\nWill use own implementation.")
 endif()
 
 try_compile(HAVE_STRING_VIEW ${CMAKE_BINARY_DIR} "${CMAKE_SOURCE_DIR}/checks/cxxsv.cpp")
 try_compile(HAVE_EXPERIMENTAL_STRING_VIEW ${CMAKE_BINARY_DIR} "${CMAKE_SOURCE_DIR}/checks/cxxsvexp.cpp")
+
+include(TestBigEndian)
+test_big_endian(WORDS_BIGENDIAN)
 
 configure_file("config.h.in" "config.h")
 

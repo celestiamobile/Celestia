@@ -8,533 +8,116 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#include "modelfile.h"
-#include <celutil/bytes.h>
 #include <cassert>
-#include <cmath>
-#include <celutil/debug.h>
+#include <cstring>
+#include <iostream>
+#include <string>
 
+#include <fmt/format.h>
+#include <fmt/ostream.h>
 
-using namespace cmod;
-using namespace std;
+#include <celutil/binaryread.h>
+#include <celutil/binarywrite.h>
+#include <celutil/tokenizer.h>
+#include "mesh.h"
+#include "model.h"
+#include "modelfile.h"
 
-
-// Material default values
-static Material::Color DefaultDiffuse(0.0f, 0.0f, 0.0f);
-static Material::Color DefaultSpecular(0.0f, 0.0f, 0.0f);
-static Material::Color DefaultEmissive(0.0f, 0.0f, 0.0f);
-static float DefaultSpecularPower = 1.0f;
-static float DefaultOpacity = 1.0f;
-static Material::BlendMode DefaultBlend = Material::NormalBlend;
-
+namespace celutil = celestia::util;
 
 
 namespace cmod
 {
-
-class Token
+namespace
 {
-public:
-    enum TokenType
-    {
-        Name,
-        String,
-        Number,
-        End,
-        Invalid
-    };
+constexpr std::size_t CEL_MODEL_HEADER_LENGTH = 16;
+constexpr const char CEL_MODEL_HEADER_ASCII[] = "#celmodel__ascii";
+constexpr const char CEL_MODEL_HEADER_BINARY[] = "#celmodel_binary";
 
-    Token() = default;
-    Token(const Token& other) = default;
+// Material default values
+constexpr Material::Color DefaultDiffuse(0.0f, 0.0f, 0.0f);
+constexpr Material::Color DefaultSpecular(0.0f, 0.0f, 0.0f);
+constexpr Material::Color DefaultEmissive(0.0f, 0.0f, 0.0f);
+constexpr float DefaultSpecularPower = 1.0f;
+constexpr float DefaultOpacity = 1.0f;
+constexpr Material::BlendMode DefaultBlend = Material::NormalBlend;
 
-    Token& operator=(const Token& other) = default;
+// Standard tokens for ASCII model loader
+constexpr const char MeshToken[] = "mesh";
+constexpr const char EndMeshToken[] = "end_mesh";
+constexpr const char VertexDescToken[] = "vertexdesc";
+constexpr const char EndVertexDescToken[] = "end_vertexdesc";
+constexpr const char VerticesToken[] = "vertices";
+constexpr const char MaterialToken[] = "material";
+constexpr const char EndMaterialToken[] = "end_material";
 
-    bool operator==(const Token& other) const
-    {
-        if (m_type == other.m_type)
-        {
-            switch (m_type)
-            {
-            case Name:
-            case String:
-                return m_stringValue == other.m_stringValue;
-            case Number:
-                return m_numberValue == other.m_numberValue;
-            case End:
-            case Invalid:
-                return true;
-            default:
-                return false;
-            }
-        }
-        else
-        {
-            return false;
-        }
-    }
+// Binary file tokens
+enum ModelFileToken
+{
+    CMOD_Material       = 1001,
+    CMOD_EndMaterial    = 1002,
+    CMOD_Diffuse        = 1003,
+    CMOD_Specular       = 1004,
+    CMOD_SpecularPower  = 1005,
+    CMOD_Opacity        = 1006,
+    CMOD_Texture        = 1007,
+    CMOD_Mesh           = 1009,
+    CMOD_EndMesh        = 1010,
+    CMOD_VertexDesc     = 1011,
+    CMOD_EndVertexDesc  = 1012,
+    CMOD_Vertices       = 1013,
+    CMOD_Emissive       = 1014,
+    CMOD_Blend          = 1015,
+};
 
-    bool operator!=(const Token& other) const
-    {
-        return !(*this == other);
-    }
-
-    ~Token() = default;
-
-    TokenType type() const
-    {
-        return m_type;
-    }
-
-    bool isValid() const
-    {
-        return m_type != Invalid;
-    }
-
-    bool isNumber() const
-    {
-        return m_type == Number;
-    }
-
-    bool isInteger() const
-    {
-        return m_type == Number;
-    }
-
-    bool isName() const
-    {
-        return m_type == Name;
-    }
-
-    bool isString() const
-    {
-        return m_type == String;
-    }
-
-    double numberValue() const
-    {
-        assert(type() == Number);
-        if (type() == Number)
-            return m_numberValue;
-
-        return 0.0;
-    }
-
-    int integerValue() const
-    {
-        assert(type() == Number);
-        //assert(std::floor(m_numberValue) == m_numberValue);
-
-        if (type() == Number)
-            return (int) m_numberValue;
-
-        return 0;
-    }
-
-    std::string stringValue() const
-    {
-        if (type() == Name || type() == String)
-            return m_stringValue;
-
-       return string();
-    }
-
-public:
-    static Token NumberToken(double value)
-    {
-        Token token;
-        token.m_type = Number;
-        token.m_numberValue = value;
-        return token;
-    }
-
-    static Token NameToken(const string& value)
-    {
-        Token token;
-        token.m_type = Name;
-        token.m_stringValue = value;
-        return token;
-    }
-
-    static Token StringToken(const string& value)
-    {
-        Token token;
-        token.m_type = String;
-        token.m_stringValue = value;
-        return token;
-    }
-
-    static Token EndToken()
-    {
-        Token token;
-        token.m_type = End;
-        return token;
-    }
-
-private:
-    TokenType m_type{Invalid};
-    double m_numberValue{0.0};
-    string m_stringValue;
+enum ModelFileType
+{
+    CMOD_Float1         = 1,
+    CMOD_Float2         = 2,
+    CMOD_Float3         = 3,
+    CMOD_Float4         = 4,
+    CMOD_String         = 5,
+    CMOD_Uint32         = 6,
+    CMOD_Color          = 7,
 };
 
 
-class TokenStream
+class ModelLoader
 {
 public:
-    TokenStream(istream* in) :
-        m_in(in),
-        m_pushedBack(false),
-        m_lineNumber(1),
-        m_parseError(false),
-        m_nextChar(' ')
-    {
-    }
+    explicit ModelLoader(HandleGetter& _handleGetter) : handleGetter(_handleGetter) {}
+    virtual ~ModelLoader() = default;
 
-    bool issep(char c)
-    {
-        return (isdigit(c) == 0) && (isalpha(c) == 0) && c != '.';
-    }
+    virtual Model* load() = 0;
 
-    void syntaxError(const std::string& message)
-    {
-        cerr << message << '\n';
-        m_parseError = true;
-    }
+    const std::string& getErrorMessage() const { return errorMessage; }
+    ResourceHandle getHandle(const fs::path& path) { return handleGetter(path); }
 
-    Token nextToken();
-
-    Token currentToken() const
-    {
-        return m_currentToken;
-    }
-
-    void pushBack()
-    {
-        m_pushedBack = true;
-    }
-
-    int readChar()
-    {
-        int c = (int) m_in->get();
-        if (c == '\n')
-            m_lineNumber++;
-
-        return c;
-    }
-
-    int getLineNumber() const
-    {
-        return m_lineNumber;
-    }
-
-    bool hasError() const
-    {
-        return m_parseError;
-    }
+protected:
+    virtual void reportError(const std::string& msg) { errorMessage = msg; }
 
 private:
-    double numberFromParts(double integerValue, double fractionValue, double fracExp,
-                           double exponentValue, double exponentSign,
-                           double sign) const
-    {
-        double x = integerValue + fractionValue / fracExp;
-        if (exponentValue != 0)
-        {
-            x *= pow(10.0, exponentValue * exponentSign);
-        }
-
-        return x * sign;
-    }
-
-    enum State
-    {
-        StartState          = 0,
-        NameState           = 1,
-        NumberState         = 2,
-        FractionState       = 3,
-        ExponentState       = 4,
-        ExponentFirstState  = 5,
-        DotState            = 6,
-        CommentState        = 7,
-        StringState         = 8,
-        ErrorState          = 9,
-        StringEscapeState   = 10,
-    };
-
-private:
-    istream* m_in;
-    Token m_currentToken;
-    bool m_pushedBack;
-    int m_lineNumber;
-    bool m_parseError;
-    int m_nextChar;
+    std::string errorMessage{ };
+    HandleGetter& handleGetter;
 };
 
-} // namespace
 
-
-
-Token TokenStream::nextToken()
+class ModelWriter
 {
-    State state = StartState;
+public:
+    explicit ModelWriter(SourceGetter& _sourceGetter) : sourceGetter(_sourceGetter) {}
+    virtual ~ModelWriter() = default;
 
-    if (m_pushedBack)
-    {
-        m_pushedBack = false;
-        return m_currentToken;
-    }
+    virtual bool write(const Model&) = 0;
 
-    if (m_currentToken.type() == Token::End)
-    {
-        // Already at end of stream
-        return m_currentToken;
-    }
+    fs::path getSource(ResourceHandle handle) { return sourceGetter(handle); }
 
-    double integerValue = 0;
-    double fractionValue = 0;
-    double sign = 1;
-    double fracExp = 1;
-    double exponentValue = 0;
-    double exponentSign = 1;
+private:
+    SourceGetter& sourceGetter;
+};
 
-    Token newToken;
 
-    string textValue;
-
-    while (!hasError() && !newToken.isValid())
-    {
-        switch (state)
-        {
-        case StartState:
-            if (isspace(m_nextChar) != 0)
-            {
-                state = StartState;
-            }
-            else if (isdigit(m_nextChar) != 0)
-            {
-                state = NumberState;
-                integerValue = m_nextChar - (int) '0';
-            }
-            else if (m_nextChar == '-')
-            {
-                state = NumberState;
-                sign = -1;
-                integerValue = 0;
-            }
-            else if (m_nextChar == '+')
-            {
-                state = NumberState;
-                sign = +1;
-                integerValue = 0;
-            }
-            else if (m_nextChar == '.')
-            {
-                state = FractionState;
-                sign = +1;
-                integerValue = 0;
-            }
-            else if ((isalpha(m_nextChar) != 0) || m_nextChar == '_')
-            {
-                state = NameState;
-                textValue += (char) m_nextChar;
-            }
-            else if (m_nextChar == '#')
-            {
-                state = CommentState;
-            }
-            else if (m_nextChar == '"')
-            {
-                state = StringState;
-            }
-            else if (m_nextChar == -1)
-            {
-                newToken = Token::EndToken();
-            }
-            else
-            {
-                syntaxError("Bad character in stream");
-            }
-            break;
-
-        case NameState:
-            if ((isalpha(m_nextChar) != 0) || (isdigit(m_nextChar) != 0) || m_nextChar == '_')
-            {
-                state = NameState;
-                textValue += (char) m_nextChar;
-            }
-            else
-            {
-                newToken = Token::NameToken(textValue);
-            }
-            break;
-
-        case CommentState:
-            if (m_nextChar == '\n' || m_nextChar == '\r' || m_nextChar == char_traits<char>::eof())
-            {
-                state = StartState;
-            }
-            break;
-
-        case StringState:
-            if (m_nextChar == '"')
-            {
-                newToken = Token::StringToken(textValue);
-                m_nextChar = readChar();
-            }
-            else if (m_nextChar == '\\')
-            {
-                state = StringEscapeState;
-            }
-            else if (m_nextChar == char_traits<char>::eof())
-            {
-                syntaxError("Unterminated string");
-            }
-            else
-            {
-                state = StringState;
-                textValue += (char) m_nextChar;
-            }
-            break;
-
-        case StringEscapeState:
-            if (m_nextChar == '\\')
-            {
-                textValue += '\\';
-                state = StringState;
-            }
-            else if (m_nextChar == 'n')
-            {
-                textValue += '\n';
-                state = StringState;
-            }
-            else if (m_nextChar == '"')
-            {
-                textValue += '"';
-                state = StringState;
-            }
-            else
-            {
-                syntaxError("Unknown escape code in string");
-                state = StringState;
-            }
-            break;
-
-        case NumberState:
-            if (isdigit(m_nextChar) != 0)
-            {
-                state = NumberState;
-                integerValue = integerValue * 10 + m_nextChar - (int) '0';
-            }
-            else if (m_nextChar == '.')
-            {
-                state = FractionState;
-            }
-            else if (m_nextChar == 'e' || m_nextChar == 'E')
-            {
-                state = ExponentFirstState;
-            }
-            else if (issep(m_nextChar))
-            {
-                double x = numberFromParts(integerValue, fractionValue, fracExp, exponentValue, exponentSign, sign);
-                newToken = Token::NumberToken(x);
-            }
-            else
-            {
-                syntaxError("Bad character in number");
-            }
-            break;
-
-        case FractionState:
-            if (isdigit(m_nextChar) != 0)
-            {
-                state = FractionState;
-                fractionValue = fractionValue * 10 + m_nextChar - (int) '0';
-                fracExp *= 10;
-            }
-            else if (m_nextChar == 'e' || m_nextChar == 'E')
-            {
-                state = ExponentFirstState;
-            }
-            else if (issep(m_nextChar))
-            {
-                double x = numberFromParts(integerValue, fractionValue, fracExp, exponentValue, exponentSign, sign);
-                newToken = Token::NumberToken(x);
-            }
-            else
-            {
-                syntaxError("Bad character in number");
-            }
-            break;
-
-        case ExponentFirstState:
-            if (isdigit(m_nextChar) != 0)
-            {
-                state = ExponentState;
-                exponentValue = (int) m_nextChar - (int) '0';
-            }
-            else if (m_nextChar == '-')
-            {
-                state = ExponentState;
-                exponentSign = -1;
-            }
-            else if (m_nextChar == '+')
-            {
-                state = ExponentState;
-            }
-            else
-            {
-                state = ErrorState;
-                syntaxError("Bad character in number");
-            }
-            break;
-
-        case ExponentState:
-            if (isdigit(m_nextChar) != 0)
-            {
-                state = ExponentState;
-                exponentValue = exponentValue * 10 + (int) m_nextChar - (int) '0';
-            }
-            else if (issep(m_nextChar))
-            {
-                double x = numberFromParts(integerValue, fractionValue, fracExp, exponentValue, exponentSign, sign);
-                newToken = Token::NumberToken(x);
-            }
-            else
-            {
-                state = ErrorState;
-                syntaxError("Bad character in number");
-            }
-            break;
-
-        case DotState:
-            if (isdigit(m_nextChar) != 0)
-            {
-                state = FractionState;
-                fractionValue = fractionValue * 10 + (int) m_nextChar - (int) '0';
-                fracExp = 10;
-            }
-            else
-            {
-                state = ErrorState;
-                syntaxError("'.' in stupid place");
-            }
-            break;
-
-        case ErrorState:
-            break;  // Prevent GCC4 warnings; do nothing
-
-        } // Switch
-
-        if (!hasError() && !newToken.isValid())
-        {
-            m_nextChar = readChar();
-        }
-    }
-
-    m_currentToken = newToken;
-
-    return newToken;
-}
-
+/***** ASCII loader *****/
 
 /*!
 This is an approximate Backus Naur form for the contents of ASCII cmod
@@ -608,203 +191,30 @@ defined here--they have the obvious definitions.
 class AsciiModelLoader : public ModelLoader
 {
 public:
-    AsciiModelLoader(istream& _in);
+    AsciiModelLoader(std::istream& _in, HandleGetter& _handleGetter) :
+        ModelLoader(_handleGetter),
+        tok(&_in)
+    {}
     ~AsciiModelLoader() override = default;
 
     Model* load() override;
-    void reportError(const string& /*msg*/) override;
+    void reportError(const std::string& /*msg*/) override;
 
-    Material*               loadMaterial();
+    Material* loadMaterial();
     Mesh::VertexDescription* loadVertexDescription();
-    Mesh*                    loadMesh();
-    char*                    loadVertices(const Mesh::VertexDescription& vertexDesc,
-                                          unsigned int& vertexCount);
+    Mesh* loadMesh();
+    char* loadVertices(const Mesh::VertexDescription& vertexDesc,
+                       unsigned int& vertexCount);
 
 private:
-    TokenStream tok;
-};
-
-
-// Standard tokens for ASCII model loader
-static Token MeshToken = Token::NameToken("mesh");
-static Token EndMeshToken = Token::NameToken("end_mesh");
-static Token VertexDescToken = Token::NameToken("vertexdesc");
-static Token EndVertexDescToken = Token::NameToken("end_vertexdesc");
-static Token VerticesToken = Token::NameToken("vertices");
-static Token MaterialToken = Token::NameToken("material");
-static Token EndMaterialToken = Token::NameToken("end_material");
-
-
-class AsciiModelWriter : public ModelWriter
-{
-public:
-    AsciiModelWriter(ostream& /*_out*/);
-    ~AsciiModelWriter() override = default;
-
-    bool write(const Model& /*model*/) override;
-
-private:
-    void writeMesh(const Mesh& /*mesh*/);
-    void writeMaterial(const Material& /*material*/);
-    void writeGroup(const Mesh::PrimitiveGroup& /*group*/);
-    void writeVertexDescription(const Mesh::VertexDescription& /*desc*/);
-    void writeVertices(const void* vertexData,
-                       unsigned int nVertices,
-                       unsigned int stride,
-                       const Mesh::VertexDescription& desc);
-
-    ostream& out;
-};
-
-
-class BinaryModelLoader : public ModelLoader
-{
-public:
-    BinaryModelLoader(istream& _in);
-    ~BinaryModelLoader() override = default;
-
-    Model* load() override;
-    void reportError(const string& /*msg*/) override;
-
-    Material*                loadMaterial();
-    Mesh::VertexDescription* loadVertexDescription();
-    Mesh*                    loadMesh();
-    char*                    loadVertices(const Mesh::VertexDescription& vertexDesc,
-                                          unsigned int& vertexCount);
-
-private:
-    istream& in;
-};
-
-
-class BinaryModelWriter : public ModelWriter
-{
-public:
-    BinaryModelWriter(ostream& /*_out*/);
-    ~BinaryModelWriter() override = default;
-
-    bool write(const Model& /*model*/) override;
-
-private:
-    void writeMesh(const Mesh& /*mesh*/);
-    void writeMaterial(const Material& /*material*/);
-    void writeGroup(const Mesh::PrimitiveGroup& /*group*/);
-    void writeVertexDescription(const Mesh::VertexDescription& /*desc*/);
-    void writeVertices(const void* vertexData,
-                       unsigned int nVertices,
-                       unsigned int stride,
-                       const Mesh::VertexDescription& desc);
-
-    ostream& out;
+    Tokenizer tok;
 };
 
 
 void
-ModelLoader::reportError(const string& msg)
+AsciiModelLoader::reportError(const std::string& msg)
 {
-    errorMessage = msg;
-}
-
-
-const string&
-ModelLoader::getErrorMessage() const
-{
-    return errorMessage;
-}
-
-
-void
-ModelLoader::setTextureLoader(TextureLoader* _textureLoader)
-{
-    textureLoader = _textureLoader;
-}
-
-
-TextureLoader*
-ModelLoader::getTextureLoader() const
-{
-    return textureLoader;
-}
-
-
-Model* cmod::LoadModel(istream& in, TextureLoader* textureLoader)
-{
-    ModelLoader* loader = ModelLoader::OpenModel(in);
-    if (loader == nullptr)
-        return nullptr;
-
-    loader->setTextureLoader(textureLoader);
-
-    Model* model = loader->load();
-    if (model == nullptr)
-    {
-        cerr << "Error in model file: " << loader->getErrorMessage() << '\n';
-    }
-
-    delete loader;
-
-    return model;
-}
-
-
-ModelLoader*
-ModelLoader::OpenModel(istream& in)
-{
-    char header[CEL_MODEL_HEADER_LENGTH + 1];
-    memset(header, '\0', sizeof(header));
-
-    in.read(header, CEL_MODEL_HEADER_LENGTH);
-    if (strcmp(header, CEL_MODEL_HEADER_ASCII) == 0)
-    {
-        return new AsciiModelLoader(in);
-    }
-    if (strcmp(header, CEL_MODEL_HEADER_BINARY) == 0)
-    {
-        return new BinaryModelLoader(in);
-    }
-    else
-    {
-        cerr << "Model file has invalid header.\n";
-        return nullptr;
-    }
-}
-
-
-bool
-cmod::SaveModelAscii(const Model* model, std::ostream& out)
-{
-    if (model == nullptr)
-        return false;
-
-    AsciiModelWriter(out).write(*model);
-
-    return true;
-}
-
-
-bool
-cmod::SaveModelBinary(const Model* model, std::ostream& out)
-{
-    if (model == nullptr)
-        return false;
-
-    BinaryModelWriter(out).write(*model);
-
-    return true;
-}
-
-
-AsciiModelLoader::AsciiModelLoader(istream& _in) :
-    tok(&_in)
-{
-}
-
-
-void
-AsciiModelLoader::reportError(const string& msg)
-{
-    string s;
-    s = fmt::sprintf("%s (line %d)", msg, tok.getLineNumber());
+    std::string s = fmt::format("{} (line {})", msg, tok.getLineNumber());
     ModelLoader::reportError(s);
 }
 
@@ -812,7 +222,7 @@ AsciiModelLoader::reportError(const string& msg)
 Material*
 AsciiModelLoader::loadMaterial()
 {
-    if (tok.nextToken() != MaterialToken)
+    if (tok.nextToken() != Tokenizer::TokenName || tok.getNameValue() != MaterialToken)
     {
         reportError("Material definition expected");
         return nullptr;
@@ -826,43 +236,32 @@ AsciiModelLoader::loadMaterial()
     material->specularPower = DefaultSpecularPower;
     material->opacity = DefaultOpacity;
 
-    while (tok.nextToken().isName() && tok.currentToken() != EndMaterialToken)
+    while (tok.nextToken() == Tokenizer::TokenName && tok.getNameValue() != EndMaterialToken)
     {
-        string property = tok.currentToken().stringValue();
+        std::string property = tok.getStringValue();
         Material::TextureSemantic texType = Mesh::parseTextureSemantic(property);
 
         if (texType != Material::InvalidTextureSemantic)
         {
-            Token t = tok.nextToken();
-            if (t.type() != Token::String)
+            if (tok.nextToken() != Tokenizer::TokenString)
             {
                 reportError("Texture name expected");
                 delete material;
                 return nullptr;
             }
 
-            string textureName = t.stringValue();
+            std::string textureName = tok.getStringValue();
 
-            Material::TextureResource* tex = nullptr;
-            if (getTextureLoader())
-            {
-                tex = getTextureLoader()->loadTexture(textureName);
-            }
-            else
-            {
-                tex = new Material::DefaultTextureResource(textureName);
-            }
-
+            ResourceHandle tex = getHandle(textureName);
             material->maps[texType] = tex;
         }
         else if (property == "blend")
         {
             Material::BlendMode blendMode = Material::InvalidBlend;
 
-            Token t = tok.nextToken();
-            if (t.isName())
+            if (tok.nextToken() == Tokenizer::TokenName)
             {
-                string blendModeName = tok.currentToken().stringValue();
+                std::string blendModeName = tok.getStringValue();
                 if (blendModeName == "normal")
                     blendMode = Material::NormalBlend;
                 else if (blendModeName == "add")
@@ -893,14 +292,13 @@ AsciiModelLoader::loadMaterial()
 
             for (int i = 0; i < nValues; i++)
             {
-                Token t = tok.nextToken();
-                if (t.type() != Token::Number)
+                if (tok.nextToken() != Tokenizer::TokenNumber)
                 {
                     reportError("Bad property value in material");
                     delete material;
                     return nullptr;
                 }
-                data[i] = t.numberValue();
+                data[i] = tok.getNumberValue();
             }
 
             Material::Color colorVal;
@@ -932,7 +330,7 @@ AsciiModelLoader::loadMaterial()
         }
     }
 
-    if (tok.currentToken().type() != Token::Name)
+    if (tok.getTokenType() != Tokenizer::TokenName)
     {
         delete material;
         return nullptr;
@@ -945,7 +343,7 @@ AsciiModelLoader::loadMaterial()
 Mesh::VertexDescription*
 AsciiModelLoader::loadVertexDescription()
 {
-    if (tok.nextToken() != VertexDescToken)
+    if (tok.nextToken() != Tokenizer::TokenName || tok.getNameValue() != VertexDescToken)
     {
         reportError("Vertex description expected");
         return nullptr;
@@ -956,10 +354,10 @@ AsciiModelLoader::loadVertexDescription()
     unsigned int offset = 0;
     auto* attributes = new Mesh::VertexAttribute[maxAttributes];
 
-    while (tok.nextToken().isName() && tok.currentToken() != EndVertexDescToken)
+    while (tok.nextToken() == Tokenizer::TokenName && tok.getNameValue() != EndVertexDescToken)
     {
-        string semanticName;
-        string formatName;
+        std::string semanticName;
+        std::string formatName;
         bool valid = false;
 
         if (nAttributes == maxAttributes)
@@ -971,11 +369,11 @@ AsciiModelLoader::loadVertexDescription()
             return nullptr;
         }
 
-        semanticName = tok.currentToken().stringValue();
+        semanticName = tok.getStringValue();
 
-        if (tok.nextToken().isName())
+        if (tok.nextToken() == Tokenizer::TokenName)
         {
-            formatName = tok.currentToken().stringValue();
+            formatName = tok.getStringValue();
             valid = true;
         }
 
@@ -990,8 +388,7 @@ AsciiModelLoader::loadVertexDescription()
             Mesh::parseVertexAttributeSemantic(semanticName);
         if (semantic == Mesh::InvalidSemantic)
         {
-            reportError(string("Invalid vertex attribute semantic '") +
-                        semanticName + "'");
+            reportError(fmt::format("Invalid vertex attribute semantic '{}'", semanticName));
             delete[] attributes;
             return nullptr;
         }
@@ -1000,8 +397,7 @@ AsciiModelLoader::loadVertexDescription()
             Mesh::parseVertexAttributeFormat(formatName);
         if (format == Mesh::InvalidFormat)
         {
-            reportError(string("Invalid vertex attribute format '") +
-                        formatName + "'");
+            reportError(fmt::format("Invalid vertex attribute format '{}'", formatName));
             delete[] attributes;
             return nullptr;
         }
@@ -1014,7 +410,7 @@ AsciiModelLoader::loadVertexDescription()
         nAttributes++;
     }
 
-    if (tok.currentToken().type() != Token::Name)
+    if (tok.getTokenType() != Tokenizer::TokenName)
     {
         reportError("Invalid vertex description");
         delete[] attributes;
@@ -1039,20 +435,20 @@ char*
 AsciiModelLoader::loadVertices(const Mesh::VertexDescription& vertexDesc,
                                unsigned int& vertexCount)
 {
-    if (tok.nextToken() != VerticesToken)
+    if (tok.nextToken() != Tokenizer::TokenName && tok.getNameValue() != VerticesToken)
     {
         reportError("Vertex data expected");
         return nullptr;
     }
 
-    if (tok.nextToken().type() != Token::Number)
+    if (tok.nextToken() != Tokenizer::TokenNumber || !tok.isInteger())
     {
         reportError("Vertex count expected");
         return nullptr;
     }
 
-    double num = tok.currentToken().numberValue();
-    if (num != floor(num) || num <= 0.0)
+    std::int32_t num = tok.getIntegerValue();
+    if (num <= 0)
     {
         reportError("Bad vertex count for mesh");
         return nullptr;
@@ -1095,14 +491,14 @@ AsciiModelLoader::loadVertices(const Mesh::VertexDescription& vertexDesc,
 
             for (int j = 0; j < readCount; j++)
             {
-                if (!tok.nextToken().isNumber())
+                if (tok.nextToken() != Tokenizer::TokenNumber)
                 {
                     reportError("Error in vertex data");
                     data[j] = 0.0;
                 }
                 else
                 {
-                    data[j] = tok.currentToken().numberValue();
+                    data[j] = tok.getNumberValue();
                 }
                 // TODO: range check unsigned byte values
             }
@@ -1112,14 +508,16 @@ AsciiModelLoader::loadVertices(const Mesh::VertexDescription& vertexDesc,
             {
                 for (int k = 0; k < readCount; k++)
                 {
-                    reinterpret_cast<unsigned char*>(vertexData + base)[k] =
-                        (unsigned char) (data[k]);
+                    *(vertexData + base + k) = static_cast<char>(static_cast<unsigned char>(data[k]));
                 }
             }
             else
             {
                 for (int k = 0; k < readCount; k++)
-                    reinterpret_cast<float*>(vertexData + base)[k] = (float) data[k];
+                {
+                    float value = static_cast<float>(data[k]);
+                    std::memcpy(vertexData + base + sizeof(float) * k, &value, sizeof(float));
+                }
             }
         }
     }
@@ -1131,7 +529,7 @@ AsciiModelLoader::loadVertices(const Mesh::VertexDescription& vertexDesc,
 Mesh*
 AsciiModelLoader::loadMesh()
 {
-    if (tok.nextToken() != MeshToken)
+    if (tok.nextToken() != Tokenizer::TokenName && tok.getNameValue() != MeshToken)
     {
         reportError("Mesh definition expected");
         return nullptr;
@@ -1154,18 +552,18 @@ AsciiModelLoader::loadMesh()
     mesh->setVertices(vertexCount, vertexData);
     delete vertexDesc;
 
-    while (tok.nextToken().isName() && tok.currentToken() != EndMeshToken)
+    while (tok.nextToken() == Tokenizer::TokenName && tok.getNameValue() != EndMeshToken)
     {
         Mesh::PrimitiveGroupType type =
-            Mesh::parsePrimitiveGroupType(tok.currentToken().stringValue());
+            Mesh::parsePrimitiveGroupType(tok.getStringValue());
         if (type == Mesh::InvalidPrimitiveGroupType)
         {
-            reportError("Bad primitive group type: " + tok.currentToken().stringValue());
+            reportError("Bad primitive group type: " + tok.getStringValue());
             delete mesh;
             return nullptr;
         }
 
-        if (!tok.nextToken().isInteger())
+        if (tok.nextToken() != Tokenizer::TokenNumber || !tok.isInteger())
         {
             reportError("Material index expected in primitive group");
             delete mesh;
@@ -1173,29 +571,29 @@ AsciiModelLoader::loadMesh()
         }
 
         unsigned int materialIndex;
-        if (tok.currentToken().integerValue() == -1)
+        if (tok.getIntegerValue() == -1)
         {
             materialIndex = ~0u;
         }
         else
         {
-            materialIndex = (unsigned int) tok.currentToken().integerValue();
+            materialIndex = (unsigned int) tok.getIntegerValue();
         }
 
-        if (!tok.nextToken().isInteger())
+        if (tok.nextToken() != Tokenizer::TokenNumber || !tok.isInteger())
         {
             reportError("Index count expected in primitive group");
             delete mesh;
             return nullptr;
         }
 
-        unsigned int indexCount = (unsigned int) tok.currentToken().integerValue();
+        unsigned int indexCount = (unsigned int) tok.getIntegerValue();
 
         auto* indices = new Mesh::index32[indexCount];
 
         for (unsigned int i = 0; i < indexCount; i++)
         {
-            if (!tok.nextToken().isInteger())
+            if (tok.nextToken() != Tokenizer::TokenNumber || !tok.isInteger())
             {
                 reportError("Incomplete index list in primitive group");
                 delete[] indices;
@@ -1203,7 +601,7 @@ AsciiModelLoader::loadMesh()
                 return nullptr;
             }
 
-            unsigned int index = (unsigned int) tok.currentToken().integerValue();
+            unsigned int index = (unsigned int) tok.getIntegerValue();
             if (index >= vertexCount)
             {
                 reportError("Index out of range");
@@ -1229,11 +627,11 @@ AsciiModelLoader::load()
     bool seenMeshes = false;
 
     // Parse material and mesh definitions
-    for (Token token = tok.nextToken(); token.type() != Token::End; token = tok.nextToken())
+    for (Tokenizer::TokenType token = tok.nextToken(); token != Tokenizer::TokenEnd; token = tok.nextToken())
     {
-        if (token.isName())
+        if (token == Tokenizer::TokenName)
         {
-            string name = tok.currentToken().stringValue();
+            std::string name = tok.getStringValue();
             tok.pushBack();
 
             if (name == "material")
@@ -1269,7 +667,7 @@ AsciiModelLoader::load()
             }
             else
             {
-                reportError(string("Error: Unknown block type ") + name);
+                reportError(fmt::format("Error: Unknown block type {}", name));
                 delete model;
                 return nullptr;
             }
@@ -1286,102 +684,139 @@ AsciiModelLoader::load()
 }
 
 
+/***** ASCII writer *****/
 
-AsciiModelWriter::AsciiModelWriter(ostream& _out) :
-    out(_out)
+class AsciiModelWriter : public ModelWriter
 {
-}
+public:
+    AsciiModelWriter(std::ostream& _out, SourceGetter& _sourceGetter) :
+        ModelWriter(_sourceGetter),
+        out(_out)
+    {}
+    ~AsciiModelWriter() override = default;
+
+    bool write(const Model& /*model*/) override;
+
+private:
+    bool writeMesh(const Mesh& /*mesh*/);
+    bool writeMaterial(const Material& /*material*/);
+    bool writeGroup(const Mesh::PrimitiveGroup& /*group*/);
+    bool writeVertexDescription(const Mesh::VertexDescription& /*desc*/);
+    bool writeVertices(const void* vertexData,
+                       unsigned int nVertices,
+                       unsigned int stride,
+                       const Mesh::VertexDescription& desc);
+
+    std::ostream& out;
+};
+
 
 bool
 AsciiModelWriter::write(const Model& model)
 {
-    out << CEL_MODEL_HEADER_ASCII << "\n\n";
+    fmt::print(out, "{}\n\n", CEL_MODEL_HEADER_ASCII);
+    if (!out.good()) { return false; }
 
     for (unsigned int matIndex = 0; model.getMaterial(matIndex) != nullptr; matIndex++)
     {
-        writeMaterial(*model.getMaterial(matIndex));
-        out << '\n';
+        if (!writeMaterial(*model.getMaterial(matIndex))) { return false; }
+        if (!(out << '\n').good()) { return false; }
     }
 
     for (unsigned int meshIndex = 0; model.getMesh(meshIndex) != nullptr; meshIndex++)
     {
-        writeMesh(*model.getMesh(meshIndex));
-        out << '\n';
+        if (!writeMesh(*model.getMesh(meshIndex))) { return false; }
+        if (!(out << '\n').good()) { return false; }
     }
 
     return true;
 }
 
 
-void
+bool
 AsciiModelWriter::writeGroup(const Mesh::PrimitiveGroup& group)
 {
     switch (group.prim)
     {
     case Mesh::TriList:
-        out << "trilist"; break;
+        fmt::print(out, "trilist"); break;
     case Mesh::TriStrip:
-        out << "tristrip"; break;
+        fmt::print(out, "tristrip"); break;
     case Mesh::TriFan:
-        out << "trifan"; break;
+        fmt::print(out, "trifan"); break;
     case Mesh::LineList:
-        out << "linelist"; break;
+        fmt::print(out, "linelist"); break;
     case Mesh::LineStrip:
-        out << "linestrip"; break;
+        fmt::print(out, "linestrip"); break;
     case Mesh::PointList:
-        out << "points"; break;
+        fmt::print(out, "points"); break;
     case Mesh::SpriteList:
-        out << "sprites"; break;
+        fmt::print(out, "sprites"); break;
     default:
-        return;
+        return false;
     }
+    if (!out.good()) { return false; }
 
     if (group.materialIndex == ~0u)
         out << " -1";
     else
-        out << ' ' << group.materialIndex;
-    out << ' ' << group.nIndices << '\n';
+        fmt::print(out, " {}", group.materialIndex);
+    if (!out.good()) { return false; }
+
+    fmt::print(out, " {}\n", group.nIndices);
+    if (!out.good()) { return false;}
 
     // Print the indices, twelve per line
     for (unsigned int i = 0; i < group.nIndices; i++)
     {
-        out << group.indices[i];
-        if (i % 12 == 11 || i == group.nIndices - 1)
-            out << '\n';
-        else
-            out << ' ';
+        fmt::print(out, "{}{}",
+            group.indices[i],
+            i % 12 == 11 || i == group.nIndices - 1 ? '\n' : ' ');
+        if (!out.good()) { return false; }
     }
+
+    return true;
 }
 
 
-void
+bool
 AsciiModelWriter::writeMesh(const Mesh& mesh)
 {
-    out << "mesh\n";
+    if (!(out << "mesh\n").good()) { return false; }
 
     if (!mesh.getName().empty())
-        out << "# " << mesh.getName() << '\n';
+    {
+        fmt::print(out, "# {}\n", mesh.getName());
+        if (!out.good()) { return false; }
+    }
 
-    writeVertexDescription(mesh.getVertexDescription());
-    out << '\n';
+    if (!writeVertexDescription(mesh.getVertexDescription())) { return false; }
+    if (!(out << '\n').good()) { return false; }
 
-    writeVertices(mesh.getVertexData(),
-                  mesh.getVertexCount(),
-                  mesh.getVertexStride(),
-                  mesh.getVertexDescription());
-    out << '\n';
+    if (!writeVertices(mesh.getVertexData(),
+                       mesh.getVertexCount(),
+                       mesh.getVertexStride(),
+                       mesh.getVertexDescription()))
+    {
+        return false;
+    }
+
+    if (!(out << '\n').good()) { return false; }
 
     for (unsigned int groupIndex = 0; mesh.getGroup(groupIndex) != nullptr; groupIndex++)
     {
-        writeGroup(*mesh.getGroup(groupIndex));
-        out << '\n';
+        if (!writeGroup(*mesh.getGroup(groupIndex))
+            || !(out << '\n').good())
+        {
+            return false;
+        }
     }
 
-    out << "end_mesh\n";
+    return (out << "end_mesh\n").good();
 }
 
 
-void
+bool
 AsciiModelWriter::writeVertices(const void* vertexData,
                                 unsigned int nVertices,
                                 unsigned int stride,
@@ -1389,50 +824,56 @@ AsciiModelWriter::writeVertices(const void* vertexData,
 {
     const auto* vertex = reinterpret_cast<const unsigned char*>(vertexData);
 
-    out << "vertices " << nVertices << '\n';
+    fmt::print(out, "vertices {}\n", nVertices);
+    if (!out.good()) { return false; }
+
     for (unsigned int i = 0; i < nVertices; i++, vertex += stride)
     {
         for (unsigned int attr = 0; attr < desc.nAttributes; attr++)
         {
             const unsigned char* ubdata = vertex + desc.attributes[attr].offset;
-            const auto* fdata = reinterpret_cast<const float*>(ubdata);
+            //const auto* fdata = reinterpret_cast<const float*>(ubdata);
+            float fdata[4];
 
             switch (desc.attributes[attr].format)
             {
             case Mesh::Float1:
-                out << fdata[0];
+                std::memcpy(fdata, ubdata, sizeof(float));
+                fmt::print(out, "{}", fdata[0]);
                 break;
             case Mesh::Float2:
-                out << fdata[0] << ' ' << fdata[1];
+                std::memcpy(fdata, ubdata, sizeof(float) * 2);
+                fmt::print(out, "{} {}", fdata[0], fdata[1]);
                 break;
             case Mesh::Float3:
-                out << fdata[0] << ' ' << fdata[1] << ' ' << fdata[2];
+                std::memcpy(fdata, ubdata, sizeof(float) * 3);
+                fmt::print(out, "{} {} {}", fdata[0], fdata[1], fdata[2]);
                 break;
             case Mesh::Float4:
-                out << fdata[0] << ' ' << fdata[1] << ' ' <<
-                       fdata[2] << ' ' << fdata[3];
+                std::memcpy(fdata, ubdata, sizeof(float) * 4);
+                fmt::print(out, "{} {} {} {}", fdata[0], fdata[1], fdata[2], fdata[3]);
                 break;
             case Mesh::UByte4:
-                out << (int) ubdata[0] << ' ' << (int) ubdata[1] << ' ' <<
-                       (int) ubdata[2] << ' ' << (int) ubdata[3];
+                fmt::print(out, "{} {} {} {}", +ubdata[0], +ubdata[1], +ubdata[2], +ubdata[3]);
                 break;
             default:
                 assert(0);
                 break;
             }
-
-            out << ' ';
+            if (!out.good() || !(out << ' ').good()) { return false; }
         }
 
-        out << '\n';
+        if (!(out << '\n').good()) { return false; }
     }
+
+    return true;
 }
 
 
-void
+bool
 AsciiModelWriter::writeVertexDescription(const Mesh::VertexDescription& desc)
 {
-    out << "vertexdesc\n";
+    if (!(out << "vertexdesc\n").good()) { return false; }
     for (unsigned int attr = 0; attr < desc.nAttributes; attr++)
     {
         // We should never have a vertex description with invalid
@@ -1475,7 +916,7 @@ AsciiModelWriter::writeVertexDescription(const Mesh::VertexDescription& desc)
             break;
         }
 
-        out << ' ';
+        if (!out.good() || !(out << ' ').good()) { return false; }
 
         switch (desc.attributes[attr].format)
         {
@@ -1499,49 +940,58 @@ AsciiModelWriter::writeVertexDescription(const Mesh::VertexDescription& desc)
             break;
         }
 
-        out << '\n';
+        if (!out.good() || !(out << '\n').good()) { return false; }
     }
-    out << "end_vertexdesc\n";
+    return (out << "end_vertexdesc\n").good();
 }
 
 
-void
+bool
 AsciiModelWriter::writeMaterial(const Material& material)
 {
-    out << "material\n";
+    if (!(out << "material\n").good()) { return false; }
     if (material.diffuse != DefaultDiffuse)
     {
-        out << "diffuse " <<
-            material.diffuse.red() << ' ' <<
-            material.diffuse.green() << ' ' <<
-            material.diffuse.blue() << '\n';
+        fmt::print(out, "diffuse {} {} {}\n",
+            material.diffuse.red(),
+            material.diffuse.green(),
+            material.diffuse.blue());
+        if (!out.good()) { return false; }
     }
 
     if (material.emissive != DefaultEmissive)
     {
-        out << "emissive " <<
-            material.emissive.red() << ' ' <<
-            material.emissive.green() << ' ' <<
-            material.emissive.blue() << '\n';
+        fmt::print(out, "emissive {} {} {}\n",
+            material.emissive.red(),
+            material.emissive.green(),
+            material.emissive.blue());
+        if (!out.good()) { return false; }
     }
 
     if (material.specular != DefaultSpecular)
     {
-        out << "specular " <<
-            material.specular.red() << ' ' <<
-            material.specular.green() << ' ' <<
-            material.specular.blue() << '\n';
+        fmt::print(out, "specular {} {} {}\n",
+            material.specular.red(),
+            material.specular.green(),
+            material.specular.blue());
+        if (!out.good()) { return false; }
     }
 
     if (material.specularPower != DefaultSpecularPower)
-        out << "specpower " << material.specularPower << '\n';
+    {
+        fmt::print(out, "specpower {}\n", material.specularPower);
+        if (!out.good()) { return false; }
+    }
 
     if (material.opacity != DefaultOpacity)
-        out << "opacity " << material.opacity << '\n';
+    {
+        fmt::print(out, "opacity {}\n", material.opacity);
+        if (!out.good()) { return false; }
+    }
 
     if (material.blend != DefaultBlend)
     {
-        out << "blend ";
+        if (!(out << "blend ").good()) { return false; }
         switch (material.blend)
         {
         case Material::NormalBlend:
@@ -1557,15 +1007,16 @@ AsciiModelWriter::writeMaterial(const Material& material)
             assert(0);
             break;
         }
-        out << "\n";
+
+        if (!out.good() || !(out << '\n').good()) { return false; }
     }
 
     for (int i = 0; i < Material::TextureSemanticMax; i++)
     {
         fs::path texSource;
-        if (material.maps[i] != nullptr)
+        if (material.maps[i] != InvalidResource)
         {
-            texSource = material.maps[i]->source();
+            texSource = getSource(material.maps[i]);
         }
 
         if (!texSource.empty())
@@ -1588,102 +1039,74 @@ AsciiModelWriter::writeMaterial(const Material& material)
                 assert(0);
             }
 
-            out << " \"" << texSource.string() << "\"\n";
+            if (!out.good()) { return false; }
+
+            fmt::print(out, " \"{}\"\n", texSource.string());
+            if (!out.good()) { return false; }
         }
     }
 
-    out << "end_material\n";
+    return (out << "end_material\n").good();
 }
 
 
 /***** Binary loader *****/
 
-BinaryModelLoader::BinaryModelLoader(istream& _in) :
-    in(_in)
+bool readToken(std::istream& in, ModelFileToken& value)
 {
-}
-
-
-void
-BinaryModelLoader::reportError(const string& msg)
-{
-    string s;
-    s = fmt::sprintf("%s (offset %d)", msg, 0);
-    ModelLoader::reportError(s);
-}
-
-
-// Read a big-endian 32-bit unsigned integer
-static uint32_t readUint(istream& in)
-{
-    int32_t ret;
-    in.read((char*) &ret, sizeof(int32_t));
-    LE_TO_CPU_INT32(ret, ret);
-    return (uint32_t) ret;
-}
-
-
-static float readFloat(istream& in)
-{
-    float f;
-    in.read((char*) &f, sizeof(float));
-    LE_TO_CPU_FLOAT(f, f);
-    return f;
-}
-
-
-static int16_t readInt16(istream& in)
-{
-    int16_t ret;
-    in.read((char *) &ret, sizeof(int16_t));
-    LE_TO_CPU_INT16(ret, ret);
-    return ret;
-}
-
-
-static ModelFileToken readToken(istream& in)
-{
-    return (ModelFileToken) readInt16(in);
-}
-
-
-static ModelFileType readType(istream& in)
-{
-    return (ModelFileType) readInt16(in);
-}
-
-
-static bool readTypeFloat1(istream& in, float& f)
-{
-    if (readType(in) != CMOD_Float1)
-        return false;
-    f = readFloat(in);
+    std::int16_t num;
+    if (!celutil::readLE<std::int16_t>(in, num)) { return false; }
+    value = static_cast<ModelFileToken>(num);
     return true;
 }
 
 
-static bool readTypeColor(istream& in, Material::Color& c)
+bool readType(std::istream& in, ModelFileType& value)
 {
-    if (readType(in) != CMOD_Color)
-        return false;
+    std::int16_t num;
+    if (!celutil::readLE<std::int16_t>(in, num)) { return false; }
+    value = static_cast<ModelFileType>(num);
+    return true;
+}
 
-    float r = readFloat(in);
-    float g = readFloat(in);
-    float b = readFloat(in);
+
+bool readTypeFloat1(std::istream& in, float& f)
+{
+    ModelFileType cmodType;
+    return readType(in, cmodType)
+        && cmodType == CMOD_Float1
+        && celutil::readLE<float>(in, f);
+}
+
+
+bool readTypeColor(std::istream& in, Material::Color& c)
+{
+    ModelFileType cmodType;
+    float r, g, b;
+    if (!readType(in, cmodType)
+        || cmodType != CMOD_Color
+        || !celutil::readLE<float>(in, r)
+        || !celutil::readLE<float>(in, g)
+        || !celutil::readLE<float>(in, b))
+    {
+        return false;
+    }
+
     c = Material::Color(r, g, b);
-
     return true;
 }
 
 
-static bool readTypeString(istream& in, string& s)
+bool readTypeString(std::istream& in, std::string& s)
 {
-    if (readType(in) != CMOD_String)
-        return false;
-
+    ModelFileType cmodType;
     uint16_t len;
-    in.read((char*) &len, sizeof(uint16_t));
-    LE_TO_CPU_INT16(len, len);
+    if (!readType(in, cmodType)
+        || cmodType != CMOD_String
+        || !celutil::readLE<std::uint16_t>(in, len))
+    {
+        return false;
+    }
 
     if (len == 0)
     {
@@ -1691,20 +1114,20 @@ static bool readTypeString(istream& in, string& s)
     }
     else
     {
-        auto* buf = new char[len];
-        in.read(buf, len);
-        s = string(buf, len);
-        delete[] buf;
+        std::vector<char> buf(len);
+        if (!in.read(buf.data(), len).good()) { return false; }
+        s = std::string(buf.cbegin(), buf.cend());
     }
 
     return true;
 }
 
 
-static bool ignoreValue(istream& in)
+bool ignoreValue(std::istream& in)
 {
-    ModelFileType type = readType(in);
-    int size = 0;
+    ModelFileType type;
+    if (!readType(in, type)) { return false; }
+    std::streamsize size = 0;
 
     switch (type)
     {
@@ -1728,9 +1151,8 @@ static bool ignoreValue(istream& in)
         break;
     case CMOD_String:
         {
-            uint16_t len;
-            in.read((char*) &len, sizeof(uint16_t));
-            LE_TO_CPU_INT16(len, len);
+            std::uint16_t len;
+            if (!celutil::readLE<std::uint16_t>(in, len)) { return false; }
             size = len;
         }
         break;
@@ -1739,9 +1161,38 @@ static bool ignoreValue(istream& in)
         return false;
     }
 
-    in.ignore(size);
+    return in.ignore(size).good();
+}
 
-    return true;
+
+class BinaryModelLoader : public ModelLoader
+{
+public:
+    BinaryModelLoader(std::istream& _in, HandleGetter& _handleGetter) :
+        ModelLoader(_handleGetter),
+        in(_in)
+    {}
+    ~BinaryModelLoader() override = default;
+
+    Model* load() override;
+    void reportError(const std::string& /*msg*/) override;
+
+    Material* loadMaterial();
+    Mesh::VertexDescription* loadVertexDescription();
+    Mesh* loadMesh();
+    char* loadVertices(const Mesh::VertexDescription& vertexDesc,
+                       unsigned int& vertexCount);
+
+private:
+    std::istream& in;
+};
+
+
+void
+BinaryModelLoader::reportError(const std::string& msg)
+{
+    std::string s = fmt::format("{} (offset {})", msg, 0);
+    ModelLoader::reportError(s);
 }
 
 
@@ -1754,12 +1205,15 @@ BinaryModelLoader::load()
     // Parse material and mesh definitions
     for (;;)
     {
-        ModelFileToken tok = readToken(in);
-
-        if (in.eof())
+        ModelFileToken tok;
+        if (!readToken(in, tok))
         {
-            break;
+            if (in.eof()) { break; }
+            reportError("Failed to read token");
+            delete model;
+            return nullptr;
         }
+
         if (tok == CMOD_Material)
         {
             if (seenMeshes)
@@ -1816,7 +1270,14 @@ BinaryModelLoader::loadMaterial()
 
     for (;;)
     {
-        ModelFileToken tok = readToken(in);
+        ModelFileToken tok;
+        if (!readToken(in, tok))
+        {
+            reportError("Error reading token type");
+            delete material;
+            return nullptr;
+        }
+
         switch (tok)
         {
         case CMOD_Diffuse:
@@ -1866,8 +1327,9 @@ BinaryModelLoader::loadMaterial()
 
         case CMOD_Blend:
             {
-                int16_t blendMode = readInt16(in);
-                if (blendMode < 0 || blendMode >= Material::BlendMax)
+                std::int16_t blendMode;
+                if (!celutil::readLE<std::int16_t>(in, blendMode)
+                    || blendMode < 0 || blendMode >= Material::BlendMax)
                 {
                     reportError("Bad blend mode");
                     delete material;
@@ -1879,15 +1341,16 @@ BinaryModelLoader::loadMaterial()
 
         case CMOD_Texture:
             {
-                int16_t texType = readInt16(in);
-                if (texType < 0 || texType >= Material::TextureSemanticMax)
+                std::int16_t texType;
+                if (!celutil::readLE<std::int16_t>(in, texType)
+                    || texType < 0 || texType >= Material::TextureSemanticMax)
                 {
                     reportError("Bad texture type");
                     delete material;
                     return nullptr;
                 }
 
-                string texfile;
+                std::string texfile;
                 if (!readTypeString(in, texfile))
                 {
                     reportError("String expected for texture filename");
@@ -1902,16 +1365,7 @@ BinaryModelLoader::loadMaterial()
                     return nullptr;
                 }
 
-                Material::TextureResource* tex = nullptr;
-                if (getTextureLoader() != nullptr)
-                {
-                    tex = getTextureLoader()->loadTexture(texfile);
-                }
-                else
-                {
-                    tex = new Material::DefaultTextureResource(texfile);
-                }
-
+                ResourceHandle tex = getHandle(texfile);
                 material->maps[texType] = tex;
             }
             break;
@@ -1934,7 +1388,8 @@ BinaryModelLoader::loadMaterial()
 Mesh::VertexDescription*
 BinaryModelLoader::loadVertexDescription()
 {
-    if (readToken(in) != CMOD_VertexDesc)
+    ModelFileToken tok;
+    if (!readToken(in, tok) || tok != CMOD_VertexDesc)
     {
         reportError("Vertex description expected");
         return nullptr;
@@ -1947,7 +1402,13 @@ BinaryModelLoader::loadVertexDescription()
 
     for (;;)
     {
-        int16_t tok = readInt16(in);
+        std::int16_t tok;
+        if (!celutil::readLE<std::int16_t>(in, tok))
+        {
+            reportError("Could not read token");
+            delete[] attributes;
+            return nullptr;
+        }
 
         if (tok == CMOD_EndVertexDesc)
         {
@@ -1955,31 +1416,30 @@ BinaryModelLoader::loadVertexDescription()
         }
         if (tok >= 0 && tok < Mesh::SemanticMax)
         {
-            int16_t fmt = readInt16(in);
-            if (fmt < 0 || fmt >= Mesh::FormatMax)
+            std::int16_t fmt;
+            if (!celutil::readLE<std::int16_t>(in, fmt)
+                || fmt < 0 || fmt >= Mesh::FormatMax)
             {
                 reportError("Invalid vertex attribute type");
                 delete[] attributes;
                 return nullptr;
             }
 
+            if (nAttributes == maxAttributes)
+            {
+                reportError("Too many attributes in vertex description");
+                delete[] attributes;
+                return nullptr;
+            }
 
-                if (nAttributes == maxAttributes)
-                {
-                    reportError("Too many attributes in vertex description");
-                    delete[] attributes;
-                    return nullptr;
-                }
+            attributes[nAttributes].semantic =
+                static_cast<Mesh::VertexAttributeSemantic>(tok);
+            attributes[nAttributes].format =
+                static_cast<Mesh::VertexAttributeFormat>(fmt);
+            attributes[nAttributes].offset = offset;
 
-                attributes[nAttributes].semantic =
-                    static_cast<Mesh::VertexAttributeSemantic>(tok);
-                attributes[nAttributes].format =
-                    static_cast<Mesh::VertexAttributeFormat>(fmt);
-                attributes[nAttributes].offset = offset;
-
-                offset += Mesh::getVertexAttributeSize(attributes[nAttributes].format);
-                nAttributes++;
-
+            offset += Mesh::getVertexAttributeSize(attributes[nAttributes].format);
+            nAttributes++;
         }
         else
         {
@@ -2025,7 +1485,13 @@ BinaryModelLoader::loadMesh()
 
     for (;;)
     {
-        int16_t tok = readInt16(in);
+        std::int16_t tok;
+        if (!celutil::readLE<std::int16_t>(in, tok))
+        {
+            reportError("Failed to read token type");
+            delete mesh;
+            return nullptr;
+        }
 
         if (tok == CMOD_EndMesh)
         {
@@ -2040,15 +1506,21 @@ BinaryModelLoader::loadMesh()
 
         Mesh::PrimitiveGroupType type =
             static_cast<Mesh::PrimitiveGroupType>(tok);
-        unsigned int materialIndex = readUint(in);
-        unsigned int indexCount = readUint(in);
+        std::uint32_t materialIndex, indexCount;
+        if (!celutil::readLE<std::uint32_t>(in, materialIndex)
+            || !celutil::readLE<std::uint32_t>(in, indexCount))
+        {
+            reportError("Could not read primitive indices");
+            delete mesh;
+            return nullptr;
+        }
 
         auto* indices = new uint32_t[indexCount];
 
         for (unsigned int i = 0; i < indexCount; i++)
         {
-            uint32_t index = readUint(in);
-            if (index >= vertexCount)
+            std::uint32_t index;
+            if (!celutil::readLE<std::uint32_t>(in, index) || index >= vertexCount)
             {
                 reportError("Index out of range");
                 delete[] indices;
@@ -2070,13 +1542,18 @@ char*
 BinaryModelLoader::loadVertices(const Mesh::VertexDescription& vertexDesc,
                                 unsigned int& vertexCount)
 {
-    if (readToken(in) != CMOD_Vertices)
+    ModelFileToken tok;
+    if (!readToken(in, tok) || tok != CMOD_Vertices)
     {
         reportError("Vertex data expected");
         return nullptr;
     }
 
-    vertexCount = readUint(in);
+    if (!celutil::readLE<std::uint32_t>(in, vertexCount))
+    {
+        reportError("Vertex count expected");
+        return nullptr;
+    }
     unsigned int vertexDataSize = vertexDesc.stride * vertexCount;
     auto* vertexData = new char[vertexDataSize];
 
@@ -2089,29 +1566,59 @@ BinaryModelLoader::loadVertices(const Mesh::VertexDescription& vertexDesc,
         {
             unsigned int base = offset + vertexDesc.attributes[attr].offset;
             Mesh::VertexAttributeFormat fmt = vertexDesc.attributes[attr].format;
+            float f[4];
             /*int readCount = 0;    Unused*/
             switch (fmt)
             {
             case Mesh::Float1:
-                reinterpret_cast<float*>(vertexData + base)[0] = readFloat(in);
+                if (!celutil::readLE<float>(in, f[0]))
+                {
+                    reportError("Failed to read Float1");
+                    delete[] vertexData;
+                    return nullptr;
+                }
+                std::memcpy(vertexData + base, f, sizeof(float));
                 break;
             case Mesh::Float2:
-                reinterpret_cast<float*>(vertexData + base)[0] = readFloat(in);
-                reinterpret_cast<float*>(vertexData + base)[1] = readFloat(in);
+                if (!celutil::readLE<float>(in, f[0])
+                    || !celutil::readLE<float>(in, f[1]))
+                {
+                    reportError("Failed to read Float2");
+                    delete[] vertexData;
+                    return nullptr;
+                }
+                std::memcpy(vertexData + base, f, sizeof(float) * 2);
                 break;
             case Mesh::Float3:
-                reinterpret_cast<float*>(vertexData + base)[0] = readFloat(in);
-                reinterpret_cast<float*>(vertexData + base)[1] = readFloat(in);
-                reinterpret_cast<float*>(vertexData + base)[2] = readFloat(in);
+                if (!celutil::readLE<float>(in, f[0])
+                    || !celutil::readLE<float>(in, f[1])
+                    || !celutil::readLE<float>(in, f[2]))
+                {
+                    reportError("Failed to read Float3");
+                    delete[] vertexData;
+                    return nullptr;
+                }
+                std::memcpy(vertexData + base, f, sizeof(float) * 3);
                 break;
             case Mesh::Float4:
-                reinterpret_cast<float*>(vertexData + base)[0] = readFloat(in);
-                reinterpret_cast<float*>(vertexData + base)[1] = readFloat(in);
-                reinterpret_cast<float*>(vertexData + base)[2] = readFloat(in);
-                reinterpret_cast<float*>(vertexData + base)[3] = readFloat(in);
+                if (!celutil::readLE<float>(in, f[0])
+                    || !celutil::readLE<float>(in, f[1])
+                    || !celutil::readLE<float>(in, f[2])
+                    || !celutil::readLE<float>(in, f[3]))
+                {
+                    reportError("Failed to read Float4");
+                    delete[] vertexData;
+                    return nullptr;
+                }
+                std::memcpy(vertexData + base, f, sizeof(float) * 4);
                 break;
             case Mesh::UByte4:
-                in.get(reinterpret_cast<char*>(vertexData + base), 4);
+                if (!in.get(reinterpret_cast<char*>(vertexData + base), 4).good())
+                {
+                    reportError("failed to read UByte4");
+                    delete[] vertexData;
+                    return nullptr;
+                }
                 break;
             default:
                 assert(0);
@@ -2125,117 +1632,130 @@ BinaryModelLoader::loadVertices(const Mesh::VertexDescription& vertexDesc,
 }
 
 
-
 /***** Binary writer *****/
 
-BinaryModelWriter::BinaryModelWriter(ostream& _out) :
-    out(_out)
+bool writeToken(std::ostream& out, ModelFileToken val)
 {
-}
-
-// Utility functions for writing binary values to a file
-static void writeUint32(ostream& out, uint32_t val)
-{
-    LE_TO_CPU_INT32(val, val);
-    out.write(reinterpret_cast<char*>(&val), sizeof(uint32_t));
-}
-
-static void writeFloat(ostream& out, float val)
-{
-    LE_TO_CPU_FLOAT(val, val);
-    out.write(reinterpret_cast<char*>(&val), sizeof(float));
-}
-
-static void writeInt16(ostream& out, int16_t val)
-{
-    LE_TO_CPU_INT16(val, val);
-    out.write(reinterpret_cast<char*>(&val), sizeof(int16_t));
-}
-
-static void writeToken(ostream& out, ModelFileToken val)
-{
-    writeInt16(out, static_cast<int16_t>(val));
-}
-
-static void writeType(ostream& out, ModelFileType val)
-{
-    writeInt16(out, static_cast<int16_t>(val));
+    return celutil::writeLE<std::int16_t>(out, static_cast<std::int16_t>(val));
 }
 
 
-static void writeTypeFloat1(ostream& out, float f)
+bool writeType(std::ostream& out, ModelFileType val)
 {
-    writeType(out, CMOD_Float1);
-    writeFloat(out, f);
+    return celutil::writeLE<std::int16_t>(out, static_cast<std::int16_t>(val));
 }
 
 
-static void writeTypeColor(ostream& out, const Material::Color& c)
+bool writeTypeFloat1(std::ostream& out, float f)
 {
-    writeType(out, CMOD_Color);
-    writeFloat(out, c.red());
-    writeFloat(out, c.green());
-    writeFloat(out, c.blue());
+    return writeType(out, CMOD_Float1) && celutil::writeLE<float>(out, f);
 }
 
 
-static void writeTypeString(ostream& out, const string& s)
+bool writeTypeColor(std::ostream& out, const Material::Color& c)
 {
-    writeType(out, CMOD_String);
-    writeInt16(out, static_cast<int16_t>(s.length()));
-    out.write(s.c_str(), s.length());
+    return writeType(out, CMOD_Color)
+        && celutil::writeLE<float>(out, c.red())
+        && celutil::writeLE<float>(out, c.green())
+        && celutil::writeLE<float>(out, c.blue());
 }
+
+
+bool writeTypeString(std::ostream& out, const std::string& s)
+{
+    return s.length() <= INT16_MAX
+        && writeType(out, CMOD_String)
+        && celutil::writeLE<std::int16_t>(out, s.length())
+        && out.write(s.c_str(), s.length()).good();
+}
+
+
+class BinaryModelWriter : public ModelWriter
+{
+public:
+    BinaryModelWriter(std::ostream& _out, SourceGetter& _sourceGetter) :
+        ModelWriter(_sourceGetter),
+        out(_out)
+    {}
+    ~BinaryModelWriter() override = default;
+
+    bool write(const Model& /*model*/) override;
+
+private:
+    bool writeMesh(const Mesh& /*mesh*/);
+    bool writeMaterial(const Material& /*material*/);
+    bool writeGroup(const Mesh::PrimitiveGroup& /*group*/);
+    bool writeVertexDescription(const Mesh::VertexDescription& /*desc*/);
+    bool writeVertices(const void* vertexData,
+                       unsigned int nVertices,
+                       unsigned int stride,
+                       const Mesh::VertexDescription& desc);
+
+    std::ostream& out;
+};
 
 
 bool
 BinaryModelWriter::write(const Model& model)
 {
-    out << CEL_MODEL_HEADER_BINARY;
+    if (!out.write(CEL_MODEL_HEADER_BINARY, CEL_MODEL_HEADER_LENGTH).good()) { return false; }
 
     for (unsigned int matIndex = 0; model.getMaterial(matIndex) != nullptr; matIndex++)
-        writeMaterial(*model.getMaterial(matIndex));
+    {
+        if (!writeMaterial(*model.getMaterial(matIndex))) { return false; }
+    }
 
     for (unsigned int meshIndex = 0; model.getMesh(meshIndex) != nullptr; meshIndex++)
-        writeMesh(*model.getMesh(meshIndex));
+    {
+        if (!writeMesh(*model.getMesh(meshIndex))) { return false; }
+    }
 
     return true;
 }
 
 
-void
+bool
 BinaryModelWriter::writeGroup(const Mesh::PrimitiveGroup& group)
 {
-    writeInt16(out, static_cast<int16_t>(group.prim));
-    writeUint32(out, group.materialIndex);
-    writeUint32(out, group.nIndices);
+    if (!celutil::writeLE<std::int16_t>(out, group.prim)
+        || !celutil::writeLE<std::uint32_t>(out, group.materialIndex)
+        || !celutil::writeLE<std::uint32_t>(out, group.nIndices))
+    {
+        return false;
+    }
 
     for (unsigned int i = 0; i < group.nIndices; i++)
     {
-        writeUint32(out, group.indices[i]);
+        if (!celutil::writeLE<std::uint32_t>(out, group.indices[i])) { return false; }
     }
+
+    return true;
 }
 
 
-void
+bool
 BinaryModelWriter::writeMesh(const Mesh& mesh)
 {
-    writeToken(out, CMOD_Mesh);
-
-    writeVertexDescription(mesh.getVertexDescription());
-
-    writeVertices(mesh.getVertexData(),
-                  mesh.getVertexCount(),
-                  mesh.getVertexStride(),
-                  mesh.getVertexDescription());
+    if (!writeToken(out, CMOD_Mesh)
+        || !writeVertexDescription(mesh.getVertexDescription())
+        || !writeVertices(mesh.getVertexData(),
+                          mesh.getVertexCount(),
+                          mesh.getVertexStride(),
+                          mesh.getVertexDescription()))
+    {
+        return false;
+    }
 
     for (unsigned int groupIndex = 0; mesh.getGroup(groupIndex) != nullptr; groupIndex++)
-        writeGroup(*mesh.getGroup(groupIndex));
+    {
+        if (!writeGroup(*mesh.getGroup(groupIndex))) { return false; }
+    }
 
-    writeToken(out, CMOD_EndMesh);
+    return writeToken(out, CMOD_EndMesh);
 }
 
 
-void
+bool
 BinaryModelWriter::writeVertices(const void* vertexData,
                                  unsigned int nVertices,
                                  unsigned int stride,
@@ -2243,133 +1763,197 @@ BinaryModelWriter::writeVertices(const void* vertexData,
 {
     const auto* vertex = reinterpret_cast<const char*>(vertexData);
 
-    writeToken(out, CMOD_Vertices);
-    writeUint32(out, nVertices);
+    if (!writeToken(out, CMOD_Vertices) || !celutil::writeLE<std::uint32_t>(out, nVertices))
+    {
+        return false;
+    }
 
     for (unsigned int i = 0; i < nVertices; i++, vertex += stride)
     {
         for (unsigned int attr = 0; attr < desc.nAttributes; attr++)
         {
             const char* cdata = vertex + desc.attributes[attr].offset;
-            const auto* fdata = reinterpret_cast<const float*>(cdata);
+            float fdata[4];
 
+            bool result;
             switch (desc.attributes[attr].format)
             {
             case Mesh::Float1:
-                writeFloat(out, fdata[0]);
+                std::memcpy(fdata, cdata, sizeof(float));
+                result = celutil::writeLE<float>(out, fdata[0]);
                 break;
             case Mesh::Float2:
-                writeFloat(out, fdata[0]);
-                writeFloat(out, fdata[1]);
+                std::memcpy(fdata, cdata, sizeof(float) * 2);
+                result = celutil::writeLE<float>(out, fdata[0])
+                    && celutil::writeLE<float>(out, fdata[1]);
                 break;
             case Mesh::Float3:
-                writeFloat(out, fdata[0]);
-                writeFloat(out, fdata[1]);
-                writeFloat(out, fdata[2]);
+                std::memcpy(fdata, cdata, sizeof(float) * 3);
+                result = celutil::writeLE<float>(out, fdata[0])
+                    && celutil::writeLE<float>(out, fdata[1])
+                    && celutil::writeLE<float>(out, fdata[2]);
                 break;
             case Mesh::Float4:
-                writeFloat(out, fdata[0]);
-                writeFloat(out, fdata[1]);
-                writeFloat(out, fdata[2]);
-                writeFloat(out, fdata[3]);
+                std::memcpy(fdata, cdata, sizeof(float) * 4);
+                result = celutil::writeLE<float>(out, fdata[0])
+                    && celutil::writeLE<float>(out, fdata[1])
+                    && celutil::writeLE<float>(out, fdata[2])
+                    && celutil::writeLE<float>(out, fdata[3]);
                 break;
             case Mesh::UByte4:
-                out.write(cdata, 4);
+                result = out.write(cdata, 4).good();
                 break;
             default:
                 assert(0);
                 break;
             }
+
+            if (!result) { return false; }
         }
     }
+
+    return true;
 }
 
 
-void
+bool
 BinaryModelWriter::writeVertexDescription(const Mesh::VertexDescription& desc)
 {
-    writeToken(out, CMOD_VertexDesc);
+    if (!writeToken(out, CMOD_VertexDesc)) { return false; }
 
     for (unsigned int attr = 0; attr < desc.nAttributes; attr++)
     {
-        writeInt16(out, static_cast<int16_t>(desc.attributes[attr].semantic));
-        writeInt16(out, static_cast<int16_t>(desc.attributes[attr].format));
+        if (!celutil::writeLE<std::int16_t>(out, desc.attributes[attr].semantic)
+            || !celutil::writeLE<std::int16_t>(out, desc.attributes[attr].format))
+        {
+            return false;
+        }
     }
 
-    writeToken(out, CMOD_EndVertexDesc);
+    return writeToken(out, CMOD_EndVertexDesc);
 }
 
 
-void
+bool
 BinaryModelWriter::writeMaterial(const Material& material)
 {
-    writeToken(out, CMOD_Material);
+    if (!writeToken(out, CMOD_Material)) { return false; }
 
-    if (material.diffuse != DefaultDiffuse)
+    if (material.diffuse != DefaultDiffuse
+        && (!writeToken(out, CMOD_Diffuse) || !writeTypeColor(out, material.diffuse)))
     {
-        writeToken(out, CMOD_Diffuse);
-        writeTypeColor(out, material.diffuse);
+        return false;
     }
 
-    if (material.emissive != DefaultEmissive)
+    if (material.emissive != DefaultEmissive
+        && (!writeToken(out, CMOD_Emissive) || !writeTypeColor(out, material.emissive)))
     {
-        writeToken(out, CMOD_Emissive);
-        writeTypeColor(out, material.emissive);
+        return false;
     }
 
-    if (material.specular != DefaultSpecular)
+    if (material.specular != DefaultSpecular
+        && (!writeToken(out, CMOD_Specular) || !writeTypeColor(out, material.specular)))
     {
-        writeToken(out, CMOD_Specular);
-        writeTypeColor(out, material.specular);
+        return false;
     }
 
-    if (material.specularPower != DefaultSpecularPower)
+    if (material.specularPower != DefaultSpecularPower
+        && (!writeToken(out, CMOD_SpecularPower) || !writeTypeFloat1(out, material.specularPower)))
     {
-        writeToken(out, CMOD_SpecularPower);
-        writeTypeFloat1(out, material.specularPower);
+        return false;
     }
 
-    if (material.opacity != DefaultOpacity)
+    if (material.opacity != DefaultOpacity
+        && (!writeToken(out, CMOD_Opacity) || !writeTypeFloat1(out, material.opacity)))
     {
-        writeToken(out, CMOD_Opacity);
-        writeTypeFloat1(out, material.opacity);
+        return false;
     }
 
-    if (material.blend != DefaultBlend)
+    if (material.blend != DefaultBlend
+        && (!writeToken(out, CMOD_Blend) || !celutil::writeLE<std::int16_t>(out, material.blend)))
     {
-        writeToken(out, CMOD_Blend);
-        writeInt16(out, (int16_t) material.blend);
+        return false;
     }
 
     for (int i = 0; i < Material::TextureSemanticMax; i++)
     {
-        if (material.maps[i])
+        if (material.maps[i] != InvalidResource)
         {
-            fs::path texSource = material.maps[i]->source();
-            if (!texSource.empty())
+            fs::path texSource = getSource(material.maps[i]);
+            if (!texSource.empty()
+                && (!writeToken(out, CMOD_Texture)
+                    || !celutil::writeLE<std::int16_t>(out, i)
+                    || !writeTypeString(out, texSource.string())))
             {
-                writeToken(out, CMOD_Texture);
-                writeInt16(out, (int16_t) i);
-                writeTypeString(out, texSource.string());
+                return false;
             }
         }
     }
 
-    writeToken(out, CMOD_EndMaterial);
+    return writeToken(out, CMOD_EndMaterial);
 }
 
 
-#ifdef CMOD_LOAD_TEST
-
-int main(int argc, char* argv[])
+ModelLoader* OpenModel(std::istream& in, HandleGetter& getHandle)
 {
-    Model* model = LoadModel(cin);
-    if (model)
+    char header[CEL_MODEL_HEADER_LENGTH];
+    if (!in.read(header, CEL_MODEL_HEADER_LENGTH).good())
     {
-        SaveModelAscii(model, cout);
+        std::cerr << "Could not read model header\n";
+        return nullptr;
     }
 
-    return 0;
+    if (std::strncmp(header, CEL_MODEL_HEADER_ASCII, CEL_MODEL_HEADER_LENGTH) == 0)
+    {
+        return new AsciiModelLoader(in, getHandle);
+    }
+    if (std::strncmp(header, CEL_MODEL_HEADER_BINARY, CEL_MODEL_HEADER_LENGTH) == 0)
+    {
+        return new BinaryModelLoader(in, getHandle);
+    }
+    else
+    {
+        std::cerr << "Model file has invalid header.\n";
+        return nullptr;
+    }
 }
 
-#endif
+
+} // end unnamed namespace
+
+
+Model* LoadModel(std::istream& in, HandleGetter handleGetter)
+{
+    ModelLoader* loader = OpenModel(in, handleGetter);
+    if (loader == nullptr)
+        return nullptr;
+
+    Model* model = loader->load();
+    if (model == nullptr)
+    {
+        std::cerr << "Error in model file: " << loader->getErrorMessage() << '\n';
+    }
+
+    delete loader;
+
+    return model;
+}
+
+
+bool
+SaveModelAscii(const Model* model, std::ostream& out, SourceGetter sourceGetter)
+{
+    if (model == nullptr) { return false; }
+    AsciiModelWriter writer(out, sourceGetter);
+    return writer.write(*model);
+}
+
+
+bool
+SaveModelBinary(const Model* model, std::ostream& out, SourceGetter sourceGetter)
+{
+    if (model == nullptr) { return false; }
+    BinaryModelWriter writer(out, sourceGetter);
+    return writer.write(*model);
+}
+} // end namespace cmod

@@ -15,6 +15,8 @@
 #include <sstream>
 #include <iomanip>
 #include <tuple>
+#include <fmt/ostream.h>
+#include <fmt/printf.h>
 #include <Eigen/Geometry>
 #include <celcompat/filesystem.h>
 #include <celmath/geomutil.h>
@@ -408,21 +410,21 @@ ShaderManager::getShader(const string& name)
     uintmax_t fsSize = fs::file_size(fsName, ecf);
     if (ecv || ecf)
     {
-        fmt::fprintf(cerr, "Failed to get file size of %s or %s\n", vsName.string(), fsName.string());
+        fmt::print(cerr, "Failed to get file size of {} or {}\n", vsName, fsName);
         return getShader(name, errorVertexShaderSource, errorFragmentShaderSource);
     }
 
     ifstream vsf(vsName.string());
     if (!vsf.good())
     {
-        fmt::fprintf(cerr, "Failed to open %s\n", vsName.string());
+        fmt::print(cerr, "Failed to open {}\n", vsName);
         return getShader(name, errorVertexShaderSource, errorFragmentShaderSource);
     }
 
     ifstream fsf(fsName.string());
     if (!fsf.good())
     {
-        fmt::fprintf(cerr, "Failed to open %s\n", fsName.string());
+        fmt::print(cerr, "Failed to open {}\n", fsName);
         return getShader(name, errorVertexShaderSource, errorFragmentShaderSource);
     }
 

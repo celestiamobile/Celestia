@@ -104,7 +104,7 @@ static bool is_valid_directory(const fs::path& dir)
     std::error_code ec;
     if (!fs::is_directory(dir, ec))
     {
-        fmt::fprintf(cerr, _("Path %s doesn't exist or isn't a directory"), dir.string());
+        cerr << fmt::sprintf(_("Path %s doesn't exist or isn't a directory\n"), dir);
         return false;
     }
 
@@ -201,8 +201,7 @@ void CelestiaCore::readFavoritesFile()
     {
         favorites = ReadFavoritesList(in);
         if (favorites == nullptr)
-            warning(fmt::format(_("Error reading favorites file {}.\n"),
-                                path.string()));
+            warning(fmt::format(_("Error reading favorites file {}.\n"), path));
     }
 }
 
@@ -223,8 +222,7 @@ void CelestiaCore::writeFavoritesFile()
     bool isDir = fs::is_directory(path.parent_path(), ec);
     if (ec)
     {
-        warning(fmt::format(_("Failed to check directory existance for favorites file {}\n"),
-                            path.string()));
+        warning(fmt::format(_("Failed to check directory existance for favorites file {}\n"), path));
         return;
     }
     if (!isDir)
@@ -232,8 +230,7 @@ void CelestiaCore::writeFavoritesFile()
         fs::create_directory(path.parent_path(), ec);
         if (ec)
         {
-            warning(fmt::format(_("Failed to create a directory for favorites file {}\n"),
-                                path.string()));
+            warning(fmt::format(_("Failed to create a directory for favorites file {}\n"), path));
             return;
         }
     }
@@ -889,12 +886,12 @@ static string getKeyName(const char* c, int modifiers)
     // Translate control characters
     if (length == 1 && c[0] >= '\001' && c[0] <= '\032')
     {
-        return fmt::sprintf("C-%c", '\140' + c[0]);
+        return fmt::format("C-{:c}", static_cast<char>('\140' + c[0]));
     }
 
     if (modifiers & CelestiaCore::ControlKey)
     {
-        return fmt::sprintf("C-%s", c);
+        return fmt::format("C-{}", c);
     }
 
     return string(c);
@@ -2576,7 +2573,7 @@ static void displayRotationPeriod(Overlay& overlay, double days)
         p = _("seconds");
     }
 
-    fmt::fprintf(overlay, _("Rotation period: %s %s\n"), n, p);
+    overlay.printf(_("Rotation period: %s %s\n"), n, p);
 }
 
 static void displayMass(Overlay& overlay, float mass, CelestiaCore::MeasurementSystem measurement)
@@ -2584,14 +2581,14 @@ static void displayMass(Overlay& overlay, float mass, CelestiaCore::MeasurementS
     if (mass < 0.001f)
     {
         if (measurement == CelestiaCore::Imperial)
-            fmt::fprintf(overlay, _("Mass: %.6g lb\n"), mass * astro::EarthMass / (float) OneLbInKg);
+            overlay.printf(_("Mass: %.6g lb\n"), mass * astro::EarthMass / (float) OneLbInKg);
         else
-            fmt::fprintf(overlay, _("Mass: %.6g kg\n"), mass * astro::EarthMass);
+            overlay.printf(_("Mass: %.6g kg\n"), mass * astro::EarthMass);
     }
     else if (mass > 50)
-        fmt::fprintf(overlay, _("Mass: %.2f Mj\n"), mass * astro::EarthMass / astro::JupiterMass);
+        overlay.printf(_("Mass: %.2f Mj\n"), mass * astro::EarthMass / astro::JupiterMass);
     else
-        fmt::fprintf(overlay, _("Mass: %.2f Me\n"), mass);
+        overlay.printf(_("Mass: %.2f Me\n"), mass);
 }
 
 static void displaySpeed(Overlay& overlay, float speed, CelestiaCore::MeasurementSystem measurement)
@@ -2640,7 +2637,7 @@ static void displaySpeed(Overlay& overlay, float speed, CelestiaCore::Measuremen
             u = _("m/s");
         }
     }
-    fmt::fprintf(overlay, _("Speed: %s %s\n"), n, u);
+    overlay.printf(_("Speed: %s %s\n"), n, u);
 }
 
 // Display a positive angle as degrees, minutes, and seconds. If the angle is less than one
@@ -2674,7 +2671,7 @@ static void displayDeclination(Overlay& overlay, double angle)
     double seconds;
     astro::decimalToDegMinSec(angle, degrees, minutes, seconds);
 
-    fmt::fprintf(overlay, _("Dec: %+d%s %02d' %.1f\"\n"),
+    overlay.printf(_("Dec: %+d%s %02d' %.1f\"\n"),
                           abs(degrees), UTF8_DEGREE_SIGN,
                           abs(minutes), abs(seconds));
 }
@@ -2686,7 +2683,7 @@ static void displayRightAscension(Overlay& overlay, double angle)
     double seconds;
     astro::decimalToHourMinSec(angle, hours, minutes, seconds);
 
-    fmt::fprintf(overlay, _("RA: %dh %02dm %.1fs\n"),
+    overlay.printf(_("RA: %dh %02dm %.1fs\n"),
                           hours, abs(minutes), abs(seconds));
 }
 
@@ -2702,7 +2699,7 @@ static void displayApparentDiameter(Overlay& overlay,
         // than one second--otherwise, it's probably not interesting data.
         if (arcSize < 160.0 && arcSize > 1.0 / 3600.0)
         {
-            fmt::fprintf(overlay, _("Apparent diameter: %s\n"),
+            overlay.printf(_("Apparent diameter: %s\n"),
                                  angleToStr(arcSize));
         }
     }
@@ -2715,11 +2712,11 @@ static void displayApparentMagnitude(Overlay& overlay,
     if (distance > 32.6167)
     {
         float appMag = astro::absToAppMag(absMag, (float) distance);
-        fmt::fprintf(overlay, _("Apparent magnitude: %.1f\n"), appMag);
+        overlay.printf(_("Apparent magnitude: %.1f\n"), appMag);
     }
     else
     {
-        fmt::fprintf(overlay, _("Absolute magnitude: %.1f\n"), absMag);
+        overlay.printf(_("Absolute magnitude: %.1f\n"), absMag);
     }
 }
 
@@ -2798,9 +2795,9 @@ static void displayPlanetocentricCoords(Overlay& overlay,
     }
 
     if (showAltitude)
-        fmt::fprintf(overlay, "%.6f%c %.6f%c", lat, nsHemi, lon, ewHemi);
+        overlay.printf("%.6f%c %.6f%c", lat, nsHemi, lon, ewHemi);
     else
-        fmt::fprintf(overlay, _("%.6f%c %.6f%c %s"), lat, nsHemi, lon, ewHemi, DistanceKmToStr(altitude, 5, measurement));
+        overlay.printf(_("%.6f%c %.6f%c %s"), lat, nsHemi, lon, ewHemi, DistanceKmToStr(altitude, 5, measurement));
 }
 
 
@@ -2827,7 +2824,7 @@ static void displayStarInfo(Overlay& overlay,
                             double distance,
                             CelestiaCore::MeasurementSystem measurement)
 {
-    fmt::fprintf(overlay, _("Distance: %s\n"), DistanceLyToStr(distance, 5, measurement));
+    overlay.printf(_("Distance: %s\n"), DistanceLyToStr(distance, 5, measurement));
 
     if (!star.getVisibility())
     {
@@ -2835,12 +2832,12 @@ static void displayStarInfo(Overlay& overlay,
     }
     else
     {
-        fmt::fprintf(overlay, _("Abs (app) mag: %.2f (%.2f)\n"),
+        overlay.printf(_("Abs (app) mag: %.2f (%.2f)\n"),
                                 star.getAbsoluteMagnitude(),
                                 star.getApparentMagnitude(float(distance)));
 
         if (star.getLuminosity() > 1.0e-10f)
-            fmt::fprintf(overlay, _("Luminosity: %sx Sun\n"), SigDigitNum(star.getLuminosity(), 3));
+            overlay.printf(_("Luminosity: %sx Sun\n"), SigDigitNum(star.getLuminosity(), 3));
 
         const char* star_class;
         switch (star.getSpectralType()[0])
@@ -2854,25 +2851,25 @@ static void displayStarInfo(Overlay& overlay,
         default:
             star_class = star.getSpectralType();
         };
-        fmt::fprintf(overlay, _("Class: %s\n"), star_class);
+        overlay.printf(_("Class: %s\n"), star_class);
 
         displayApparentDiameter(overlay, star.getRadius(),
                                 astro::lightYearsToKilometers(distance));
 
         if (detail > 1)
         {
-            fmt::fprintf(overlay, _("Surface temp: %s K\n"), SigDigitNum(star.getTemperature(), 3));
+            overlay.printf(_("Surface temp: %s K\n"), SigDigitNum(star.getTemperature(), 3));
             float solarRadii = star.getRadius() / 6.96e5f;
 
             if (solarRadii > 0.01f)
             {
-                fmt::fprintf(overlay, _("Radius: %s Rsun  (%s)\n"),
+                overlay.printf(_("Radius: %s Rsun  (%s)\n"),
                              SigDigitNum(star.getRadius() / 696000.0f, 2),
                              DistanceKmToStr(star.getRadius(), 3, measurement));
             }
             else
             {
-                fmt::fprintf(overlay, _("Radius: %s\n"),
+                overlay.printf(_("Radius: %s\n"),
                              DistanceKmToStr(star.getRadius(), 3, measurement));
             }
 
@@ -2899,15 +2896,15 @@ static void displayDSOinfo(Overlay& overlay, const DeepSkyObject& dso, double di
 
     if (distance >= 0)
     {
-        fmt::fprintf(overlay, _("Distance: %s\n"),
+        overlay.printf(_("Distance: %s\n"),
                      DistanceLyToStr(distance, 5, measurement));
     }
     else
     {
-        fmt::fprintf(overlay, _("Distance from center: %s\n"),
+        overlay.printf(_("Distance from center: %s\n"),
                      DistanceLyToStr(distance + dso.getRadius(), 5, measurement));
      }
-    fmt::fprintf(overlay, _("Radius: %s\n"),
+    overlay.printf(_("Radius: %s\n"),
                  DistanceLyToStr(dso.getRadius(), 5, measurement));
 
     displayApparentDiameter(overlay, dso.getRadius(), distance);
@@ -2929,14 +2926,14 @@ static void displayPlanetInfo(Overlay& overlay,
                               CelestiaCore::MeasurementSystem measurement)
 {
     double distance = distanceKm - body.getRadius();
-    fmt::fprintf(overlay, _("Distance: %s\n"), DistanceKmToStr(distance, 5, measurement));
+    overlay.printf(_("Distance: %s\n"), DistanceKmToStr(distance, 5, measurement));
 
     if (body.getClassification() == Body::Invisible)
     {
         return;
     }
 
-    fmt::fprintf(overlay, _("Radius: %s\n"), DistanceKmToStr(body.getRadius(), 5, measurement));
+    overlay.printf(_("Radius: %s\n"), DistanceKmToStr(body.getRadius(), 5, measurement));
 
     displayApparentDiameter(overlay, body.getRadius(), distanceKm);
 
@@ -2977,7 +2974,7 @@ static void displayPlanetInfo(Overlay& overlay,
             sunVec.normalize();
             double cosPhaseAngle = sunVec.dot(viewVec.normalized());
             double phaseAngle = acos(cosPhaseAngle);
-            fmt::fprintf(overlay, _("Phase angle: %.1f%s\n"), radToDeg(phaseAngle), UTF8_DEGREE_SIGN);
+            overlay.printf(_("Phase angle: %.1f%s\n"), radToDeg(phaseAngle), UTF8_DEGREE_SIGN);
         }
     }
 
@@ -2993,14 +2990,14 @@ static void displayPlanetInfo(Overlay& overlay,
         if (density > 0)
         {
             if (measurement == CelestiaCore::Imperial)
-                fmt::fprintf(overlay, _("Density: %.2f x 1000 lb/ft^3\n"), density / (float) OneLbPerFt3InKgPerM3 / 1000.0f);
+                overlay.printf(_("Density: %.2f x 1000 lb/ft^3\n"), density / (float) OneLbPerFt3InKgPerM3 / 1000.0f);
             else
-                fmt::fprintf(overlay, _("Density: %.2f x 1000 kg/m^3\n"), density / 1000.0f);
+                overlay.printf(_("Density: %.2f x 1000 kg/m^3\n"), density / 1000.0f);
         }
 
         float planetTemp = body.getTemperature(t);
         if (planetTemp > 0)
-            fmt::fprintf(overlay, _("Temperature: %.0f K\n"), planetTemp);
+            overlay.printf(_("Temperature: %.0f K\n"), planetTemp);
     }
 }
 
@@ -3010,7 +3007,7 @@ static void displayLocationInfo(Overlay& overlay,
                                 double distanceKm,
                                 CelestiaCore::MeasurementSystem measurement)
 {
-    fmt::fprintf(overlay, _("Distance: %s\n"), DistanceKmToStr(distanceKm, 5, measurement));
+    overlay.printf(_("Distance: %s\n"), DistanceKmToStr(distanceKm, 5, measurement));
 
     Body* body = location.getParentBody();
     if (body != nullptr)
@@ -3148,7 +3145,7 @@ void CelestiaCore::renderOverlay()
         overlay->moveBy(width - safeAreaInsets.right - dateStrWidth, height - safeAreaInsets.top - fontHeight);
         overlay->beginText();
 
-        overlay->print(dateStr);
+        overlay->printf(dateStr);
 
         if (lightTravelFlag && lt > 0.0)
         {
@@ -3172,11 +3169,11 @@ void CelestiaCore::renderOverlay()
             }
             else if (abs(sim->getTimeScale()) > 1.0)
             {
-                fmt::fprintf(*overlay, _("%.6g x faster"), sim->getTimeScale()); // XXX: %'.12g
+                overlay->printf(_("%.6g x faster"), sim->getTimeScale()); // XXX: %'.12g
             }
             else
             {
-                fmt::fprintf(*overlay, _("%.6g x slower"), 1.0 / sim->getTimeScale()); // XXX: %'.12g
+                overlay->printf(_("%.6g x slower"), 1.0 / sim->getTimeScale()); // XXX: %'.12g
             }
 
             if (sim->getPauseState() == true)
@@ -3201,7 +3198,7 @@ void CelestiaCore::renderOverlay()
         *overlay << '\n';
         if (showFPSCounter)
 #ifdef OCTREE_DEBUG
-            fmt::fprintf(*overlay, _("FPS: %.1f, vis. stars stats: [ %zu : %zu : %zu ], vis. DSOs stats: [ %zu : %zu : %zu ]\n"),
+            overlay->printf(_("FPS: %.1f, vis. stars stats: [ %zu : %zu : %zu ], vis. DSOs stats: [ %zu : %zu : %zu ]\n"),
                          fps,
                          getRenderer()->m_starProcStats.objects,
                          getRenderer()->m_starProcStats.nodes,
@@ -3210,7 +3207,7 @@ void CelestiaCore::renderOverlay()
                          getRenderer()->m_dsoProcStats.nodes,
                          getRenderer()->m_dsoProcStats.height);
 #else
-            fmt::fprintf(*overlay, _("FPS: %.1f\n"), fps);
+            overlay->printf(_("FPS: %.1f\n"), fps);
 #endif
         else
             *overlay << '\n';
@@ -3235,10 +3232,10 @@ void CelestiaCore::renderOverlay()
         {
             double timeLeft = sim->getArrivalTime() - sim->getRealTime();
             if (timeLeft >= 1)
-                fmt::fprintf(*overlay, _("Travelling (%s)\n"),
+                overlay->printf(_("Travelling (%s)\n"),
                              FormattedNumber(timeLeft, 0, FormattedNumber::GroupThousands));
             else
-                fmt::fprintf(*overlay, _("Travelling\n"));
+                overlay->printf(_("Travelling\n"));
         }
         else
         {
@@ -3247,7 +3244,7 @@ void CelestiaCore::renderOverlay()
 
         if (!sim->getTrackedObject().empty())
         {
-            fmt::fprintf(*overlay, _("Track %s\n"),
+            overlay->printf(_("Track %s\n"),
                          CX_("Track", getSelectionName(sim->getTrackedObject(), *u)));
         }
         else
@@ -3263,21 +3260,21 @@ void CelestiaCore::renderOverlay()
             switch (coordSys)
             {
             case ObserverFrame::Ecliptical:
-                fmt::fprintf(*overlay, _("Follow %s\n"),
+                overlay->printf(_("Follow %s\n"),
                              CX_("Follow", getSelectionName(refObject, *u)));
                 break;
             case ObserverFrame::BodyFixed:
-                fmt::fprintf(*overlay, _("Sync Orbit %s\n"),
+                overlay->printf(_("Sync Orbit %s\n"),
                              CX_("Sync", getSelectionName(refObject, *u)));
                 break;
             case ObserverFrame::PhaseLock:
-                fmt::fprintf(*overlay, _("Lock %s -> %s\n"),
+                overlay->printf(_("Lock %s -> %s\n"),
                              CX_("Lock", getSelectionName(refObject, *u)),
                              CX_("LockTo", getSelectionName(sim->getFrame()->getTargetObject(), *u)));
                 break;
 
             case ObserverFrame::Chase:
-                fmt::fprintf(*overlay, _("Chase %s\n"),
+                overlay->printf(_("Chase %s\n"),
                              CX_("Chase", getSelectionName(refObject, *u)));
                 break;
 
@@ -3291,7 +3288,7 @@ void CelestiaCore::renderOverlay()
 
         // Field of view
         float fov = radToDeg(sim->getActiveObserver()->getFOV());
-        fmt::fprintf(*overlay, _("FOV: %s (%.2fx)\n"),
+        overlay->printf(_("FOV: %s (%.2fx)\n"),
                               angleToStr(fov), (*activeView)->zoom);
         overlay->endText();
         overlay->restorePos();
@@ -3474,7 +3471,7 @@ void CelestiaCore::renderOverlay()
         overlay->moveBy(safeAreaInsets.left, safeAreaInsets.bottom + rectHeight - titleFontHeight);
         overlay->setColor(0.6f, 0.6f, 1.0f, 1.0f);
         overlay->beginText();
-        fmt::fprintf(*overlay, _("Target name: %s"), typedText);
+        overlay->printf(_("Target name: %s"), typedText);
         overlay->endText();
         overlay->setFont(font);
         if (typedTextCompletion.size() >= 1)
@@ -3561,7 +3558,7 @@ void CelestiaCore::renderOverlay()
         overlay->moveBy((float) ((width - movieWidth) / 2),
                         (float) ((height + movieHeight) / 2 + 2));
         overlay->beginText();
-        fmt::fprintf(*overlay, _("%dx%d at %.2f fps  %s"),
+        overlay->printf(_("%dx%d at %.2f fps  %s"),
                               movieWidth, movieHeight,
                               movieCapture->getFrameRate(),
                               recording ? _("Recording") : _("Paused"));
@@ -3577,7 +3574,7 @@ void CelestiaCore::renderOverlay()
         auto min = (int) (sec / 60);
         sec -= min * 60.0f;
         overlay->beginText();
-        fmt::fprintf(*overlay, "%3d:%05.2f", min, sec);
+        overlay->printf("%3d:%05.2f", min, sec);
         overlay->endText();
         overlay->restorePos();
 
@@ -3634,10 +3631,10 @@ class SolarSystemLoader
 
         if (find(begin(skip), end(skip), filepath) != end(skip))
         {
-            fmt::fprintf(clog, _("Skipping solar system catalog: %s\n"), filepath.string());
+            clog << fmt::sprintf(_("Skipping solar system catalog: %s\n"), filepath);
             return;
         }
-        fmt::fprintf(clog, _("Loading solar system catalog: %s\n"), filepath.string());
+        clog << fmt::sprintf(_("Loading solar system catalog: %s\n"), filepath);
         if (notifier != nullptr)
             notifier->update(filepath.filename().string());
 
@@ -3680,10 +3677,10 @@ template <class OBJDB> class CatalogLoader
 
         if (find(begin(skip), end(skip), filepath) != end(skip))
         {
-            fmt::fprintf(clog, _("Skipping %s catalog: %s\n"), typeDesc, filepath.string());
+            clog << fmt::sprintf(_("Skipping %s catalog: %s\n"), typeDesc, filepath);
             return;
         }
-        fmt::fprintf(clog, _("Loading %s catalog: %s\n"), typeDesc, filepath.string());
+        clog << fmt::sprintf(_("Loading %s catalog: %s\n"), typeDesc, filepath);
         if (notifier != nullptr)
             notifier->update(filepath.filename().string());
 
@@ -3691,7 +3688,7 @@ template <class OBJDB> class CatalogLoader
         if (catalogFile.good())
         {
             if (!objDB->load(catalogFile, filepath.parent_path()))
-                DPRINTF(LOG_LEVEL_ERROR, "Error reading %s catalog file: %s\n", typeDesc, filepath.string());
+                DPRINTF(LOG_LEVEL_ERROR, "Error reading %s catalog file: %s\n", typeDesc, filepath);
         }
     }
 };
@@ -3745,10 +3742,10 @@ bool CelestiaCore::initSimulation(const fs::path& configFileName,
     // additional extras directories should be small.
     for (const auto& dir : extrasDirs)
     {
-        if (find(config->extrasDirs.begin(), config->extrasDirs.end(), dir.string()) ==
+        if (find(config->extrasDirs.begin(), config->extrasDirs.end(), dir) ==
             config->extrasDirs.end())
         {
-            config->extrasDirs.push_back(dir.string());
+            config->extrasDirs.push_back(dir);
         }
     }
 
@@ -3794,11 +3791,11 @@ bool CelestiaCore::initSimulation(const fs::path& configFileName,
         ifstream dsoFile(file.string(), ios::in);
         if (!dsoFile.good())
         {
-            warning(fmt::sprintf(_("Error opening deepsky catalog file %s.\n"), file.string()));
+            warning(fmt::sprintf(_("Error opening deepsky catalog file %s.\n"), file));
         }
         if (!dsoDB->load(dsoFile, ""))
         {
-            warning(fmt::sprintf(_("Cannot read Deep Sky Objects database %s.\n"), file.string()));
+            warning(fmt::sprintf(_("Cannot read Deep Sky Objects database %s.\n"), file));
         }
     }
 
@@ -4100,9 +4097,9 @@ static void loadCrossIndex(StarDatabase* starDB,
         if (xrefFile.good())
         {
             if (!starDB->loadCrossIndex(catalog, xrefFile))
-                fmt::fprintf(cerr, _("Error reading cross index %s\n"), filename);
+                cerr << fmt::sprintf(_("Error reading cross index %s\n"), filename);
             else
-                fmt::fprintf(clog, _("Loaded cross index %s\n"), filename);
+                clog << fmt::sprintf(_("Loaded cross index %s\n"), filename);
         }
     }
 }
@@ -4123,7 +4120,7 @@ bool CelestiaCore::readStars(const CelestiaConfig& cfg,
     }
     else
     {
-        fmt::fprintf(cerr, _("Error opening %s\n"), cfg.starNamesFile);
+        cerr << fmt::sprintf(_("Error opening %s\n"), cfg.starNamesFile);
     }
 
     // First load the binary star database file.  The majority of stars
@@ -4137,7 +4134,7 @@ bool CelestiaCore::readStars(const CelestiaConfig& cfg,
         ifstream starFile(cfg.starDatabaseFile.string(), ios::in | ios::binary);
         if (!starFile.good())
         {
-            fmt::fprintf(cerr, _("Error opening %s\n"), cfg.starDatabaseFile);
+            cerr << fmt::sprintf(_("Error opening %s\n"), cfg.starDatabaseFile);
             delete starDB;
             delete starNameDB;
             return false;
@@ -4171,7 +4168,7 @@ bool CelestiaCore::readStars(const CelestiaConfig& cfg,
         if (starFile.good())
             starDB->load(starFile);
         else
-            fmt::fprintf(cerr, _("Error opening star catalog %s\n"), file);
+            cerr << fmt::sprintf(_("Error opening star catalog %s\n"), file);
     }
 
     // Now, read supplemental star files from the extras directories
@@ -4766,7 +4763,7 @@ bool CelestiaCore::saveScreenShot(const fs::path& filename, ContentType type) co
 
     if (type != Content_JPEG && type != Content_PNG)
     {
-        fmt::print(cerr, _("Unsupported image type: {}!\n"), filename.string());
+        fmt::print(cerr, _("Unsupported image type: {}!\n"), filename);
         return false;
     }
 
@@ -4811,6 +4808,6 @@ void CelestiaCore::setLogFile(const fs::path &fn)
     }
     else
     {
-        fmt::fprintf(cerr, "Unable to open log file %s\n", fn.string());
+        fmt::print(cerr, "Unable to open log file {}\n", fn);
     }
 }
