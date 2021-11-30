@@ -30,18 +30,13 @@ using namespace celestia;
 using namespace Eigen;
 using namespace std;
 
-static bool texCapsInitialized = false;
-
 struct TextureCaps
 {
-    bool maxLevelSupported;
-    GLint maxTextureSize;
     GLint preferredAnisotropy;
 };
 
 static TextureCaps texCaps;
 
-#define NO_GLU
 #undef DUMP_TEXTURE_MIPMAP_INFO
 
 #ifdef DUMP_TEXTURE_MIPMAP_INFO
@@ -92,23 +87,19 @@ static bool testMaxLevel()
 
 static const TextureCaps& GetTextureCaps()
 {
+    static bool texCapsInitialized = false;
+
     if (!texCapsInitialized)
     {
         texCapsInitialized = true;
-
-        texCaps.maxLevelSupported = testMaxLevel();
-        glGetIntegerv(GL_MAX_TEXTURE_SIZE, &texCaps.maxTextureSize);
 
         texCaps.preferredAnisotropy = 1;
 #ifndef GL_ES
         if (gl::EXT_texture_filter_anisotropic)
         {
-            GLint maxAnisotropy = 1;
-            glGetIntegerv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAnisotropy);
-
             // Cap the preferred level texture anisotropy to 8; eventually, we should allow
             // the user to control this.
-            texCaps.preferredAnisotropy = min(8, maxAnisotropy);
+            texCaps.preferredAnisotropy = min(8, gl::maxTextureAnisotropy);
         }
 #endif
     }
@@ -420,14 +411,8 @@ ImageTexture::ImageTexture(Image& img,
     }
 #endif
 
-#ifndef GL_ES
-    if (mipMapMode == AutoMipMaps)
-        glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_TRUE);
-#endif
-
     bool genMipmaps = mipmap && !precomputedMipMaps;
-
-#if !defined(GL_ES) && defined(NO_GLU)
+#if !defined(GL_ES)
     if (genMipmaps && !FramebufferObject::isSupported())
         glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_TRUE);
 #endif
@@ -435,36 +420,16 @@ ImageTexture::ImageTexture(Image& img,
     if (mipmap)
     {
         if (precomputedMipMaps)
-        {
             LoadMipmapSet(img, GL_TEXTURE_2D);
-        }
         else if (mipMapMode == DefaultMipMaps)
-        {
-#ifdef NO_GLU
             LoadMiplessTexture(img, GL_TEXTURE_2D);
-#else
-            gluBuild2DMipmaps(GL_TEXTURE_2D,
-                              getInternalFormat(img.getFormat()),
-                              getWidth(), getHeight(),
-                              (GLenum) img.getFormat(),
-                              GL_UNSIGNED_BYTE,
-                              img.getPixels());
-#endif
-        }
-        else
-        {
-            assert(mipMapMode == AutoMipMaps);
-            LoadMiplessTexture(img, GL_TEXTURE_2D);
-        }
     }
     else
     {
         LoadMiplessTexture(img, GL_TEXTURE_2D);
     }
-#ifdef NO_GLU
     if (genMipmaps && FramebufferObject::isSupported())
         glGenerateMipmap(GL_TEXTURE_2D);
-#endif
     DumpTextureMipmapInfo(GL_TEXTURE_2D);
 
     alpha = img.hasAlpha();
@@ -647,7 +612,6 @@ TiledTexture::TiledTexture(Image& img,
 
                 if (mipmap)
                 {
-#ifdef NO_GLU
                     if (FramebufferObject::isSupported())
                     {
                         LoadMiplessTexture(*tile, GL_TEXTURE_2D);
@@ -659,14 +623,6 @@ TiledTexture::TiledTexture(Image& img,
                         glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_TRUE);
                         LoadMiplessTexture(*tile, GL_TEXTURE_2D);
                     }
-#endif
-#else
-                    gluBuild2DMipmaps(GL_TEXTURE_2D,
-                                      getInternalFormat(img.getFormat()),
-                                      tileWidth, tileHeight,
-                                      (GLenum) tile->getFormat(),
-                                      GL_UNSIGNED_BYTE,
-                                      tile->getPixels());
 #endif
                 }
                 else
@@ -777,7 +733,7 @@ CubeMap::CubeMap(Image* faces[]) :
 
     bool genMipmaps = mipmap && !precomputedMipMaps;
 
-#if !defined(GL_ES) && defined(NO_GLU)
+#if !defined(GL_ES)
     if (genMipmaps && !FramebufferObject::isSupported())
         glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_GENERATE_MIPMAP, GL_TRUE);
 #endif
@@ -790,32 +746,17 @@ CubeMap::CubeMap(Image* faces[]) :
         if (mipmap)
         {
             if (precomputedMipMaps)
-            {
                 LoadMipmapSet(*face, targetFace);
-            }
             else
-            {
-#ifdef NO_GLU
                 LoadMiplessTexture(*face, targetFace);
-#else
-                gluBuild2DMipmaps(targetFace,
-                                  getInternalFormat(format),
-                                  getWidth(), getHeight(),
-                                  (GLenum) face->getFormat(),
-                                  GL_UNSIGNED_BYTE,
-                                  face->getPixels());
-#endif
-            }
         }
         else
         {
             LoadMiplessTexture(*face, targetFace);
         }
     }
-#ifdef NO_GLU
     if (genMipmaps && FramebufferObject::isSupported())
         glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
-#endif
     DumpTextureMipmapInfo(GL_TEXTURE_CUBE_MAP_POSITIVE_X);
 }
 
@@ -971,44 +912,15 @@ Texture* CreateProceduralCubeMap(int size,
     return tex;
 }
 
-#if 0
-static bool isPow2(int x)
-{
-    return ((x & (x - 1)) == 0);
-}
-#endif
 
 static Texture* CreateTextureFromImage(Image& img,
                                        Texture::AddressMode addressMode,
                                        Texture::MipMapMode mipMode)
 {
-#if 0
-    // Require texture dimensions to be powers of two.  Even though the
-    // OpenGL driver will automatically rescale textures with non-power of
-    // two sizes, some quality loss may result.  The power of two requirement
-    // forces texture creators to resize their textures in an image editing
-    // program, hopefully resulting in  textures that look as good as possible
-    // when rendered on current hardware.
-    if (!isPow2(img.getWidth()) || !isPow2(img.getHeight()))
-    {
-        clog << "Texture has non-power of two dimensions.\n";
-        return nullptr;
-    }
-#endif
-
-    // If non power of two textures are supported switch mipmap generation to
-    // automatic. gluBuildMipMaps may rescale the texture to a power of two
-    // on some drivers even when the hardware supports non power of two textures,
-    // whereas auto mipmap generation will properly deal with the dimensions.
-    if (mipMode == Texture::DefaultMipMaps)
-         mipMode = Texture::AutoMipMaps;
-
-    bool splittingAllowed = true;
     Texture* tex = nullptr;
 
-    int maxDim = GetTextureCaps().maxTextureSize;
-    if ((img.getWidth() > maxDim || img.getHeight() > maxDim) &&
-        splittingAllowed)
+    const int maxDim = gl::maxTextureSize;
+    if ((img.getWidth() > maxDim || img.getHeight() > maxDim))
     {
         // The texture is too large; we need to split it.
         int uSplit = max(1, img.getWidth() / maxDim);
@@ -1019,9 +931,6 @@ static Texture* CreateTextureFromImage(Image& img,
     else
     {
         clog << fmt::sprintf(_("Creating ordinary texture: %ix%i\n"), img.getWidth(), img.getHeight());
-        // The image is small enough to fit in a single texture; or, splitting
-        // was disallowed so we'll scale the large image down to fit in
-        // an ordinary texture.
         tex = new ImageTexture(img, addressMode, mipMode);
     }
 
