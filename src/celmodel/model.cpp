@@ -9,6 +9,9 @@
 // of the License, or (at your option) any later version.
 
 #include <algorithm>
+#include <functional>
+#include <numeric>
+#include <utility>
 
 #include <Eigen/Geometry>
 
@@ -19,28 +22,6 @@ namespace cmod
 {
 namespace
 {
-// Simple struct that pairs an index with a material; the index is used to
-// keep track of the original material index after sorting.
-struct IndexedMaterial
-{
-    int originalIndex;
-    const Material* material;
-};
-
-
-bool
-operator<(const IndexedMaterial& im0, const IndexedMaterial& im1)
-{
-    return *(im0.material) < *(im1.material);
-}
-
-
-bool
-operator!=(const IndexedMaterial& im0, const IndexedMaterial& im1)
-{
-    return im0 < im1 || im1 < im0;
-}
-
 
 // Look at the material used by last primitive group in the mesh for the
 // opacity of the whole model.  This is a very crude way to check the opacity
@@ -63,13 +44,6 @@ Model::Model()
 }
 
 
-Model::~Model()
-{
-    for (const auto mesh : meshes)
-        delete mesh;
-}
-
-
 /*! Return the material with the specified index, or nullptr if
  *  the index is out of range. The returned material pointer
  *  is const.
@@ -78,7 +52,7 @@ const Material*
 Model::getMaterial(unsigned int index) const
 {
     if (index < materials.size())
-        return materials[index];
+        return &materials[index];
     else
         return nullptr;
 }
@@ -88,23 +62,40 @@ Model::getMaterial(unsigned int index) const
  *  return value is the number of materials in the model.
  */
 unsigned int
-Model::addMaterial(const Material* m)
+Model::addMaterial(Material&& m)
 {
     // Update the texture map usage information for the model.  Since
     // the material being added isn't necessarily used by a mesh within
     // the model, we could potentially end up with false positives--this
     // won't cause any rendering troubles, but could hurt performance
     // if it forces multipass rendering when it's not required.
-    for (int i = 0; i < Material::TextureSemanticMax; i++)
+    for (int i = 0; i < static_cast<int>(TextureSemantic::TextureSemanticMax); ++i)
     {
-        if (m->maps[i] != InvalidResource)
+        if (m.maps[i] != InvalidResource)
         {
             textureUsage[i] = true;
         }
     }
 
-    materials.push_back(m);
+    materials.push_back(std::move(m));
     return materials.size();
+}
+
+
+bool
+Model::setMaterial(unsigned int index, Material&& m)
+{
+    if (index >= materials.size()) { return false; }
+    materials[index] = std::move(m);
+
+    // Regenerate the texture map usage for the model by rescanning all the meshes.
+    for (int i = 0; i < static_cast<int>(TextureSemantic::TextureSemanticMax); ++i)
+    {
+        textureUsage[i] = std::any_of(materials.cbegin(), materials.cend(),
+                                      [&](const Material& mat) { return mat.maps[i] != InvalidResource; });
+    }
+
+    return true;
 }
 
 
@@ -120,8 +111,8 @@ Model::getVertexCount() const
 {
     unsigned int count = 0;
 
-    for (const auto mesh : meshes)
-        count += mesh->getVertexCount();
+    for (const auto& mesh : meshes)
+        count += mesh.getVertexCount();
 
     return count;
 }
@@ -132,8 +123,8 @@ Model::getPrimitiveCount() const
 {
     unsigned int count = 0;
 
-    for (const auto mesh : meshes)
-        count += mesh->getPrimitiveCount();
+    for (const auto& mesh : meshes)
+        count += mesh.getPrimitiveCount();
 
     return count;
 }
@@ -147,19 +138,29 @@ Model::getMeshCount() const
 
 
 Mesh*
+Model::getMesh(unsigned int index)
+{
+    if (index < meshes.size())
+        return &meshes[index];
+    else
+        return nullptr;
+}
+
+
+const Mesh*
 Model::getMesh(unsigned int index) const
 {
     if (index < meshes.size())
-        return meshes[index];
+        return &meshes[index];
     else
         return nullptr;
 }
 
 
 unsigned int
-Model::addMesh(Mesh* m)
+Model::addMesh(Mesh&& m)
 {
-    meshes.push_back(m);
+    meshes.push_back(std::move(m));
     return meshes.size();
 }
 
@@ -173,15 +174,15 @@ Model::pick(const Eigen::Vector3d& rayOrigin,
     double closest = maxDistance;
     Mesh::PickResult closestResult;
 
-    for (const auto mesh : meshes)
+    for (const auto& mesh : meshes)
     {
         Mesh::PickResult result;
-        if (mesh->pick(rayOrigin, rayDirection, &result))
+        if (mesh.pick(rayOrigin, rayDirection, &result))
         {
             if (result.distance < closest)
             {
                 closestResult = result;
-                closestResult.mesh = mesh;
+                closestResult.mesh = &mesh;
                 closest = result.distance;
             }
         }
@@ -221,8 +222,8 @@ Model::pick(const Eigen::Vector3d& rayOrigin, const Eigen::Vector3d& rayDirectio
 void
 Model::transform(const Eigen::Vector3f& translation, float scale)
 {
-    for (const auto mesh : meshes)
-        mesh->transform(translation, scale);
+    for (auto& mesh : meshes)
+        mesh.transform(translation, scale);
 }
 
 
@@ -231,8 +232,8 @@ Model::normalize(const Eigen::Vector3f& centerOffset)
 {
     Eigen::AlignedBox<float, 3> bbox;
 
-    for (const auto mesh : meshes)
-        bbox.extend(mesh->getBoundingBox());
+    for (const auto& mesh : meshes)
+        bbox.extend(mesh.getBoundingBox());
 
     Eigen::Vector3f center = (bbox.min() + bbox.max()) * 0.5f + centerOffset;
     Eigen::Vector3f extents = bbox.max() - bbox.min();
@@ -251,52 +252,42 @@ Model::uniquifyMaterials()
     if (materials.size() <= 1)
         return;
 
-    // Create an array of materials with the indices attached
-    std::vector<IndexedMaterial> indexedMaterials;
-    unsigned int i;
-    for (i = 0; i < materials.size(); i++)
-    {
-        IndexedMaterial im;
-        im.originalIndex = i;
-        im.material = materials[i];
-        indexedMaterials.push_back(im);
-    }
+    // Create an array of material indices
+    std::vector<unsigned int> indices(materials.size());
+    std::iota(indices.begin(), indices.end(), 0U);
 
-    // Sort the indexed materials so that we can uniquify them
-    std::sort(indexedMaterials.begin(), indexedMaterials.end());
+    // Sort the material indices so that we can uniquify the materials
+    std::sort(indices.begin(), indices.end(),
+              [&](unsigned int a, unsigned int b) { return materials[a] < materials[b]; });
 
-    std::vector<const Material*> uniqueMaterials;
-    std::vector<unsigned int> materialMap(materials.size());
-    std::vector<unsigned int> duplicateMaterials;
-
-    // From the sorted material list construct the list of unique materials
+    // From the sorted index list construct the list of unique materials
     // and a map to convert old material indices into indices that can be
     // used with the uniquified material list.
-    unsigned int uniqueMaterialCount = 0;
-    for (i = 0; i < indexedMaterials.size(); i++)
+    std::vector<unsigned int> materialMap(materials.size());
+
+    std::vector<Material> uniqueMaterials;
+    uniqueMaterials.reserve(materials.size());
+
+    for (std::size_t i = 0; i < indices.size(); ++i)
     {
-        if (i == 0 || indexedMaterials[i] != indexedMaterials[i - 1])
+        unsigned int index = indices[i];
+        if (i == 0 || materials[index] != uniqueMaterials.back())
         {
-            uniqueMaterialCount++;
-            uniqueMaterials.push_back(indexedMaterials[i].material);
+            uniqueMaterials.push_back(std::move(materials[index]));
         }
-        else
-        {
-            duplicateMaterials.push_back(i);
-        }
-        materialMap[indexedMaterials[i].originalIndex] = uniqueMaterialCount - 1;
+
+        materialMap[index] = uniqueMaterials.size() - 1;
     }
 
     // Remap all the material indices in the model. Even if no materials have
     // been eliminated we've still sorted them by opacity, which is useful
     // when reordering meshes so that translucent ones are rendered last.
-    for (const auto mesh : meshes)
-        mesh->remapMaterials(materialMap);
+    for (auto& mesh : meshes)
+    {
+        mesh.remapMaterials(materialMap);
+    }
 
-    for (const auto i : duplicateMaterials)
-        delete indexedMaterials[i].material;
-
-    materials = uniqueMaterials;
+    materials = std::move(uniqueMaterials);
 }
 
 
@@ -305,8 +296,8 @@ Model::determineOpacity()
 {
     for (unsigned int i = 0; i < materials.size(); i++)
     {
-        if ((materials[i]->opacity > 0.01f && materials[i]->opacity < 1.0f) ||
-            materials[i]->blend == Material::AdditiveBlend)
+        if ((materials[i].opacity > 0.01f && materials[i].opacity < 1.0f) ||
+            materials[i].blend == BlendMode::AdditiveBlend)
         {
             opaque = false;
             return;
@@ -318,9 +309,9 @@ Model::determineOpacity()
 
 
 bool
-Model::usesTextureType(Material::TextureSemantic t) const
+Model::usesTextureType(TextureSemantic t) const
 {
-    return textureUsage[static_cast<int>(t)];
+    return textureUsage[static_cast<std::size_t>(t)];
 }
 
 
@@ -339,12 +330,11 @@ Model::sortMeshes(const MeshComparator& comparator)
 {
     // Sort submeshes by material; if materials have been uniquified,
     // then the submeshes will be ordered so that opaque ones are first.
-    for (const auto mesh : meshes)
-        mesh->aggregateByMaterial();
+    for (auto& mesh : meshes)
+        mesh.aggregateByMaterial();
 
     // Sort the meshes so that completely opaque ones are first
-    std::sort(meshes.begin(), meshes.end(),
-              [&](const Mesh* a, const Mesh* b) { return comparator(*a, *b); });
+    std::sort(meshes.begin(), meshes.end(), std::ref(comparator));
 }
 
 } // end namespace cmod

@@ -11,6 +11,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <vector>
 
 #include <Eigen/Core>
@@ -35,11 +36,11 @@ class Model
 {
  public:
     Model();
-    ~Model();
+    ~Model() = default;
 
     const Material* getMaterial(unsigned int index) const;
-    void setMaterial(unsigned int index, const Material* material);
-    unsigned int addMaterial(const Material* material);
+    bool setMaterial(unsigned int index, Material&& material);
+    unsigned int addMaterial(Material&& material);
 
     /*! Return the number of materials in the model
      */
@@ -53,10 +54,12 @@ class Model
      */
     unsigned int getPrimitiveCount() const;
 
+    Mesh* getMesh(unsigned int index);
+
     /*! Return the mesh with the specified index, or nullptr if the
      *  index is out of range.
      */
-    Mesh* getMesh(unsigned int index) const;
+    const Mesh* getMesh(unsigned int index) const;
 
     /*! Return the total number of meshes withing the model.
      */
@@ -65,7 +68,7 @@ class Model
     /*! Add a new mesh to the model; the return value is the
      *  total number of meshes in the model.
      */
-    unsigned int addMesh(Mesh* mesh);
+    unsigned int addMesh(Mesh&& mesh);
 
     /** Find the closest intersection between the ray (given
      *  by origin and direction) and the model. If the ray
@@ -99,15 +102,15 @@ class Model
      *  all within a mesh. This information is used to decide
      *  if multiple rendering passes are required.
      */
-    virtual bool usesTextureType(Material::TextureSemantic) const;
+    bool usesTextureType(TextureSemantic) const;
 
     /** Return true if the model has no translucent components. */
-    virtual bool isOpaque() const
+    bool isOpaque() const
     {
         return opaque;
     }
 
-    virtual bool isNormalized() const
+    bool isNormalized() const
     {
         return normalized;
     }
@@ -118,7 +121,7 @@ class Model
 
     class MeshComparator
     {
-     public:
+    public:
         virtual ~MeshComparator() = default;
 
         virtual bool operator()(const Mesh&, const Mesh&) const = 0;
@@ -145,18 +148,16 @@ class Model
      */
     class OpacityComparator : public MeshComparator
     {
-     public:
+    public:
         OpacityComparator() = default;
-        virtual ~OpacityComparator() = default;
-
-        virtual bool operator()(const Mesh&, const Mesh&) const;
+        bool operator()(const Mesh&, const Mesh&) const override;
     };
 
  private:
-    std::vector<const Material*> materials;
-    std::vector<Mesh*> meshes;
+    std::vector<Material> materials{ };
+    std::vector<Mesh> meshes{ };
 
-    std::array<bool, Material::TextureSemanticMax> textureUsage;
+    std::array<bool, static_cast<std::size_t>(TextureSemantic::TextureSemanticMax)> textureUsage;
     bool opaque{ true };
     bool normalized{ false };
 };

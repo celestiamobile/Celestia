@@ -9,28 +9,32 @@
 //
 // Functions for converting a 3DS scene into a Celestia model (cmod)
 
+#include <cmath>
+#include <cstdint>
+#include <utility>
+#include <vector>
+
 #include <Eigen/Core>
 
+#include <celmodel/material.h>
+#include <celmodel/mesh.h>
+
 #include "convert3ds.h"
-#include "pathmanager.h"
 
+namespace
+{
 
-using namespace cmod;
-using namespace Eigen;
-using namespace std;
-
-
-static Material*
+cmod::Material
 convert3dsMaterial(const M3DMaterial* material3ds, cmod::HandleGetter& handleGetter)
 {
-    Material* newMaterial = new Material();
+    cmod::Material newMaterial;
 
     M3DColor diffuse = material3ds->getDiffuseColor();
-    newMaterial->diffuse = Material::Color(diffuse.red, diffuse.green, diffuse.blue);
-    newMaterial->opacity = material3ds->getOpacity();
+    newMaterial.diffuse = cmod::Color(diffuse.red, diffuse.green, diffuse.blue);
+    newMaterial.opacity = material3ds->getOpacity();
 
     M3DColor specular = material3ds->getSpecularColor();
-    newMaterial->specular = Material::Color(specular.red, specular.green, specular.blue);
+    newMaterial.specular = cmod::Color(specular.red, specular.green, specular.blue);
 
     float shininess = material3ds->getShininess();
 
@@ -38,25 +42,27 @@ convert3dsMaterial(const M3DMaterial* material3ds, cmod::HandleGetter& handleGet
     // range that OpenGL uses for the specular exponent. The
     // current equation is just a guess at the mapping that
     // 3DS actually uses.
-    newMaterial->specularPower = (float) pow(2.0, 1.0 + 0.1 * shininess);
-    if (newMaterial->specularPower > 128.0f)
-        newMaterial->specularPower = 128.0f;
+    newMaterial.specularPower = std::pow(2.0f, 1.0f + 0.1f * shininess);
+    if (newMaterial.specularPower > 128.0f)
+        newMaterial.specularPower = 128.0f;
 
     if (!material3ds->getTextureMap().empty())
     {
-        newMaterial->maps[Material::DiffuseMap] = handleGetter(material3ds->getTextureMap());
+        newMaterial.setMap(cmod::TextureSemantic::DiffuseMap, handleGetter(material3ds->getTextureMap()));
 
     }
 
     return newMaterial;
 }
 
+} // end unnamed namespace
+
 
 void
-Convert3DSMesh(Model& model,
-               M3DTriangleMesh& mesh3ds,
+Convert3DSMesh(cmod::Model& model,
+               const M3DTriangleMesh& mesh3ds,
                const M3DScene& scene,
-               const string& meshName)
+               std::string&& meshName)
 {
     int nVertices = mesh3ds.getVertexCount();
     int nTexCoords = mesh3ds.getTexCoordCount();
@@ -67,95 +73,95 @@ Convert3DSMesh(Model& model,
         vertexSize += 2;
     }
 
-    auto* vertices = new float[mesh3ds.getVertexCount() * vertexSize];
+    std::vector<cmod::VWord> vertices(mesh3ds.getVertexCount() * vertexSize);
 
     // Build the vertex list
     for (int i = 0; i < mesh3ds.getVertexCount(); ++i)
     {
         int k = i * vertexSize;
-        Vector3f pos = mesh3ds.getVertex(i);
-        vertices[k + 0] = pos.x();
-        vertices[k + 1] = pos.y();
-        vertices[k + 2] = pos.z();
-
+        Eigen::Vector3f pos = mesh3ds.getVertex(i);
+        std::memcpy(vertices.data() + k, pos.data(), sizeof(float) * 3);
         if (hasTexCoords)
         {
-            Vector2f texCoord = mesh3ds.getTexCoord(i);
-            vertices[k + 3] = texCoord.x();
-            vertices[k + 4] = texCoord.y();
+            Eigen::Vector2f texCoord = mesh3ds.getTexCoord(i);
+            std::memcpy(vertices.data() + k + 3, texCoord.data(), sizeof(float) * 2);
         }
     }
 
-    Mesh::VertexAttribute attributes[8];
-    uint32_t nAttributes = 0;
-    uint32_t offset = 0;
+    std::vector<cmod::VertexAttribute> attributes;
+    attributes.reserve(2);
+    std::uint32_t offset = 0;
 
     // Position attribute is always present
-    attributes[nAttributes] = Mesh::VertexAttribute(Mesh::Position, Mesh::Float3, 0);
-    nAttributes++;
-    offset += 12;
+    attributes.emplace_back(cmod::VertexAttributeSemantic::Position,
+                            cmod::VertexAttributeFormat::Float3,
+                            0);
+    offset += 3;
 
     if (hasTexCoords)
     {
-        attributes[nAttributes] = Mesh::VertexAttribute(Mesh::Texture0, Mesh::Float2, offset);
-        nAttributes++;
-        offset += 8;
+        attributes.emplace_back(cmod::VertexAttributeSemantic::Texture0,
+                                cmod::VertexAttributeFormat::Float2,
+                                offset);
+        offset += 2;
     }
 
     // Create the Celestia mesh
-    Mesh* mesh = new Mesh();
-    mesh->setVertexDescription(Mesh::VertexDescription(offset, nAttributes, attributes));
-    mesh->setVertices(nVertices, vertices);
+    cmod::Mesh mesh;
+    mesh.setVertexDescription(cmod::VertexDescription(std::move(attributes)));
+    mesh.setVertices(nVertices, std::move(vertices));
 
-    mesh->setName(meshName);
+    mesh.setName(std::move(meshName));
 
     if (mesh3ds.getMeshMaterialGroupCount() == 0)
     {
         // No material groups in the 3DS file. This is allowed. We'll create a single
         // primitive group with the default material.
         unsigned int faceCount = mesh3ds.getFaceCount();
-        auto* indices = new uint32_t[faceCount * 3];
+        std::vector<cmod::Index32> indices;
+        indices.reserve(faceCount * 3);
 
         for (unsigned int i = 0; i < faceCount; i++)
         {
-            uint16_t v0 = 0, v1 = 0, v2 = 0;
+            std::uint16_t v0 = 0, v1 = 0, v2 = 0;
             mesh3ds.getFace(i, v0, v1, v2);
-            indices[i * 3 + 0] = v0;
-            indices[i * 3 + 1] = v1;
-            indices[i * 3 + 2] = v2;
+            indices.push_back(v0);
+            indices.push_back(v1);
+            indices.push_back(v2);
         }
 
-        mesh->addGroup(Mesh::TriList, ~0, faceCount * 3, indices);
+        mesh.addGroup(cmod::PrimitiveGroupType::TriList, ~0, std::move(indices));
     }
     else
     {
         // We have at least one material group. Create a cmod primitive group for
         // each material group in th 3ds mesh.
-        for (uint32_t groupIndex = 0; groupIndex < mesh3ds.getMeshMaterialGroupCount(); ++groupIndex)
+        for (std::uint32_t groupIndex = 0; groupIndex < mesh3ds.getMeshMaterialGroupCount(); ++groupIndex)
         {
-            M3DMeshMaterialGroup* matGroup = mesh3ds.getMeshMaterialGroup(groupIndex);
+            const M3DMeshMaterialGroup* matGroup = mesh3ds.getMeshMaterialGroup(groupIndex);
 
-            uint32_t nMatGroupFaces = matGroup->faces.size();
-            auto* indices = new uint32_t[nMatGroupFaces * 3];
+            std::uint32_t nMatGroupFaces = matGroup->faces.size();
+            std::vector<cmod::Index32> indices;
+            indices.reserve(nMatGroupFaces * 3);
 
             for (unsigned int i = 0; i < nMatGroupFaces; i++)
             {
-                uint16_t v0 = 0, v1 = 0, v2 = 0;
-                uint16_t faceIndex = matGroup->faces[i];
+                std::uint16_t v0 = 0, v1 = 0, v2 = 0;
+                std::uint16_t faceIndex = matGroup->faces[i];
                 mesh3ds.getFace(faceIndex, v0, v1, v2);
-                indices[i * 3 + 0] = v0;
-                indices[i * 3 + 1] = v1;
-                indices[i * 3 + 2] = v2;
+                indices.push_back(v0);
+                indices.push_back(v1);
+                indices.push_back(v2);
             }
 
             // Get the material index
             unsigned int materialIndex = ~0u;
-            string material3dsName = matGroup->materialName;
+            std::string material3dsName = matGroup->materialName;
             if (!material3dsName.empty())
             {
                 for (unsigned int i = 0; i < scene.getMaterialCount(); i++)
                 {
-                    M3DMaterial* material3ds = scene.getMaterial(i);
+                    const M3DMaterial* material3ds = scene.getMaterial(i);
                     if (material3dsName == material3ds->getName())
                     {
                         materialIndex = i;
@@ -163,35 +169,35 @@ Convert3DSMesh(Model& model,
                 }
             }
 
-            mesh->addGroup(Mesh::TriList, materialIndex, nMatGroupFaces * 3, indices);
+            mesh.addGroup(cmod::PrimitiveGroupType::TriList, materialIndex, std::move(indices));
         }
     }
 
-    model.addMesh(mesh);
+    model.addMesh(std::move(mesh));
 }
 
 
-Model*
+std::unique_ptr<cmod::Model>
 Convert3DSModel(const M3DScene& scene, cmod::HandleGetter handleGetter)
 {
-    Model* model = new Model();
+    auto model = std::make_unique<cmod::Model>();
 
     // Convert materials
     for (unsigned int i = 0; i < scene.getMaterialCount(); i++)
     {
-        M3DMaterial* material = scene.getMaterial(i);
+        const M3DMaterial* material = scene.getMaterial(i);
         model->addMaterial(convert3dsMaterial(material, handleGetter));
     }
 
     // Convert meshes
     for (unsigned int i = 0; i < scene.getModelCount(); i++)
     {
-        M3DModel* model3ds = scene.getModel(i);
+        const M3DModel* model3ds = scene.getModel(i);
         if (model3ds != nullptr)
         {
             for (unsigned int j = 0; j < model3ds->getTriMeshCount(); j++)
             {
-                M3DTriangleMesh* mesh = model3ds->getTriMesh(j);
+                const M3DTriangleMesh* mesh = model3ds->getTriMesh(j);
 
                 if (mesh != nullptr && mesh->getFaceCount() > 0)
                 {

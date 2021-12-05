@@ -8,20 +8,37 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#ifndef _CMODVIEW_MODEL_VIEW_WIDGET_H_
-#define _CMODVIEW_MODEL_VIEW_WIDGET_H_
+#pragma once
 
-#include "glshader.h"
+#include <memory>
+
+#include <QColor>
 #include <QGLWidget>
-#include <QSet>
 #include <QHash>
-#include <celmodel/model.h>
+#include <QList>
+#include <QMouseEvent>
+#include <QObject>
+#include <QPoint>
+#include <QSet>
+#include <QString>
+#include <QWheelEvent>
+#include <QWidget>
+
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
+#include <celmodel/material.h>
+#include <celmodel/mesh.h>
+
+
+namespace cmod
+{
+class Model;
+}
 
 class MaterialLibrary;
 class GLFrameBufferObject;
+class GLShaderProgram;
 
 class LightingEnvironment
 {
@@ -51,7 +68,7 @@ public:
 
     static ShaderKey Create(const cmod::Material* material,
                             const LightingEnvironment* lighting,
-                            const cmod::Mesh::VertexDescription* vertexDesc);
+                            const cmod::VertexDescription* vertexDesc);
 
     unsigned int hash() const
     {
@@ -131,11 +148,9 @@ public:
     ModelViewWidget(QWidget *parent);
     ~ModelViewWidget();
 
-    void setModel(cmod::Model* model, const QString& modelDir);
-    cmod::Model* model() const
-    {
-        return m_model;
-    }
+    void setModel(std::unique_ptr<cmod::Model>&& model, const QString& modelDir);
+    cmod::Model* model() { return m_model.get(); }
+    const cmod::Model* model() const { return m_model.get(); }
 
     void resetCamera();
 
@@ -157,7 +172,7 @@ public:
     void wheelEvent(QWheelEvent* event);
 
     void select(const Eigen::Vector2f& point);
-    QSet<cmod::Mesh::PrimitiveGroup*> selection()
+    QSet<const cmod::PrimitiveGroup*> selection()
     {
         return m_selection;
     }
@@ -217,13 +232,13 @@ private:
     void renderShadow(unsigned int lightIndex);
     void bindMaterial(const cmod::Material* material,
                       const LightingEnvironment* lighting,
-                      const cmod::Mesh::VertexDescription* vertexDesc);
+                      const cmod::VertexDescription* vertexDesc);
 
     void setupDefaultLightSources();
     GLShaderProgram* createShader(const ShaderKey& shaderKey);
 
 private:
-    cmod::Model* m_model;
+    std::unique_ptr<cmod::Model> m_model;
     double m_modelBoundingRadius;
     Eigen::Vector3d m_cameraPosition;
     Eigen::Quaterniond m_cameraOrientation;
@@ -234,7 +249,7 @@ private:
 
     MaterialLibrary* m_materialLibrary;
 
-    QSet<cmod::Mesh::PrimitiveGroup*> m_selection;
+    QSet<const cmod::PrimitiveGroup*> m_selection;
     QHash<ShaderKey, GLShaderProgram*> m_shaderCache;
 
     QColor m_backgroundColor;
@@ -247,5 +262,3 @@ private:
     bool m_ambientLightEnabled;
     bool m_shadowsEnabled;
 };
-
-#endif // _CMODVIEW_MODEL_VIEW_WIDGET_H_
