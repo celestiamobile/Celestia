@@ -3023,13 +3023,13 @@ static string getSelectionName(const Selection& sel, const Universe& univ)
     switch (sel.getType())
     {
     case Selection::Type_Body:
-        return sel.body()->getName(false);
+        return sel.body()->getName(true);
     case Selection::Type_DeepSky:
-        return univ.getDSOCatalog()->getDSOName(sel.deepsky(), false);
+        return univ.getDSOCatalog()->getDSOName(sel.deepsky(), true);
     case Selection::Type_Star:
         return univ.getStarCatalog()->getStarName(*sel.star(), true);
     case Selection::Type_Location:
-        return sel.location()->getName(false);
+        return sel.location()->getName(true);
     default:
         return {};
     }
@@ -3133,8 +3133,16 @@ void CelestiaCore::renderOverlay()
         }
 
         double tdb = sim->getTime() + lt;
-        astro::Date d = timeZoneBias != 0 ? astro::TDBtoLocal(tdb) : astro::TDBtoUTC(tdb);
-        const char* dateStr = d.toCStr(dateFormat);
+        string dateStr;
+        if (customDateFormatter)
+        {
+            dateStr = customDateFormatter(tdb);
+        }
+        else
+        {
+            astro::Date d = timeZoneBias != 0 ? astro::TDBtoLocal(tdb) : astro::TDBtoUTC(tdb);
+            dateStr = d.toCStr(dateFormat);
+        }
         int dateWidth = (font->getWidth(dateStr)/(emWidth * 3) + 2) * emWidth * 3;
         if (dateWidth > dateStrWidth) dateStrWidth = dateWidth;
 
@@ -3144,7 +3152,7 @@ void CelestiaCore::renderOverlay()
         overlay->moveBy(width - safeAreaInsets.right - dateStrWidth, height - safeAreaInsets.top - fontHeight);
         overlay->beginText();
 
-        overlay->printf(dateStr);
+        overlay->printf(dateStr.c_str());
 
         if (lightTravelFlag && lt > 0.0)
         {
