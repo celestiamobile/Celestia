@@ -20,6 +20,7 @@
 
 #include <celutil/binaryread.h>
 #include <celutil/binarywrite.h>
+#include <celutil/logger.h>
 #include <celutil/tokenizer.h>
 #include "mesh.h"
 #include "model.h"
@@ -1808,6 +1809,7 @@ BinaryModelWriter::writeVertices(const VWord* vertexData,
                 break;
             default:
                 assert(0);
+                result = false;
                 break;
             }
 
@@ -1904,7 +1906,7 @@ OpenModel(std::istream& in, HandleGetter& getHandle)
     char header[CEL_MODEL_HEADER_LENGTH];
     if (!in.read(header, CEL_MODEL_HEADER_LENGTH).good())
     {
-        std::cerr << "Could not read model header\n";
+        celutil::GetLogger()->error("Could not read model header\n");
         return nullptr;
     }
 
@@ -1918,7 +1920,7 @@ OpenModel(std::istream& in, HandleGetter& getHandle)
     }
     else
     {
-        std::cerr << "Model file has invalid header.\n";
+        celutil::GetLogger()->error("Model file has invalid header.\n");
         return nullptr;
     }
 }
@@ -1937,7 +1939,7 @@ LoadModel(std::istream& in, HandleGetter handleGetter)
     std::unique_ptr<Model> model = loader->load();
     if (model == nullptr)
     {
-        std::cerr << "Error in model file: " << loader->getErrorMessage() << '\n';
+        celutil::GetLogger()->error("Error in model file: {}\n", loader->getErrorMessage());
     }
 
     return model;

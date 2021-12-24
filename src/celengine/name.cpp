@@ -1,4 +1,4 @@
-#include <celutil/debug.h>
+#include <celutil/logger.h>
 #include <celutil/gettext.h>
 #include "name.h"
 
@@ -14,14 +14,14 @@ void NameDatabase::add(const AstroCatalog::IndexNumber catalogNumber, const std:
 #ifdef DEBUG
         AstroCatalog::IndexNumber tmp;
         if ((tmp = getCatalogNumberByName(name, false)) != AstroCatalog::InvalidIndex)
-            DPRINTF(LOG_LEVEL_INFO,"Duplicated name '%s' on object with catalog numbers: %d and %d\n", name.c_str(), tmp, catalogNumber);
+            celestia::util::GetLogger()->debug("Duplicated name '{}' on object with catalog numbers: {} and {}\n", name, tmp, catalogNumber);
 #endif
         // Add the new name
         //nameIndex.insert(NameIndex::value_type(name, catalogNumber));
         std::string fname = ReplaceGreekLetterAbbr(name);
 
         nameIndex[fname] = catalogNumber;
-        std::string lname = _(fname.c_str());
+        std::string lname = D_(fname.c_str());
         if (lname != fname)
             localizedNameIndex[lname] = catalogNumber;
         numberIndex.insert(NumberIndex::value_type(catalogNumber, fname));
