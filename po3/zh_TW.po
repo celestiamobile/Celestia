@@ -245,6 +245,10 @@ msgstr "Celestia 流覽器"
 msgid "Celestia Help"
 msgstr "Celestia 輔助說明"
 
+# Android/iOS/Mac/Windows, Temperature scale
+msgid "Celsius"
+msgstr ""
+
 # Android/iOS/Mac, Center an object
 msgid "Center"
 msgstr "置中"
@@ -535,6 +539,10 @@ msgstr "離開"
 msgid "Fading Orbits"
 msgstr "漸退軌道"
 
+# Android/iOS/Mac/Windows, Temperature scale
+msgid "Fahrenheit"
+msgstr ""
+
 # iOS
 msgid "Failed to connect to the external screen."
 msgstr "連線到外接螢幕失敗。"
@@ -791,6 +799,10 @@ msgstr "已安裝"
 msgid "Julian Date:"
 msgstr "儒略曆: "
 
+# Android/iOS/Mac/Windows, Temperature scale
+msgid "Kelvin"
+msgstr ""
+
 # Android/iOS/Mac/Windows, Unit
 msgid "km"
 msgstr "公里"
@@ -925,7 +937,7 @@ msgstr "最大值（%d FPS）"
 msgid "Measure Units"
 msgstr "測量單位"
 
-# Android/iOS, Measurement system
+# Mac/Windows, Measurement system
 msgid "Measure Units:"
 msgstr "測量單位："
 
@@ -1557,6 +1569,14 @@ msgstr "與選取的星體軌道同步"
 # Android/iOS
 msgid "Tap the mode button on the sidebar to switch between object mode and camera mode."
 msgstr "輕按邊欄的模式按鈕以在相對天體模式和相機模式之間切換。"
+
+# Android/iOS
+msgid "Temperature Scale"
+msgstr ""
+
+# Mac/Windows
+msgid "Temperature Scale:"
+msgstr ""
 
 # Android/iOS/Mac/Windows, Location labels
 msgid "Terrae (Land masses)"

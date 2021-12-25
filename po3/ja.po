@@ -246,6 +246,10 @@ msgstr "Celestia天体ブラウザ"
 msgid "Celestia Help"
 msgstr "Celestiaヘルプ(Wikibooks, 英語)"
 
+# Android/iOS/Mac/Windows, Temperature scale
+msgid "Celsius"
+msgstr ""
+
 # Android/iOS/Mac, Center an object
 msgid "Center"
 msgstr "画面中央"
@@ -536,6 +540,10 @@ msgstr "終了"
 msgid "Fading Orbits"
 msgstr ""
 
+# Android/iOS/Mac/Windows, Temperature scale
+msgid "Fahrenheit"
+msgstr ""
+
 # iOS
 msgid "Failed to connect to the external screen."
 msgstr ""
@@ -792,6 +800,10 @@ msgstr ""
 msgid "Julian Date:"
 msgstr "ユリウス日:"
 
+# Android/iOS/Mac/Windows, Temperature scale
+msgid "Kelvin"
+msgstr ""
+
 # Android/iOS/Mac/Windows, Unit
 msgid "km"
 msgstr "km"
@@ -926,7 +938,7 @@ msgstr ""
 msgid "Measure Units"
 msgstr ""
 
-# Android/iOS, Measurement system
+# Mac/Windows, Measurement system
 msgid "Measure Units:"
 msgstr ""
 
@@ -1558,6 +1570,14 @@ msgstr "選択した天体に自転同期で追尾"
 # Android/iOS
 msgid "Tap the mode button on the sidebar to switch between object mode and camera mode."
 msgstr "サイドバーのモードボタンをタップして、天体モードとカメラモードを切り替えます。"
+
+# Android/iOS
+msgid "Temperature Scale"
+msgstr ""
+
+# Mac/Windows
+msgid "Temperature Scale:"
+msgstr ""
 
 # Android/iOS/Mac/Windows, Location labels
 msgid "Terrae (Land masses)"

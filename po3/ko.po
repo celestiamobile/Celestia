@@ -245,6 +245,10 @@ msgstr ""
 msgid "Celestia Help"
 msgstr ""
 
+# Android/iOS/Mac/Windows, Temperature scale
+msgid "Celsius"
+msgstr ""
+
 # Android/iOS/Mac, Center an object
 msgid "Center"
 msgstr "가운데로"
@@ -535,6 +539,10 @@ msgstr "종료"
 msgid "Fading Orbits"
 msgstr ""
 
+# Android/iOS/Mac/Windows, Temperature scale
+msgid "Fahrenheit"
+msgstr ""
+
 # iOS
 msgid "Failed to connect to the external screen."
 msgstr ""
@@ -785,6 +793,10 @@ msgstr ""
 msgid "Julian Date:"
 msgstr ""
 
+# Android/iOS/Mac/Windows, Temperature scale
+msgid "Kelvin"
+msgstr ""
+
 # Android/iOS/Mac/Windows, Unit
 msgid "km"
 msgstr "km"
@@ -919,7 +931,7 @@ msgstr ""
 msgid "Measure Units"
 msgstr ""
 
-# Android/iOS, Measurement system
+# Mac/Windows, Measurement system
 msgid "Measure Units:"
 msgstr ""
 
@@ -1548,6 +1560,14 @@ msgstr "선택한 천체의 자전에 맞춰 추적"
 
 # Android/iOS
 msgid "Tap the mode button on the sidebar to switch between object mode and camera mode."
+msgstr ""
+
+# Android/iOS
+msgid "Temperature Scale"
+msgstr ""
+
+# Mac/Windows
+msgid "Temperature Scale:"
 msgstr ""
 
 # Android/iOS/Mac/Windows, Location labels

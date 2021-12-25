@@ -244,6 +244,10 @@ msgstr "Каталог"
 msgid "Celestia Help"
 msgstr "Помощь по Celestia"
 
+# Android/iOS/Mac/Windows, Temperature scale
+msgid "Celsius"
+msgstr ""
+
 # Android/iOS/Mac, Center an object
 msgid "Center"
 msgstr "Центрировать"
@@ -534,6 +538,10 @@ msgstr "Выйти"
 msgid "Fading Orbits"
 msgstr "Затухающие орбиты"
 
+# Android/iOS/Mac/Windows, Temperature scale
+msgid "Fahrenheit"
+msgstr ""
+
 # iOS
 msgid "Failed to connect to the external screen."
 msgstr "Не удалось подключиться к внешнему экрану."
@@ -790,6 +798,10 @@ msgstr "УСТАНОВЛЕНО"
 msgid "Julian Date:"
 msgstr "Юлианская дата:"
 
+# Android/iOS/Mac/Windows, Temperature scale
+msgid "Kelvin"
+msgstr ""
+
 # Android/iOS/Mac/Windows, Unit
 msgid "km"
 msgstr "в км"
@@ -924,7 +936,7 @@ msgstr "Максимальная (%d FPS)"
 msgid "Measure Units"
 msgstr "Система мер"
 
-# Android/iOS, Measurement system
+# Mac/Windows, Measurement system
 msgid "Measure Units:"
 msgstr "Система мер:"
 
@@ -1556,6 +1568,14 @@ msgstr "Синхронное вращение"
 # Android/iOS
 msgid "Tap the mode button on the sidebar to switch between object mode and camera mode."
 msgstr "Переключение между режимами работы с объектом и камерой осуществляется через кнопку на боковой панели."
+
+# Android/iOS
+msgid "Temperature Scale"
+msgstr ""
+
+# Mac/Windows
+msgid "Temperature Scale:"
+msgstr ""
 
 # Android/iOS/Mac/Windows, Location labels
 msgid "Terrae (Land masses)"
