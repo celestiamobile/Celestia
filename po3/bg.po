@@ -8,14 +8,14 @@ msgstr ""
 "Project-Id-Version: celestia 1.7.0\n"
 "Report-Msgid-Bugs-To: team@celestia.space\n"
 "POT-Creation-Date: 2020-04-15 20:22+0800\n"
-"PO-Revision-Date: 2021-10-02 12:42+0300\n"
+"PO-Revision-Date: 2021-12-27 19:23+0200\n"
 "Last-Translator: Georgi Georgiev (Жоро) <g.georgiev.shumen@gmail.com>\n"
 "Language-Team: Bulgarian <g.georgiev.shumen@gmail.com>\n"
 "Language: bg\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"X-Generator: Poedit 3.0\n"
+"X-Generator: Poedit 3.0.1\n"
 
 # Android/iOS/Mac/Windows
 #, c-format
@@ -248,7 +248,7 @@ msgstr "Помощ за „Celestia“"
 
 # Android/iOS/Mac/Windows, Temperature scale
 msgid "Celsius"
-msgstr ""
+msgstr "Целзий"
 
 # Android/iOS/Mac, Center an object
 msgid "Center"
@@ -542,7 +542,7 @@ msgstr "Избледняване на орбитите"
 
 # Android/iOS/Mac/Windows, Temperature scale
 msgid "Fahrenheit"
-msgstr ""
+msgstr "Фаренхайт"
 
 # iOS
 msgid "Failed to connect to the external screen."
@@ -802,7 +802,7 @@ msgstr "Юлианова дата:"
 
 # Android/iOS/Mac/Windows, Temperature scale
 msgid "Kelvin"
-msgstr ""
+msgstr "Келвин"
 
 # Android/iOS/Mac/Windows, Unit
 msgid "km"
@@ -1573,11 +1573,11 @@ msgstr "Докоснете бутона в страничната лента з�
 
 # Android/iOS
 msgid "Temperature Scale"
-msgstr ""
+msgstr "Температурна скала"
 
 # Mac/Windows
 msgid "Temperature Scale:"
-msgstr ""
+msgstr "Температурна скала:"
 
 # Android/iOS/Mac/Windows, Location labels
 msgid "Terrae (Land masses)"
