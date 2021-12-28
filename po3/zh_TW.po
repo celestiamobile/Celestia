@@ -247,7 +247,7 @@ msgstr "Celestia 輔助說明"
 
 # Android/iOS/Mac/Windows, Temperature scale
 msgid "Celsius"
-msgstr ""
+msgstr "攝氏度"
 
 # Android/iOS/Mac, Center an object
 msgid "Center"
@@ -541,7 +541,7 @@ msgstr "漸退軌道"
 
 # Android/iOS/Mac/Windows, Temperature scale
 msgid "Fahrenheit"
-msgstr ""
+msgstr "華氏度"
 
 # iOS
 msgid "Failed to connect to the external screen."
@@ -801,7 +801,7 @@ msgstr "儒略曆: "
 
 # Android/iOS/Mac/Windows, Temperature scale
 msgid "Kelvin"
-msgstr ""
+msgstr "開爾文"
 
 # Android/iOS/Mac/Windows, Unit
 msgid "km"
@@ -1572,11 +1572,11 @@ msgstr "輕按邊欄的模式按鈕以在相對天體模式和相機模式之間
 
 # Android/iOS
 msgid "Temperature Scale"
-msgstr ""
+msgstr "溫度單位"
 
 # Mac/Windows
 msgid "Temperature Scale:"
-msgstr ""
+msgstr "溫度單位："
 
 # Android/iOS/Mac/Windows, Location labels
 msgid "Terrae (Land masses)"
