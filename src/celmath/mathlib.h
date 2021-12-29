@@ -18,8 +18,7 @@ namespace celmath
 {
 template<typename T> inline void sincos(T angle, T& s, T& c)
 {
-    using std::cos;
-    using std::sin;
+    using std::cos, std::sin;
     s = sin(angle);
     c = cos(angle);
 }
@@ -29,24 +28,6 @@ template<typename T> constexpr T lerp(T t, T a, T b)
 {
     return a + t * (b - a);
 }
-#endif
-
-// return t clamped to [0, 1]
-template<typename T> constexpr T clamp(T t)
-{
-    return t < static_cast<T>(0) ? static_cast<T>(0)
-        : t > static_cast<T>(1) ? 1
-        : t;
-}
-
-#if __cplusplus < 201703L
-// return t clamped to [low, high]
-template<typename T> constexpr T clamp(T t, T low, T high)
-{
-    return (t < low) ? low : ((t > high) ? high : t);
-}
-#else
-using std::clamp;
 #endif
 
 template<typename T> inline constexpr T degToRad(T d)
@@ -80,8 +61,7 @@ template<typename T> inline constexpr T sign(T x)
 // a positive value in the range [ 0, y )
 template<typename T> T pfmod(T x, T y)
 {
-    using std::abs;
-    using std::floor;
+    using std::abs, std::floor;
 
     T quotient = floor(abs(x / y));
     if (x < 0.0)

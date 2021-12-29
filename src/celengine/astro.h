@@ -14,7 +14,7 @@
 #include <Eigen/Geometry>
 #include <iosfwd>
 #include <string>
-#include <celcompat/string_view.h>
+#include <string_view>
 #include <celmath/mathlib.h>
 
 #define SOLAR_ABSMAG   4.83f
@@ -195,14 +195,14 @@ namespace astro
         return jd * SECONDS_PER_DAY;
     }
 
-    bool isLengthUnit(celestia::compat::string_view unitName);
-    bool isTimeUnit(celestia::compat::string_view unitName);
-    bool isAngleUnit(celestia::compat::string_view unitName);
-    bool isMassUnit(celestia::compat::string_view unitName);
-    bool getLengthScale(celestia::compat::string_view unitName, double& scale);
-    bool getTimeScale(celestia::compat::string_view unitName, double& scale);
-    bool getAngleScale(celestia::compat::string_view unitName, double& scale);
-    bool getMassScale(celestia::compat::string_view unitName, double& scale);
+    bool isLengthUnit(std::string_view unitName);
+    bool isTimeUnit(std::string_view unitName);
+    bool isAngleUnit(std::string_view unitName);
+    bool isMassUnit(std::string_view unitName);
+    bool getLengthScale(std::string_view unitName, double& scale);
+    bool getTimeScale(std::string_view unitName, double& scale);
+    bool getAngleScale(std::string_view unitName, double& scale);
+    bool getMassScale(std::string_view unitName, double& scale);
 
     void decimalToDegMinSec(double angle, int& degrees, int& minutes, double& seconds);
     double degMinSecToDecimal(int degrees, int minutes, double seconds);
@@ -223,21 +223,21 @@ namespace astro
     double meanEclipticObliquity(double jd);
 
     // epoch J2000: 12 UT on 1 Jan 2000
-    constexpr const double J2000            = 2451545.0;
-    constexpr const double speedOfLight     = 299792.458; // km/s
-    constexpr const double G                = 6.672e-11; // N m^2 / kg^2; gravitational constant
-    constexpr const double SolarMass        = 1.989e30;
-    constexpr const double EarthMass        = 5.972e24;
-    constexpr const double LunarMass        = 7.346e22;
-    constexpr const double JupiterMass      = 1.898e27;
+    constexpr inline double J2000            = 2451545.0;
+    constexpr inline double speedOfLight     = 299792.458; // km/s
+    constexpr inline double G                = 6.672e-11; // N m^2 / kg^2; gravitational constant
+    constexpr inline double SolarMass        = 1.989e30;
+    constexpr inline double EarthMass        = 5.972e24;
+    constexpr inline double LunarMass        = 7.346e22;
+    constexpr inline double JupiterMass      = 1.898e27;
 
     // Angle between J2000 mean equator and the ecliptic plane.
     // 23 deg 26' 21".448 (Seidelmann, _Explanatory Supplement to the
     // Astronomical Almanac_ (1992), eqn 3.222-1.
-    constexpr const double J2000Obliquity   = 23.4392911_deg;
+    constexpr inline double J2000Obliquity   = 23.4392911_deg;
 
-    constexpr const double SOLAR_IRRADIANCE = 1367.6; // Watts / m^2
-    constexpr const double SOLAR_POWER      = 3.8462e26;  // in Watts
+    constexpr inline double SOLAR_IRRADIANCE = 1367.6; // Watts / m^2
+    constexpr inline double SOLAR_POWER      = 3.8462e26;  // in Watts
 
 
     namespace literals

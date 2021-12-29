@@ -14,7 +14,7 @@
 
 #include <array>
 #include <iosfwd>
-#include <celcompat/string_view.h>
+#include <string_view>
 #include <celutil/color.h>
 #include "execenv.h"
 
@@ -114,8 +114,6 @@ class CommandGotoLongLat : public InstantaneousCommand
 class CommandGotoLocation : public InstantaneousCommand
 {
  public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
     CommandGotoLocation(double t,
                         const Eigen::Vector3d& translation,
                         const Eigen::Quaterniond& rotation);
@@ -339,8 +337,6 @@ class CommandSetPosition : public InstantaneousCommand
 class CommandSetOrientation : public InstantaneousCommand
 {
  public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
     CommandSetOrientation(const Eigen::Quaternionf&);
 
     void process(ExecutionEnvironment&) override;
@@ -380,7 +376,7 @@ class CommandConstellations : public InstantaneousCommand
  public:
     void process(ExecutionEnvironment&) override;
 
-    void setValues(celestia::compat::string_view cons, bool act);
+    void setValues(std::string_view cons, bool act);
 
     Flags flags { false, false };
 
@@ -409,7 +405,7 @@ class CommandConstellationColor : public InstantaneousCommand
 
  public:
     void process(ExecutionEnvironment&) override;
-    void setConstellations(celestia::compat::string_view cons);
+    void setConstellations(std::string_view cons);
     void setColor(float r, float g, float b);
     void unsetColor();
 

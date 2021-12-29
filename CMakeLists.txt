@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.1.0)
+cmake_minimum_required(VERSION 3.8)
 
 option(LEGACY_OPENGL_LIBS "Use legacy OpenGL libraries instead of glvnd library (Default: off)" OFF)
 
@@ -86,7 +86,7 @@ add_definitions(-D_USE_MATH_DEFINES)
 
 # Let CMake handle setting C++11 (since 3.1)
 if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 14)
+  set(CMAKE_CXX_STANDARD 17)
 endif()
 set(CMAKE_C_STANDARD 11)
 
@@ -105,6 +105,10 @@ include(FastMath)
 # Compile options
 #
 if(MSVC)
+  # CMake 3.14 and below set warning flags by default, remove them to prevent conflicts
+  string(REGEX REPLACE "/W[3|4]" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+  string(REGEX REPLACE "/W[3|4]" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+
   # Disabled warnings
   # C4244, C4267, C4503: implicit type conversion to a smaller type
   # C4786: long names in templates
@@ -161,10 +165,10 @@ if(ENABLE_SPICE)
   if(NOT CSPICE_FOUND)
     message(STATUS "Using cspice submodule")
     add_subdirectory("${CMAKE_SOURCE_DIR}/thirdparty/Spice")
-    get_target_property(SPICE_INCLUDE_DIR Spice INCLUDE_DIRECTORIES)
+    get_target_property(SPICE_INCLUDE_DIR spice INCLUDE_DIRECTORIES)
     include_directories(${SPICE_INCLUDE_DIR})
     message(STATUS "Spice include directories: ${SPICE_INCLUDE_DIR}")
-    add_library(CSPICE::CSPICE ALIAS Spice)
+    add_library(CSPICE::CSPICE ALIAS spice)
   else()
     include_directories(${CSPICE_INCLUDE_DIR})
   endif()
@@ -332,7 +336,10 @@ if("${build_type_lc}" STREQUAL "debug")
 else()
   add_definitions(-DNO_DEBUG -DEIGEN_NO_DEBUG)
   if(NOT MSVC)
-    add_compile_options(-fno-rtti -fno-exceptions)
+    add_compile_options(
+      $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
+      $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
+    )
   endif()
 endif()
 
@@ -349,20 +356,13 @@ include(CheckSymbolExists)
 check_symbol_exists(wordexp wordexp.h HAVE_WORDEXP)
 check_include_files(byteswap.h HAVE_BYTESWAP_H)
 
-find_package(Filesystem)
-if(Filesystem_FOUND)
-  if(CXX_FILESYSTEM_IS_EXPERIMENTAL)
-    set(HAVE_EXPERIMENTAL_FILESYSTEM ON)
-  else()
-    set(HAVE_FILESYSTEM ON)
-  endif()
-  link_libraries(std::filesystem)
+find_package(Filesystem REQUIRED COMPONENTS Final Experimental)
+if(CXX_FILESYSTEM_IS_EXPERIMENTAL)
+  message(WARNING "C++ lacks header <filesystem>, using <experimental/filesystem> instead.")
 else()
-  message(WARNING "C++ experimental filesystem library is unusable!\nWill use own implementation.")
+  set(HAVE_STD_FILESYSTEM ON)
 endif()
-
-try_compile(HAVE_STRING_VIEW ${CMAKE_BINARY_DIR} "${CMAKE_SOURCE_DIR}/checks/cxxsv.cpp")
-try_compile(HAVE_EXPERIMENTAL_STRING_VIEW ${CMAKE_BINARY_DIR} "${CMAKE_SOURCE_DIR}/checks/cxxsvexp.cpp")
+link_libraries(std::filesystem)
 
 try_compile(HAVE_CHARCONV ${CMAKE_BINARY_DIR} "${CMAKE_SOURCE_DIR}/checks/cxxccint.cpp")
 if(HAVE_CHARCONV)

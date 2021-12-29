@@ -52,7 +52,7 @@ bool operator< (const Blob& b1, const Blob& b2)
     return (b1.position.squaredNorm() < b2.position.squaredNorm());
 }
 
-typedef vector<Blob, aligned_allocator<Blob> > BlobVector;
+typedef vector<Blob> BlobVector;
 class GalacticForm
 {
 public:
@@ -291,8 +291,6 @@ void Galaxy::render(const Vector3f& offset,
 
 struct GalaxyVertex
 {
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
     Vector4f position;
     Matrix<GLushort, 4, 1> texCoord; // texCoord.x = x, texCoord.y = y, texCoord.z = color index, texCoord.w = alpha
 };
@@ -381,7 +379,7 @@ void Galaxy::renderGalaxyPointSprites(const Vector3f& offset,
     int pow2 = 1;
 
     BlobVector* points = form->blobs;
-    unsigned int nPoints = (unsigned int) (points->size() * celmath::clamp(getDetail()));
+    unsigned int nPoints = static_cast<unsigned int>(points->size() * std::clamp(getDetail(), 0.0f, 1.0f));
     // corrections to avoid excessive brightening if viewed e.g. edge-on
 
     float brightness_corr = 1.0f;
@@ -577,7 +575,7 @@ float Galaxy::getLightGain()
 
 void Galaxy::setLightGain(float lg)
 {
-    lightGain = celmath::clamp(lg);
+    lightGain = std::clamp(lg, 0.0f, 1.0f);
 }
 
 

@@ -18,9 +18,7 @@
 
 using namespace std;
 
-namespace celestia
-{
-namespace scripts
+namespace celestia::scripts
 {
 
 // Extremely basic implementation of an ExecutionEnvironment for
@@ -90,7 +88,7 @@ bool LegacyScriptPlugin::isOurFile(const fs::path &p) const
 
 unique_ptr<IScript> LegacyScriptPlugin::loadScript(const fs::path &path)
 {
-    ifstream scriptfile(path.string());
+    ifstream scriptfile(path);
     if (!scriptfile.good())
     {
         appCore()->fatalError(_("Error opening script file."));
@@ -109,5 +107,4 @@ unique_ptr<IScript> LegacyScriptPlugin::loadScript(const fs::path &path)
     return script;
 }
 
-}
 }
