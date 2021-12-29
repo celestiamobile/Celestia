@@ -565,13 +565,7 @@ std::int32_t Tokenizer::getIntegerValue() const
 }
 
 
-std::string Tokenizer::getNameValue() const
-{
-    return textToken;
-}
-
-
-std::string Tokenizer::getStringValue() const
+std::string_view Tokenizer::getStringValue() const
 {
     return textToken;
 }

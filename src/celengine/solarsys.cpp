@@ -1125,17 +1125,17 @@ bool LoadSolarSystemObjects(istream& in,
         DataDisposition disposition = DataDisposition::Add;
         if (tokenizer.getTokenType() == Tokenizer::TokenName)
         {
-            if (tokenizer.getNameValue() == "Add")
+            if (tokenizer.getStringValue() == "Add")
             {
                 disposition = DataDisposition::Add;
                 tokenizer.nextToken();
             }
-            else if (tokenizer.getNameValue() == "Replace")
+            else if (tokenizer.getStringValue() == "Replace")
             {
                 disposition = DataDisposition::Replace;
                 tokenizer.nextToken();
             }
-            else if (tokenizer.getNameValue() == "Modify")
+            else if (tokenizer.getStringValue() == "Modify")
             {
                 disposition = DataDisposition::Modify;
                 tokenizer.nextToken();
@@ -1146,7 +1146,7 @@ bool LoadSolarSystemObjects(istream& in,
         string itemType("Body");
         if (tokenizer.getTokenType() == Tokenizer::TokenName)
         {
-            itemType = tokenizer.getNameValue();
+            itemType = tokenizer.getStringValue();
             tokenizer.nextToken();
         }
 
@@ -1158,14 +1158,14 @@ bool LoadSolarSystemObjects(istream& in,
 
         // The name list is a string with zero more names. Multiple names are
         // delimited by colons.
-        string nameList = tokenizer.getStringValue().c_str();
+        string nameList(tokenizer.getStringValue());
 
         if (tokenizer.nextToken() != Tokenizer::TokenString)
         {
             sscError(tokenizer, "bad parent object name");
             return false;
         }
-        string parentName = tokenizer.getStringValue().c_str();
+        string parentName(tokenizer.getStringValue());
 
         Value* objectDataValue = parser.readValue();
         if (objectDataValue == nullptr)

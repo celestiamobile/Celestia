@@ -8,6 +8,8 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
+#include <string_view>
+
 #include <celutil/tokenizer.h>
 #include "astro.h"
 #include "parser.h"
@@ -76,7 +78,7 @@ Hash* Parser::readHash()
             delete hash;
             return nullptr;
         }
-        string name = tokenizer->getNameValue();
+        string name(tokenizer->getStringValue());
 
 #ifndef USE_POSTFIX_UNITS
         readUnits(name, hash);
@@ -126,7 +128,7 @@ bool Parser::readUnits(const string& propertyName, Hash* hash)
             return false;
         }
 
-        string unit = tokenizer->getNameValue();
+        std::string_view unit = tokenizer->getStringValue();
         Value* value = new Value(unit);
 
         if (astro::isLengthUnit(unit))
@@ -174,9 +176,9 @@ Value* Parser::readValue()
         return new Value(tokenizer->getStringValue());
 
     case Tokenizer::TokenName:
-        if (tokenizer->getNameValue() == "false")
+        if (tokenizer->getStringValue() == "false")
             return new Value(false);
-        else if (tokenizer->getNameValue() == "true")
+        else if (tokenizer->getStringValue() == "true")
             return new Value(true);
         else
         {
