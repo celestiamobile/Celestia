@@ -386,7 +386,8 @@ void Observer::update(double dt, double timeScale)
             else
             {
                 v = pow(sin((t - journey.startInterpolation) /
-                            (journey.endInterpolation - journey.startInterpolation) * PI / 2), 2);
+                            (journey.endInterpolation - journey.startInterpolation) *
+                            celestia::numbers::pi / 2.0), 2);
             }
 
             q = journey.initialOrientation.slerp(v, journey.finalOrientation);
@@ -493,7 +494,7 @@ void Observer::setLocationFilter(uint64_t _locationFilter)
 
 void Observer::reverseOrientation()
 {
-    setOrientation(getOrientation() * Quaterniond(AngleAxisd(PI, Vector3d::UnitY())));
+    setOrientation(getOrientation() * Quaterniond(AngleAxisd(celestia::numbers::pi, Vector3d::UnitY())));
     reverseFlag = !reverseFlag;
 }
 
@@ -1178,7 +1179,7 @@ void Observer::gotoSelectionLongLat(const Selection& selection,
 {
     if (!selection.empty())
     {
-        double phi = -latitude + PI / 2;
+        double phi = -latitude + celestia::numbers::pi / 2.0;
         double theta = longitude;
         double x = cos(theta) * sin(phi);
         double y = cos(phi);
@@ -1240,7 +1241,7 @@ void Observer::getSelectionLongLat(const Selection& selection,
 
         distance = bfPos.norm();
         longitude = radToDeg(atan2(y, x));
-        latitude = radToDeg(PI/2 - acos(z / distance));
+        latitude = radToDeg(celestia::numbers::pi/2.0 - acos(z / distance));
     }
 }
 
@@ -1358,7 +1359,7 @@ Vector3f Observer::getPickRay(float x, float y) const
 Vector3f Observer::getPickRayFisheye(float x, float y) const
 {
     float r = hypot(x, y);
-    float phi = float(PI) * r;
+    float phi = celestia::numbers::pi_v<float> * r;
     float sin_phi = sin(phi);
     float theta = atan2(y, x);
     float newX = sin_phi * cos(theta);
@@ -1375,7 +1376,22 @@ Vector3f Observer::getPickRayFisheye(float x, float y) const
 // universal coordinates.
 void Observer::updateUniversal()
 {
-    positionUniv = frame->convertToUniversal(position, simTime);
+    UniversalCoord newPositionUniv = frame->convertToUniversal(position, simTime);
+    if (newPositionUniv.isOutOfBounds())
+    {
+        // New position would take us out of range of the simulation. At this
+        // point the positionUniv has not been updated, so will contain a position
+        // within the bounds of the simulation. To make the coordinates consistent,
+        // we recompute the frame-local position from positionUniv.
+        position = frame->convertFromUniversal(positionUniv, simTime);
+    }
+    else
+    {
+        // We're in bounds of the simulation, so update the universal coordinate
+        // to match the frame-local position.
+        positionUniv = newPositionUniv;
+    }
+
     orientationUniv = frame->convertToUniversal(orientation, simTime);
 }
 

@@ -16,6 +16,7 @@
 #include "celestiacore.h"
 #include "favorites.h"
 #include "url.h"
+#include <celcompat/numbers.h>
 #include <celengine/astro.h>
 #include <celengine/asterism.h>
 #include <celengine/boundaries.h>
@@ -1214,28 +1215,6 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         notifyWatchers(RenderFlagsChanged);
         break;
 
-    case '\026':  // Ctrl+V
-#ifdef USE_GLCONTEXT
-        {
-            GLContext* context = renderer->getGLContext();
-            GLContext::GLRenderPath path = context->getRenderPath();
-            GLContext::GLRenderPath newPath = context->nextRenderPath();
-
-            if (newPath != path)
-            {
-                switch (newPath)
-                {
-                case GLContext::GLPath_GLSL:
-                    flash(_("Render path: OpenGL 2.1"));
-                    break;
-                }
-                context->setRenderPath(newPath);
-                notifyWatchers(RenderFlagsChanged);
-            }
-        }
-#endif
-        break;
-
     case '\027':  // Ctrl+W
         wireframe = !wireframe;
         renderer->setRenderMode(wireframe ? RenderMode::Line : RenderMode::Fill);
@@ -1845,32 +1824,6 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         // with a Lua script.
         editMode = !editMode;
         break;
-
-#ifdef USE_HDR
-    case '|':
-        renderer->setBloomEnabled(!renderer->getBloomEnabled());
-        if (renderer->getBloomEnabled())
-            flash(_("Bloom enabled"));
-        else
-            flash(_("Bloom disabled"));
-        break;
-
-    case '<':
-        {
-            renderer->decreaseBrightness();
-            string buf = fmt::sprintf("%s:  %+3.2f", _("Exposure"), -renderer->getBrightness());
-            flash(buf);
-        }
-        break;
-
-    case '>':
-        {
-            renderer->increaseBrightness();
-            string buf = fmt::sprintf("%s:  %+3.2f", _("Exposure"), -renderer->getBrightness());
-            flash(buf);
-        }
-        break;
-#endif
     }
 }
 
@@ -2756,15 +2709,15 @@ static void displayApparentMagnitude(Overlay& overlay,
 
 static void displayRADec(Overlay& overlay, const Vector3d& v)
 {
-    double phi = atan2(v.x(), v.z()) - PI / 2;
+    double phi = atan2(v.x(), v.z()) - celestia::numbers::pi / 2;
     if (phi < 0)
-        phi = phi + 2 * PI;
+        phi = phi + 2 * celestia::numbers::pi;
 
     double theta = atan2(sqrt(v.x() * v.x() + v.z() * v.z()), v.y());
     if (theta > 0)
-        theta = PI / 2 - theta;
+        theta = celestia::numbers::pi / 2 - theta;
     else
-        theta = -PI / 2 - theta;
+        theta = -celestia::numbers::pi / 2 - theta;
 
 
     displayRightAscension(overlay, radToDeg(phi));
@@ -4072,15 +4025,6 @@ bool CelestiaCore::initRenderer()
                              Renderer::ShowAtmospheres |
                              Renderer::ShowAutoMag);
 
-#ifdef USE_GLCONTEXT
-    GLContext* context = new GLContext();
-
-    context->init(config->ignoreGLExtensions);
-    // Choose the render path, starting with the least desirable
-    context->setRenderPath(GLContext::GLPath_GLSL);
-    //GetLogger()->verbose("render path: {}\n", context->getRenderPath());
-#endif
-
     Renderer::DetailOptions detailOptions;
     detailOptions.orbitPathSamplePoints = config->orbitPathSamplePoints;
     detailOptions.shadowTextureSize = config->shadowTextureSize;
@@ -4090,11 +4034,7 @@ bool CelestiaCore::initRenderer()
     detailOptions.linearFadeFraction = config->linearFadeFraction;
 
     // Prepare the scene for rendering.
-#ifdef USE_GLCONTEXT
-    if (!renderer->init(context, (int) width, (int) height, detailOptions))
-#else
     if (!renderer->init((int) width, (int) height, detailOptions))
-#endif
     {
         fatalError(_("Failed to initialize renderer"), false);
         return false;

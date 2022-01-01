@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <vector>
+#include <celcompat/numbers.h>
 #include <celmath/mathlib.h>
 #include "axisarrow.h"
 #include "body.h"
@@ -58,7 +59,7 @@ static size_t initArrow(VertexObject &vo)
     for (unsigned i = 0; i <= nSections; i++)
     {
         float c, s;
-        sincos((i * 2.0f * (float)PI) / nSections, c, s);
+        sincos((i * 2.0f * celestia::numbers::pi_v<float>) / nSections, c, s);
 
         // circle at bottom
         Vector3f v0(shaftRadius * c, shaftRadius * s, 0.0f);
@@ -269,11 +270,7 @@ ArrowReferenceMark::ArrowReferenceMark(const Body& _body) :
     body(_body),
     size(1.0),
     color(1.0f, 1.0f, 1.0f),
-#ifdef USE_HDR
-    opacity(0.0f)
-#else
     opacity(1.0f)
-#endif
 {
     shadprop.texUsage = ShaderProperties::VertexColors;
     shadprop.lightModel = ShaderProperties::UnlitModel;
@@ -324,11 +321,7 @@ ArrowReferenceMark::render(Renderer* renderer,
         renderer->enableDepthTest();
         renderer->disableDepthMask();
         renderer->enableBlending();
-#ifdef USE_HDR
-        renderer->setBlendingFactors(GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
-#else
         renderer->setBlendingFactors(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-#endif
     }
 
     Affine3f transform = Translation3f(position) * q.cast<float>() * Scaling(size);
@@ -356,11 +349,7 @@ ArrowReferenceMark::render(Renderer* renderer,
 AxesReferenceMark::AxesReferenceMark(const Body& _body) :
     body(_body),
     size(),
-#ifdef USE_HDR
-    opacity(0.0f)
-#else
     opacity(1.0f)
-#endif
 {
     shadprop.texUsage = ShaderProperties::VertexColors;
     shadprop.lightModel = ShaderProperties::UnlitModel;
@@ -378,9 +367,6 @@ void
 AxesReferenceMark::setOpacity(float _opacity)
 {
     opacity = _opacity;
-#ifdef USE_HDR
-    opacity = 1.0f - opacity;
-#endif
 }
 
 
@@ -405,11 +391,7 @@ AxesReferenceMark::render(Renderer* renderer,
         renderer->enableDepthTest();
         renderer->disableDepthMask();
         renderer->enableBlending();
-#ifdef USE_HDR
-        renderer->setBlendingFactors(GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
-#else
         renderer->setBlendingFactors(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-#endif
     }
 
     Affine3f transform = Translation3f(position) * q.cast<float>() * Scaling(size);
@@ -600,7 +582,7 @@ BodyAxisArrows::BodyAxisArrows(const Body& _body) :
 Quaterniond
 BodyAxisArrows::getOrientation(double tdb) const
 {
-    return (Quaterniond(AngleAxis<double>(PI, Vector3d::UnitY())) * body.getEclipticToBodyFixed(tdb)).conjugate();
+    return (Quaterniond(AngleAxis<double>(celestia::numbers::pi, Vector3d::UnitY())) * body.getEclipticToBodyFixed(tdb)).conjugate();
 }
 
 

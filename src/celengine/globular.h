@@ -21,25 +21,14 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
+#include <celcompat/filesystem.h>
 #include "deepskyobj.h"
 #include "vertexobject.h"
 
+struct GlobularForm;
 struct Matrices;
 class Renderer;
 
-
-struct GBlob
-{
-    Eigen::Vector3f position;
-    unsigned int   colorIndex;
-    float          radius_2d;
-};
-
-struct GlobularForm
-{
-    std::vector<GBlob>* gblobs;
-    Eigen::Vector3f scale;
-};
 
 class Globular : public DeepSkyObject
 {
@@ -50,10 +39,10 @@ class Globular : public DeepSkyObject
     void setType(const std::string&) override;
     std::string getDescription() const override;
     float getDetail() const;
-    void  setDetail(float);
+    void setDetail(float);
     float getCoreRadius() const;
-    void  setCoreRadius(const float);
-    void  setConcentration(const float);
+    void setCoreRadius(float);
+    void setConcentration(float);
     float getConcentration() const;
     float getHalfMassRadius() const override;
     unsigned int cSlot(float) const;
@@ -71,31 +60,22 @@ class Globular : public DeepSkyObject
                 const Matrices& m,
                 Renderer* r) override;
 
-    GlobularForm* getForm() const;
-
     std::uint64_t getRenderMask() const override;
     unsigned int getLabelMask() const override;
     const char* getObjTypeName() const override;
 
  private:
-    void renderGlobularPointSprites(const Eigen::Vector3f& offset,
-                                    const Eigen::Quaternionf& viewerOrientation,
-                                    float brightness,
-                                    float pixelSize,
-                                    const Matrices& m,
-                                    Renderer* r);
-
-   // Reference values ( = data base averages) of core radius, King concentration
-   // and mu25 isophote radius:
+    // Reference values ( = data base averages) of core radius, King concentration
+    // and mu25 isophote radius:
     static constexpr float R_c_ref = 0.83f, C_ref = 2.1f, R_mu25 = 40.32f;
 
     void recomputeTidalRadius();
 
-    float         detail{ 1.0f };
-    GlobularForm* form{ nullptr };
-    float         r_c{ R_c_ref };
-    float         c{ C_ref };
-    float         tidalRadius{ 0.0f };
+    float detail{ 1.0f };
+    const GlobularForm* form{ nullptr };
+    float r_c{ R_c_ref };
+    float c{ C_ref };
+    float tidalRadius{ 0.0f };
 
     celgl::VertexObject vo{ GL_ARRAY_BUFFER, 0, GL_STATIC_DRAW };
 };

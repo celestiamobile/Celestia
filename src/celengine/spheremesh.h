@@ -10,56 +10,52 @@
 
 #pragma once
 
-// IMPORTANT: This file is a relic from the early days of Celestia.
-// Its sole function now is to handle the now-deprecated .cms mesh files;
-// it will eventually be removed from Celestia.
+#include <vector>
 
 #include <Eigen/Core>
-
-#include <celengine/dispmap.h>
 
 namespace cmod
 {
 class Mesh;
 }
 
+struct SphereMeshParameters
+{
+    Eigen::Vector3f size;
+    Eigen::Vector3f offset;
+    float featureHeight;
+    float octaves;
+    float slices;
+    float rings;
+
+    float value(float u, float v) const;
+};
+
 /*! The SphereMesh class is used to generate displacement mapped
  *  spheres when loading the now-deprecated .cms geometry files.
- *  It remains in the Celestia code base for backward compatibility,
- *  and it's use is discouraged.
  */
 class SphereMesh
 {
 public:
-    SphereMesh(float radius, int _nRings, int _nSlices);
-    SphereMesh(const Eigen::Vector3f& size, int _nRings, int _nSlices);
-    SphereMesh(const Eigen::Vector3f& size,
-               const DisplacementMap& dispmap,
-               float height = 1.0f);
     SphereMesh(const Eigen::Vector3f& size,
                int _nRings, int _nSlices,
-               DisplacementMapFunc func,
-               void* info);
-    ~SphereMesh();
+               const SphereMeshParameters& params);
+    ~SphereMesh() = default;
 
     //! Convert this object into a standard Celestia mesh.
     cmod::Mesh convertToMesh() const;
 
  private:
-    void createSphere(float radius, int _nRings, int _nSlices);
+    void createSphere();
     void generateNormals();
     void scale(const Eigen::Vector3f&);
     void fixNormals();
-    void displace(const DisplacementMap& dispmap, float height);
-    void displace(DisplacementMapFunc func, void* info);
+    void displace(const SphereMeshParameters& params);
 
     int nRings;
     int nSlices;
     int nVertices;
-    float* vertices{ nullptr };
-    float* normals{ nullptr };
-    float* texCoords{ nullptr };
-    float* tangents{ nullptr };
-    int nIndices;
-    unsigned short* indices{ nullptr };
+    std::vector<Eigen::Vector3f> vertices{ };
+    std::vector<Eigen::Vector3f> normals{ };
+    std::vector<Eigen::Vector2f> texCoords{ };
 };

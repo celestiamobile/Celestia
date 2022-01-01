@@ -26,8 +26,6 @@ set(CELENGINE_SOURCES
   curveplot.h
   deepskyobj.cpp
   deepskyobj.h
-  dispmap.cpp
-  dispmap.h
   dsodb.cpp
   dsodb.h
   dsoname.cpp
@@ -45,8 +43,6 @@ set(CELENGINE_SOURCES
   galaxy.cpp
   galaxy.h
   geometry.h
-  #glcontext.cpp
-  #glcontext.h
   glmarker.cpp
   globular.cpp
   globular.h
@@ -56,7 +52,6 @@ set(CELENGINE_SOURCES
   glsupport.h
   hash.cpp
   hash.h
-  #hdrfuncrender.cpp
   image.cpp
   image.h
   lightenv.h
@@ -93,10 +88,6 @@ set(CELENGINE_SOURCES
   parseobject.h
   parser.cpp
   parser.h
-#  particlesystem.cpp
-#  particlesystemfile.cpp
-#  particlesystemfile.h
-#  particlesystem.h
   planetgrid.cpp
   planetgrid.h
   pointstarrenderer.cpp
@@ -153,7 +144,6 @@ set(CELENGINE_SOURCES
   timelinephase.h
   trajmanager.cpp
   trajmanager.h
-  univcoord.cpp
   univcoord.h
   universe.cpp
   universe.h

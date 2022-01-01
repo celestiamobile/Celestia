@@ -13,9 +13,6 @@
 #include <Eigen/Core>
 #include "octree.h"
 
-#ifdef USE_GLCONTEXT
-class GLContext;
-#endif
 class Observer;
 class Renderer;
 
@@ -26,9 +23,6 @@ template <class OBJ, class PREC> class ObjectRenderer : public OctreeProcessor<O
     void process(const OBJ& /*unused*/, PREC /*unused*/, float /*unused*/) {};
 
     const Observer* observer    { nullptr };
-#ifdef USE_GLCONTEXT
-    GLContext* context          { nullptr };
-#endif
     Renderer*  renderer         { nullptr };
 
     Eigen::Vector3f viewNormal;
@@ -39,9 +33,6 @@ template <class OBJ, class PREC> class ObjectRenderer : public OctreeProcessor<O
     float faintestMag           { 0.0f };
     float faintestMagNight      { 0.0f };
     float saturationMag         { 0.0f };
-#ifdef USE_HDR
-    float exposure              { 0.0f };
-#endif
     float brightnessScale       { 0.0f };
     float brightnessBias        { 0.0f };
     float distanceLimit         { 0.0f };

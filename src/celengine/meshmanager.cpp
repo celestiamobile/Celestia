@@ -8,9 +8,6 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-// Experimental particle system support
-#define PARTICLE_SYSTEM 0
-
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -25,7 +22,6 @@
 
 #include <cel3ds/3dsmodel.h>
 #include <cel3ds/3dsread.h>
-#include <celmath/randutils.h>
 #include <celmodel/material.h>
 #include <celmodel/mesh.h>
 #include <celmodel/model.h>
@@ -40,45 +36,11 @@
 #include "spheremesh.h"
 #include "texmanager.h"
 
-#if PARTICLE_SYSTEM
-#include "particlesystem.h"
-#include "particlesystemfile.h"
-#endif
-
 using celestia::util::GetLogger;
 
 namespace
 {
 
-struct NoiseMeshParameters
-{
-    Eigen::Vector3f size;
-    Eigen::Vector3f offset;
-    float featureHeight;
-    float octaves;
-    float slices;
-    float rings;
-};
-
-
-float
-NoiseDisplacementFunc(float u, float v, void* info)
-{
-    float theta = u * static_cast<float>(PI) * 2;
-    float phi = (v - 0.5f) * static_cast<float>(PI);
-
-    // assert(info != nullptr);
-    auto* params = static_cast<NoiseMeshParameters*>(info);
-
-    Eigen::Vector3f p = Eigen::Vector3f(std::cos(phi) * std::cos(theta),
-                                        std::sin(phi),
-                                        std::cos(phi) * std::sin(theta))
-                        + params->offset;
-    return celmath::fractalsum(p, params->octaves) * params->featureHeight;
-}
-
-
-// TODO: The Celestia mesh format is deprecated
 std::unique_ptr<cmod::Model>
 LoadCelestiaMesh(const fs::path& filename)
 {
@@ -121,7 +83,7 @@ LoadCelestiaMesh(const fs::path& filename)
 
     Hash* meshDef = meshDefValue->getHash();
 
-    NoiseMeshParameters params{};
+    SphereMeshParameters params{};
 
     params.size = Eigen::Vector3f::Ones();
     params.offset = Eigen::Vector3f::Constant(10.0f);
@@ -143,8 +105,7 @@ LoadCelestiaMesh(const fs::path& filename)
     SphereMesh sphereMesh(params.size,
                           static_cast<int>(params.rings),
                           static_cast<int>(params.slices),
-                          NoiseDisplacementFunc,
-                          (void*) &params);
+                          params);
     model->addMesh(sphereMesh.convertToMesh());
 
     return model;
@@ -509,16 +470,6 @@ GeometryInfo::load(const fs::path& resolvedFilename)
                 model->transform(center, scale);
         }
     }
-#if PARTICLE_SYSTEM
-    else if (fileType == Content_CelestiaParticleSystem)
-    {
-        ifstream in(filename);
-        if (in.good())
-        {
-            return LoadParticleSystem(in, path);
-        }
-    }
-#endif
 
     // Condition the model for optimal rendering
     if (model != nullptr)

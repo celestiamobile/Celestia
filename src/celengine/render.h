@@ -24,9 +24,6 @@
 #include <celengine/renderlistentry.h>
 #include "vertexobject.h"
 
-#ifdef USE_GLCONTEXT
-class GLContext;
-#endif
 class RendererWatcher;
 class FrameTree;
 class ReferenceMark;
@@ -129,11 +126,7 @@ class Renderer
         FisheyeMode     = 1
     };
 
-#ifdef USE_GLCONTEXT
-    bool init(GLContext*, int, int, DetailOptions&);
-#else
     bool init(int, int, DetailOptions&);
-#endif
     void shutdown() {};
     void resize(int, int);
     float getAspectRatio() const;
@@ -353,18 +346,6 @@ class Renderer
     {
         m_projectionPtr = &m;
     }
-
-#ifdef USE_HDR
-    bool getBloomEnabled();
-    void setBloomEnabled(bool);
-    void increaseBrightness();
-    void decreaseBrightness();
-    float getBrightness();
-#endif
-
-#ifdef USE_GLCONTEXT
-    GLContext* getGLContext() { return context; }
-#endif
 
     void setStarStyle(StarStyle);
     StarStyle getStarStyle() const;
@@ -744,42 +725,7 @@ class Renderer
     void enableSmoothLines();
     void disableSmoothLines();
 
-#ifdef USE_HDR
  private:
-    int sceneTexWidth, sceneTexHeight;
-    GLfloat sceneTexWScale, sceneTexHScale;
-    GLsizei blurBaseWidth, blurBaseHeight;
-    GLuint sceneTexture;
-    Texture **blurTextures;
-    Texture *blurTempTexture;
-    GLuint gaussianLists[4];
-    GLint blurFormat;
-    bool useLuminanceAlpha;
-    bool bloomEnabled;
-    float maxBodyMag;
-    float exposure, exposurePrev;
-    float brightPlus;
-
-    void genBlurTexture(int blurLevel);
-    void genBlurTextures();
-    void genSceneTexture();
-    void renderToBlurTexture(int blurLevel);
-    void renderToTexture(const Observer& observer,
-                         const Universe& universe,
-                         float faintestMagNight,
-                         const Selection& sel);
-    void drawSceneTexture();
-    void drawBlur();
-    void drawGaussian3x3(float xdelta, float ydelta, GLsizei width, GLsizei height, float blend);
-    void drawGaussian5x5(float xdelta, float ydelta, GLsizei width, GLsizei height, float blend);
-    void drawGaussian9x9(float xdelta, float ydelta, GLsizei width, GLsizei height, float blend);
-    void drawBlendedVertices(float xdelta, float ydelta, float blend);
-#endif
-
- private:
-#ifdef USE_GLCONTEXT
-    GLContext* context;
-#endif
     ShaderManager* shaderManager{ nullptr };
 
     int windowWidth;

@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <Eigen/Geometry>
+#include <celcompat/numbers.h>
 #include <celmath/intersect.h>
 #include "body.h"
 #include "render.h"
@@ -40,11 +41,7 @@ VisibleRegion::VisibleRegion(const Body& body, const Selection& target) :
     m_body(body),
     m_target(target),
     m_color(1.0f, 1.0f, 0.0f),
-#ifdef USE_HDR
-    m_opacity(0.0f)
-#else
     m_opacity(1.0f)
-#endif
 {
     setTag("visible region");
 }
@@ -75,9 +72,6 @@ void
 VisibleRegion::setOpacity(float opacity)
 {
     m_opacity = opacity;
-#ifdef USE_HDR
-    m_opacity = 1.0f - opacity;
-#endif
 }
 
 
@@ -194,11 +188,7 @@ VisibleRegion::render(Renderer* renderer,
     renderer->enableDepthTest();
     renderer->enableDepthMask();
     renderer->enableBlending();
-#ifdef USE_HDR
-    renderer->setBlendingFactors(GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
-#else
     renderer->setBlendingFactors(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-#endif
 
     double maxSemiAxis = m_body.getRadius();
 
@@ -230,7 +220,7 @@ VisibleRegion::render(Renderer* renderer,
 
     for (unsigned i = 0; i <= nSections + 1; i++)
     {
-        double theta = (double) i / (double) (nSections) * 2.0 * PI;
+        double theta = (double) i / (double) (nSections) * 2.0 * celestia::numbers::pi;
         Vector3d w = cos(theta) * uAxis + sin(theta) * vAxis;
 
         Vector3d toCenter = ellipsoidTangent(recipSemiAxes, w, e, e_, ee);
