@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2001-2020 Celestia Development Team
+# Copyright (C) 2001-2022 Celestia Development Team
 # This file is distributed under the same license as the celestia package.
 #
 #, fuzzy
@@ -8,7 +8,7 @@ msgstr ""
 "Project-Id-Version: celestia 1.7.0\n"
 "Report-Msgid-Bugs-To: team@celestia.space\n"
 "POT-Creation-Date: 2020-04-15 20:22+0800\n"
-"PO-Revision-Date: 2021-10-03 22:55+0300\n"
+"PO-Revision-Date: 2022-01-17 17:33+0300\n"
 "Last-Translator: Askaniy Anpilogov <askaniy1625@gmail.com>\n"
 "Language: ru\n"
 "MIME-Version: 1.0\n"
@@ -33,7 +33,7 @@ msgstr "%d FPS"
 # Android/iOS, Unit foot
 #, c-format
 msgid "%d ft"
-msgstr "%d фут"
+msgstr "%d фут(ов)"
 
 # Android/iOS/Mac/Windows, Unit kilometer
 #, c-format
@@ -246,7 +246,7 @@ msgstr "Помощь по Celestia"
 
 # Android/iOS/Mac/Windows, Temperature scale
 msgid "Celsius"
-msgstr ""
+msgstr "Цельсия"
 
 # Android/iOS/Mac, Center an object
 msgid "Center"
@@ -540,7 +540,7 @@ msgstr "Затухающие орбиты"
 
 # Android/iOS/Mac/Windows, Temperature scale
 msgid "Fahrenheit"
-msgstr ""
+msgstr "Фаренгейта"
 
 # iOS
 msgid "Failed to connect to the external screen."
@@ -800,7 +800,7 @@ msgstr "Юлианская дата:"
 
 # Android/iOS/Mac/Windows, Temperature scale
 msgid "Kelvin"
-msgstr ""
+msgstr "Кельвина"
 
 # Android/iOS/Mac/Windows, Unit
 msgid "km"
@@ -1571,11 +1571,11 @@ msgstr "Переключение между режимами работы с о�
 
 # Android/iOS
 msgid "Temperature Scale"
-msgstr ""
+msgstr "Температурная шкала"
 
 # Mac/Windows
 msgid "Temperature Scale:"
-msgstr ""
+msgstr "Температурная шкала:"
 
 # Android/iOS/Mac/Windows, Location labels
 msgid "Terrae (Land masses)"

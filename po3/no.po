@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2001-2020 Celestia Development Team
+# Copyright (C) 2001-2022 Celestia Development Team
 # This file is distributed under the same license as the celestia package.
 #
 #, fuzzy
