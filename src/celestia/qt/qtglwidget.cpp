@@ -60,7 +60,7 @@ const unsigned int DEFAULT_TEXTURE_RESOLUTION = medres;
 
 
 CelestiaGlWidget::CelestiaGlWidget(QWidget* parent, const char* /* name */, CelestiaCore* core) :
-    QGLWidget(parent)
+    QOpenGLWidget(parent)
 {
     setFocusPolicy(Qt::ClickFocus);
 
@@ -96,7 +96,7 @@ void CelestiaGlWidget::initializeGL()
     using namespace celestia;
     if (!gl::init(appCore->getConfig()->ignoreGLExtensions) || !gl::checkVersion(gl::GL_2_1))
     {
-        QMessageBox::critical(0, "Celestia", _("Celestia was unable to initialize OpenGL 2.1."));
+        QMessageBox::critical(0, "Celestia", _("Celestia was unable to initialize OpenGL 2.1."));
         exit(1);
     }
 
@@ -133,15 +133,18 @@ void CelestiaGlWidget::initializeGL()
 
 void CelestiaGlWidget::resizeGL(int w, int h)
 {
-    appCore->resize(w, h);
+    qreal scale = devicePixelRatioF();
+    auto width = static_cast<int>(w * scale);
+    auto height = static_cast<int>(h * scale);
+    appCore->resize(width, height);
 }
 
 
 void CelestiaGlWidget::mouseMoveEvent(QMouseEvent* m)
 {
-    float scale = devicePixelRatioF();
-    int x = (int)(m->x() * scale);
-    int y = (int)(m->y() * scale);
+    qreal scale = devicePixelRatioF();
+    auto x = static_cast<int>(m->x() * scale);
+    auto y = static_cast<int>(m->y() * scale);
 
     int buttons = 0;
     if (m->buttons() & LeftButton)
@@ -198,9 +201,9 @@ void CelestiaGlWidget::mouseMoveEvent(QMouseEvent* m)
 
 void CelestiaGlWidget::mousePressEvent( QMouseEvent* m )
 {
-    float scale = devicePixelRatioF();
-    int x = (int)(m->x() * scale);
-    int y = (int)(m->y() * scale);
+    qreal scale = devicePixelRatioF();
+    auto x = static_cast<int>(m->x() * scale);
+    auto y = static_cast<int>(m->y() * scale);
 
     if (m->button() == LeftButton)
         appCore->mouseButtonDown(x, y, CelestiaCore::LeftButton);
@@ -213,9 +216,9 @@ void CelestiaGlWidget::mousePressEvent( QMouseEvent* m )
 
 void CelestiaGlWidget::mouseReleaseEvent( QMouseEvent* m )
 {
-    float scale = devicePixelRatioF();
-    int x = (int)(m->x() * scale);
-    int y = (int)(m->y() * scale);
+    qreal scale = devicePixelRatioF();
+    auto x = static_cast<int>(m->x() * scale);
+    auto y = static_cast<int>(m->y() * scale);
 
     if (m->button() == LeftButton)
     {
