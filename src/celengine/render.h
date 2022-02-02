@@ -318,10 +318,12 @@ class Renderer
     {
         return m_modelMatrix;
     }
+
     const Eigen::Matrix4f& getProjectionMatrix() const
     {
         return m_projMatrix;
     }
+
     const Eigen::Matrix4f& getOrthoProjectionMatrix() const
     {
         return m_orthoProjMatrix;
@@ -337,6 +339,11 @@ class Renderer
         m_modelViewPtr = &m;
     }
 
+    void setDefaultModelViewMatrix()
+    {
+        m_modelViewPtr = &m_modelMatrix;
+    }
+
     const Eigen::Matrix4f& getCurrentProjectionMatrix() const
     {
         return *m_projectionPtr;
@@ -345,6 +352,11 @@ class Renderer
     void setCurrentProjectionMatrix(const Eigen::Matrix4f& m)
     {
         m_projectionPtr = &m;
+    }
+
+    void setDefaultProjectionMatrix()
+    {
+        m_projectionPtr = &m_projMatrix;
     }
 
     void setStarStyle(StarStyle);
@@ -618,10 +630,16 @@ class Renderer
                          float discSizeInPixels,
                          const Matrices&);
 
+    void calculatePointSize(float appMag,
+                            float size,
+                            float &discSize,
+                            float &alpha,
+                            float &glareSize,
+                            float &glareAlpha) const;
+
     void renderObjectAsPoint(const Eigen::Vector3f& center,
                              float radius,
                              float appMag,
-                             float _faintestMag,
                              float discSizeInPixels,
                              const Color& color,
                              bool useHalos,
@@ -840,6 +858,9 @@ class Renderer
 
     std::array<celgl::VertexObject*, static_cast<size_t>(VOType::Count)> m_VertexObjects;
 
+    // Saturation magnitude used to calculate a point star size
+    float satPoint;
+
     // Location markers
  public:
     celestia::MarkerRepresentation mountainRep;
@@ -897,6 +918,8 @@ class Renderer
     static Color EclipticColor;
 
     static Color SelectionCursorColor;
+
+    friend class PointStarRenderer;
 };
 
 

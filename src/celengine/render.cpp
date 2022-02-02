@@ -1560,6 +1560,13 @@ void Renderer::draw(const Observer& observer,
     else
         brightnessScale = 0.1667f;
 
+    brightnessScale *= corrFac;
+    if (starStyle == ScaledDiscStars)
+        brightnessScale *= 2.0f;
+
+    // Calculate saturation magnitude
+    satPoint = faintestMag - (1.0f - brightnessBias) / brightnessScale;
+
     ambientColor = Color(ambientLightLevel, ambientLightLevel, ambientLightLevel);
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -1662,43 +1669,7 @@ void Renderer::draw(const Observer& observer,
     enableDepthMask();
 }
 
-void renderPoint(const Renderer &renderer,
-                 const Vector3f &position,
-                 const Color &color,
-                 float size,
-                 bool useSprite,
-                 const Matrices &m)
-{
-    auto *prog = renderer.getShaderManager().getShader("star");
-    if (prog == nullptr)
-        return;
-
-    prog->use();
-    prog->samplerParam("starTex") = 0;
-    prog->setMVPMatrices(*m.projection, *m.modelview);
-
-#ifndef GL_ES
-    glEnable(GL_POINT_SPRITE);
-    glEnable(GL_VERTEX_PROGRAM_POINT_SIZE);
-#endif
-    // Workaround for macOS to pass a single vertex coord
-    glEnableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
-    glVertexAttribPointer(CelestiaGLProgram::VertexCoordAttributeIndex,
-                          3, GL_FLOAT, GL_FALSE, sizeof(position), position.data());
-
-    glVertexAttrib(CelestiaGLProgram::ColorAttributeIndex, color);
-    glVertexAttrib1f(CelestiaGLProgram::PointSizeAttributeIndex, useSprite ? size : renderer.getScreenDpi() / 96.0f);
-
-    glDrawArrays(GL_POINTS, 0, 1);
-
-    glDisableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
-
-#ifndef GL_ES
-    glDisable(GL_VERTEX_PROGRAM_POINT_SIZE);
-    glDisable(GL_POINT_SPRITE);
-#endif
-}
-
+static
 void renderLargePoint(Renderer &renderer,
                       const Vector3f &position,
                       const Color &color,
@@ -1741,6 +1712,64 @@ void renderLargePoint(Renderer &renderer,
     vo.unbind();
 }
 
+static Eigen::Vector3f
+calculateQuadCenter(const Eigen::Quaternionf &cameraOrientation,
+                    const Eigen::Vector3f &position,
+                    float radius)
+{
+    Matrix3f m = cameraOrientation.conjugate().toRotationMatrix();
+
+    // Offset the glare sprite so that it lies in front of the object
+    Vector3f direction = position.normalized();
+
+    // Position the sprite on the the line between the viewer and the
+    // object, and on a plane normal to the view direction.
+    return position + direction * (radius / (m * Vector3f::UnitZ()).dot(direction));
+}
+
+void
+Renderer::calculatePointSize(float appMag,
+                             float size,
+                             float &discSize,
+                             float &alpha,
+                             float &glareSize,
+                             float &glareAlpha) const
+{
+    alpha = std::max(0.0f, (faintestMag - appMag) * brightnessScale + brightnessBias);
+
+    discSize = size;
+    if (starStyle == ScaledDiscStars)
+    {
+        if (alpha > 1.0f)
+        {
+            float discScale = std::min(MaxScaledDiscStarSize, pow(2.0f, 0.3f * (satPoint - appMag)));
+            discSize *= std::max(1.0f, discScale);
+
+            glareAlpha = std::min(0.5f, discScale / 4.0f);
+            glareSize = discSize * 3.0f;
+
+            alpha = 1.0f;
+        }
+        else
+        {
+            glareSize = glareAlpha = 0.0f;
+        }
+    }
+    else
+    {
+        if (alpha > 1.0f)
+        {
+            float discScale = std::min(100.0f, satPoint - appMag + 2.0f);
+            glareAlpha = std::min(GlareOpacity, (discScale - 2.0f) / 4.0f);
+            glareSize = 2.0f * discScale * size;
+            alpha = 1.0f;
+        }
+        else
+        {
+            glareSize = glareAlpha = 0.0f;
+        }
+    }
+}
 
 // If the an object occupies a pixel or less of screen space, we don't
 // render its mesh at all and just display a starlike point instead.
@@ -1751,95 +1780,49 @@ void renderLargePoint(Renderer &renderer,
 void Renderer::renderObjectAsPoint(const Vector3f& position,
                                    float radius,
                                    float appMag,
-                                   float _faintestMag,
                                    float discSizeInPixels,
                                    const Color &color,
                                    bool useHalos,
                                    bool emissive,
                                    const Matrices &mvp)
 {
-    const float maxSize = MaxScaledDiscStarSize;
-    float maxDiscSize = (starStyle == ScaledDiscStars) ? maxSize : 1.0f;
+    const bool useScaledDiscs = starStyle == ScaledDiscStars;
+    float maxDiscSize = useScaledDiscs ? MaxScaledDiscStarSize : 1.0f;
     float maxBlendDiscSize = maxDiscSize + 3.0f;
-
-    bool useScaledDiscs = starStyle == ScaledDiscStars;
 
     if (discSizeInPixels < maxBlendDiscSize || useHalos)
     {
-        float alpha = 1.0f;
         float fade = 1.0f;
-        float size = BaseStarDiscSize * screenDpi / 96.0f;
-        float satPoint = _faintestMag - (1.0f - brightnessBias) / brightnessScale;
-
         if (discSizeInPixels > maxDiscSize)
         {
-            fade = (maxBlendDiscSize - discSizeInPixels) /
-                (maxBlendDiscSize - maxDiscSize);
-            if (fade > 1)
-                fade = 1;
+            fade = std::min(1.0f, (maxBlendDiscSize - discSizeInPixels) /
+                                  (maxBlendDiscSize - maxDiscSize));
         }
 
-        alpha = (_faintestMag - appMag) * brightnessScale * 2.0f + brightnessBias;
-        if (alpha < 0.0f)
-            alpha = 0.0f;
+        float scale = static_cast<float>(screenDpi) / 96.0f;
+        float pointSize, alpha, glareSize, glareAlpha;
+        calculatePointSize(appMag, BaseStarDiscSize * scale, pointSize, alpha, glareSize, glareAlpha);
 
-        float pointSize = size;
-        float glareSize = 0.0f;
-        float glareAlpha = 0.0f;
-        if (useScaledDiscs)
-        {
-            if (alpha > 1.0f)
-            {
-                float discScale = min(maxSize, (float) pow(2.0f, 0.3f * (satPoint - appMag)));
-                pointSize *= max(1.0f, discScale);
-
-                glareAlpha = min(0.5f, discScale / 4.0f);
-                if (discSizeInPixels > maxSize)
-                    glareAlpha = min(glareAlpha, (maxSize - discSizeInPixels) / maxSize + 1.0f);
-                glareSize = pointSize * 3.0f;
-
-                alpha = 1.0f;
-            }
-        }
-        else
-        {
-            if (alpha > 1.0f)
-            {
-                float discScale = min(100.0f, satPoint - appMag + 2.0f);
-                glareAlpha = min(GlareOpacity, (discScale - 2.0f) / 4.0f);
-                glareSize = pointSize * discScale * 2.0f ;
-                if (emissive)
-                    glareSize = max(glareSize, pointSize * discSizeInPixels / (screenDpi / 96.0f) * 3.0f);
-            }
-        }
+        if (useScaledDiscs && discSizeInPixels > MaxScaledDiscStarSize)
+            glareAlpha = std::min(glareAlpha, (MaxScaledDiscStarSize - discSizeInPixels) / MaxScaledDiscStarSize + 1.0f);
 
         alpha *= fade;
         if (!emissive)
-        {
-            glareSize = max(glareSize, pointSize * discSizeInPixels / (screenDpi / 96.0f) * 3.0f);
             glareAlpha *= fade;
-        }
 
-        Matrix3f m = m_cameraOrientation.conjugate().toRotationMatrix();
-        Vector3f center = position;
-
-        // Offset the glare sprite so that it lies in front of the object
-        Vector3f direction = center.normalized();
-
-        // Position the sprite on the the line between the viewer and the
-        // object, and on a plane normal to the view direction.
-        center = center + direction * (radius / (m * Vector3f::UnitZ()).dot(direction));
+        if (glareSize != 0.0f)
+            glareSize = std::max(glareSize, pointSize * discSizeInPixels / scale * 3.0f);
 
         enableDepthTest();
         disableDepthMask();
 
-        bool useSprites = starStyle != PointStars;
-        if (useSprites)
+        if (starStyle != PointStars)
             gaussianDiscTex->bind();
+
         if (pointSize > gl::maxPointSize)
-            renderLargePoint(*this, center, {color, alpha}, pointSize, mvp);
+            renderLargePoint(*this, position, {color, alpha}, pointSize, mvp);
         else
-            renderPoint(*this, center, {color, alpha}, pointSize, useSprites, mvp);
+            pointStarVertexBuffer->addStar(position, {color, alpha}, pointSize);
 
         // If the object is brighter than magnitude 1, add a halo around it to
         // make it appear more brilliant.  This is a hack to compensate for the
@@ -1849,11 +1832,12 @@ void Renderer::renderObjectAsPoint(const Vector3f& position,
         // with halos.
         if (useHalos && glareAlpha > 0.0f)
         {
+            Eigen::Vector3f center = calculateQuadCenter(m_cameraOrientation, position, radius);
             gaussianGlareTex->bind();
             if (glareSize > gl::maxPointSize)
                 renderLargePoint(*this, center, {color, glareAlpha}, glareSize, mvp);
             else
-                renderPoint(*this, center, {color, glareAlpha}, glareSize, true, mvp);
+                glareVertexBuffer->addStar(center, {color, glareAlpha}, glareSize);
         }
     }
 }
@@ -3317,7 +3301,6 @@ void Renderer::renderPlanet(Body& body,
         renderObjectAsPoint(pos,
                             body.getRadius(),
                             appMag,
-                            faintestMag,
                             discSizeInPixels,
                             body.getSurface().color,
                             false, false, m);
@@ -3396,7 +3379,6 @@ void Renderer::renderStar(const Star& star,
     renderObjectAsPoint(pos,
                         star.getRadius(),
                         appMag,
-                        faintestMag,
                         discSizeInPixels,
                         color,
                         star.hasCorona(), true,
@@ -4371,11 +4353,7 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     starRenderer.cosFOV            = (float) cos(degToRad(calcMaxFOV(fov, getAspectRatio())) / 2.0f);
 
     starRenderer.pixelSize         = pixelSize;
-    starRenderer.brightnessScale   = brightnessScale * corrFac;
-    starRenderer.brightnessBias    = brightnessBias;
     starRenderer.faintestMag       = faintestMag;
-    starRenderer.faintestMagNight  = faintestMagNight;
-    starRenderer.saturationMag     = saturationMag;
     starRenderer.distanceLimit     = distanceLimit;
     starRenderer.labelMode         = labelMode;
     starRenderer.SolarSystemMaxDistance = SolarSystemMaxDistance;
@@ -4383,18 +4361,6 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     // = 1.0 at startup
     float effDistanceToScreen = mmToInches((float) REF_DISTANCE_TO_SCREEN) * pixelSize * getScreenDpi();
     starRenderer.labelThresholdMag = 1.2f * max(1.0f, (faintestMag - 4.0f) * (1.0f - 0.5f * (float) log10(effDistanceToScreen)));
-
-    starRenderer.size = BaseStarDiscSize * screenDpi / 96.0f;
-    if (starStyle == ScaledDiscStars)
-    {
-        starRenderer.useScaledDiscs = true;
-        starRenderer.brightnessScale *= 2.0f;
-        starRenderer.maxDiscSize = starRenderer.size * MaxScaledDiscStarSize;
-    }
-    else if (starStyle == FuzzyPointStars)
-    {
-        starRenderer.brightnessScale *= 1.0f;
-    }
 
     starRenderer.colorTemp = colorTemp;
 
@@ -4455,17 +4421,11 @@ void Renderer::renderDeepSkyObjects(const Universe& universe,
     dsoRenderer.orientationMatrix= observer.getOrientationf().conjugate().toRotationMatrix();
     dsoRenderer.observer         = &observer;
     dsoRenderer.obsPos           = obsPos;
-    dsoRenderer.viewNormal       = observer.getOrientationf().conjugate() * -Vector3f::UnitZ();
     dsoRenderer.fov              = fov;
     // size/pixelSize =0.86 at 120deg, 1.43 at 45deg and 1.6 at 0deg.
-    dsoRenderer.size             = pixelSize * 1.6f / corrFac;
     dsoRenderer.pixelSize        = pixelSize;
-    dsoRenderer.brightnessScale  = brightnessScale * corrFac;
-    dsoRenderer.brightnessBias   = brightnessBias;
     dsoRenderer.avgAbsMag        = dsoDB->getAverageAbsoluteMagnitude();
     dsoRenderer.faintestMag      = faintestMag;
-    dsoRenderer.faintestMagNight = faintestMagNight;
-    dsoRenderer.saturationMag    = saturationMag;
     dsoRenderer.renderFlags      = renderFlags;
     dsoRenderer.labelMode        = labelMode;
     dsoRenderer.wWidth           = windowWidth;
@@ -5988,6 +5948,8 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
             proj = Perspective(fov, aspectRatio, nearPlaneDistance, farPlaneDistance);
         Matrices m = { &proj, &m_modelMatrix };
 
+        setCurrentProjectionMatrix(proj);
+
         Frustum intervalFrustum(degToRad(fov),
                                 aspectRatio,
                                 nearPlaneDistance,
@@ -6050,6 +6012,18 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
             i--;
         }
 
+        PointStarVertexBuffer::enable();
+        glareVertexBuffer->startSprites();
+        glareVertexBuffer->render();
+        glareVertexBuffer->finish();
+        if (starStyle == PointStars)
+            pointStarVertexBuffer->startBasicPoints();
+        else
+            pointStarVertexBuffer->startSprites();
+        pointStarVertexBuffer->render();
+        pointStarVertexBuffer->finish();
+        PointStarVertexBuffer::disable();
+
         // Render annotations in this interval
         enableSmoothLines();
         annotation = renderSortedAnnotations(annotation,
@@ -6062,4 +6036,5 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
 
     // reset the depth range
     glDepthRange(0, 1);
+    setDefaultProjectionMatrix();
 }

@@ -1,9 +1,20 @@
-//#define GL_ES
+// sdlmain.cpp
+//
+// Copyright (C) 2020-present, the Celestia Development Team
+//
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public License
+// as published by the Free Software Foundation; either version 2
+// of the License, or (at your option) any later version.
+
 #include <cctype>
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <string_view>
+#include <system_error>
 #include <fmt/printf.h>
+#include <celcompat/filesystem.h>
 #include <celengine/glsupport.h>
 #include <celutil/gettext.h>
 #include <celutil/tzutil.h>
@@ -13,8 +24,8 @@
 #else
 #include <SDL_opengl.h>
 #endif
-#include <unistd.h>
 #include <celestia/celestiacore.h>
+#include <celestia/url.h>
 
 namespace celestia
 {
@@ -36,7 +47,7 @@ class SDL_Application
 {
  public:
     SDL_Application() = delete;
-    SDL_Application(const std::string name, int w, int h) :
+    SDL_Application(std::string_view name, int w, int h) :
         m_appName       { name },
         m_windowWidth   { w },
         m_windowHeight  { h }
@@ -44,13 +55,13 @@ class SDL_Application
     }
     ~SDL_Application();
 
-    static std::shared_ptr<SDL_Application> init(const std::string, int, int);
+    static std::shared_ptr<SDL_Application> init(std::string_view, int, int);
 
     bool createOpenGLWindow();
 
     bool initCelestiaCore();
     void run();
-    const char* getError() const;
+    std::string_view getError() const;
 
  private:
     void display();
@@ -67,6 +78,9 @@ class SDL_Application
 
     // aux functions
     void toggleFullscreen();
+    void copyURL();
+    void pasteURL();
+    void configure() const;
 
     // state variables
     std::string m_appName;
@@ -84,7 +98,7 @@ class SDL_Application
 };
 
 std::shared_ptr<SDL_Application>
-SDL_Application::init(const std::string name, int w, int h)
+SDL_Application::init(std::string_view name, int w, int h)
 {
     if (SDL_Init(SDL_INIT_VIDEO) < 0)
         return nullptr;
@@ -96,7 +110,7 @@ SDL_Application::init(const std::string name, int w, int h)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 #endif
-    return std::shared_ptr<SDL_Application>(new SDL_Application(std::move(name), w, h));
+    return std::make_shared<SDL_Application>(name, w, h);
 }
 
 SDL_Application::~SDL_Application()
@@ -132,7 +146,7 @@ SDL_Application::createOpenGLWindow()
     return true;
 }
 
-const char*
+std::string_view
 SDL_Application::getError() const
 {
     return SDL_GetError();
@@ -155,10 +169,21 @@ SDL_Application::initCelestiaCore()
 }
 
 void
+SDL_Application::configure() const
+{
+    auto *renderer     = m_appCore->getRenderer();
+    const auto *config = m_appCore->getConfig();
+
+    renderer->setRenderFlags(Renderer::DefaultRenderFlags);
+    renderer->setShadowMapSize(config->ShadowMapSize);
+    renderer->setSolarSystemMaxDistance(config->SolarSystemMaxDistance);
+}
+
+void
 SDL_Application::run()
 {
     m_appCore->initRenderer();
-    m_appCore->getRenderer()->setRenderFlags(Renderer::DefaultRenderFlags);
+    configure();
     m_appCore->start();
 
     std::string tzName;
@@ -294,8 +319,18 @@ SDL_Application::handleKeyPressEvent(const SDL_KeyboardEvent &event)
         int k = tolower(key);
         if (k >= 'a' && k <= 'z')
         {
-            key = k + 1 - 'a';
-            m_appCore->charEntered(key, mod);
+            switch (k)
+            {
+            case 'c':
+                copyURL();
+                break;
+            case 'v':
+                pasteURL();
+                break;
+            default:
+                key = k + 1 - 'a';
+                m_appCore->charEntered(key, mod);
+            }
             return;
         }
         mod |= CelestiaCore::ControlKey;
@@ -471,6 +506,29 @@ SDL_Application::toggleFullscreen()
             m_fullscreen = true;
     }
 }
+
+void
+SDL_Application::copyURL()
+{
+    CelestiaState appState(m_appCore);
+    appState.captureState();
+
+    if (SDL_SetClipboardText(Url(appState).getAsString().c_str()) == 0)
+        m_appCore->flash(_("Copied URL"));
+}
+
+void
+SDL_Application::pasteURL()
+{
+    if (SDL_HasClipboardText() != SDL_TRUE)
+        return;
+
+    // on error SDL_GetClipboardText returns a new empty string
+    char *str = SDL_GetClipboardText(); // don't add const due to SDL_free
+    if (*str != '\0' && m_appCore->goToUrl(str))
+        m_appCore->flash(_("Pasting URL"));
+
+    SDL_free(str);
 }
 
 void
@@ -484,7 +542,8 @@ FatalError(const std::string &message)
         std::cerr << message << std::endl;
 }
 
-void DumpGLInfo()
+void
+DumpGLInfo()
 {
     const char* s;
     s = reinterpret_cast<const char*>(glGetString(GL_VERSION));
@@ -504,10 +563,8 @@ void DumpGLInfo()
         std::cout << s << '\n';
 }
 
-
-using namespace celestia;
-
-int main(int argc, char **argv)
+int
+sdlmain(int /* argc */, char ** /* argv */)
 {
     setlocale(LC_ALL, "");
     setlocale(LC_NUMERIC, "C");
@@ -515,10 +572,16 @@ int main(int argc, char **argv)
     bind_textdomain_codeset(PACKAGE, "UTF-8");
     textdomain(PACKAGE);
 
-    if (chdir(CONFIG_DATA_DIR) == -1)
+    const char *dataDir = getenv("CELESTIA_DATA_DIR");
+    if (dataDir == nullptr)
+        dataDir = CONFIG_DATA_DIR;
+
+    std::error_code ec;
+    fs::current_path(dataDir, ec);
+    if (ec)
     {
         FatalError(fmt::sprintf("Cannot chdir to '%s', probably due to improper installation",
-                   CONFIG_DATA_DIR));
+                   dataDir));
         return 1;
     }
 
@@ -556,4 +619,11 @@ int main(int argc, char **argv)
     app->run();
 
     return 0;
+}
+} // namespace
+
+int
+main(int argc, char **argv)
+{
+    return celestia::sdlmain(argc, argv);
 }
