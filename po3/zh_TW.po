@@ -159,7 +159,7 @@ msgstr "作者群"
 msgid "Authors:"
 msgstr "作者: "
 
-# Android/iOS/Windows, Authors for an add-on
+# Windows, Authors for an add-on
 #, c-format
 msgid "Authors: %s"
 msgstr "作者: %s"
@@ -470,14 +470,6 @@ msgstr "下"
 msgid "Down Arrow"
 msgstr "下箭號"
 
-# Android/iOS, Download button when the add-on is not downloaded
-msgid "DOWNLOAD"
-msgstr "下載"
-
-# Android/iOS, Download button when the add-on is being downloaded
-msgid "DOWNLOADING"
-msgstr "下載中"
-
 # Android/iOS/Mac/Windows, Tab for deep sky objects in Star Browser
 msgid "DSOs"
 msgstr "深太空星體"
@@ -783,16 +775,12 @@ msgstr "資訊顯示 :"
 msgid "Information"
 msgstr "資訊"
 
-# Windows, Install an add-on
+# Android/iOS/Windows, Install an add-on
 msgid "Install"
 msgstr "安裝"
 
 # Android/iOS/Windows, Title for the list of installed add-ons
 msgid "Installed"
-msgstr "已安裝"
-
-# Android/iOS, Download button when the add-on is installed
-msgid "INSTALLED"
 msgstr "已安裝"
 
 # Mac, Set simulation time based on Julian date
@@ -1255,7 +1243,7 @@ msgstr "參考向量只對當前選中的太陽系天體有效。"
 msgid "Refresh"
 msgstr "重新整理"
 
-# Android/iOS/Windows, Release date for an add-on
+# Windows, Release date for an add-on
 #, c-format
 msgid "Release date: %s"
 msgstr "釋出日期: %s"
@@ -1679,7 +1667,7 @@ msgstr "無法獲取路徑，請確保您選擇的路徑在%s下。"
 msgid "Unable to uninstall add-on."
 msgstr "無法解除安裝外掛。"
 
-# Windows, Uninstall an add-on
+# Android/iOS/Windows, Uninstall an add-on
 msgid "Uninstall"
 msgstr "解除安裝"
 

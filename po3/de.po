@@ -160,7 +160,7 @@ msgstr "Autoren"
 msgid "Authors:"
 msgstr "Autoren:"
 
-# Android/iOS/Windows, Authors for an add-on
+# Windows, Authors for an add-on
 #, c-format
 msgid "Authors: %s"
 msgstr ""
@@ -471,14 +471,6 @@ msgstr "Runter"
 msgid "Down Arrow"
 msgstr "Pfeil nach unten"
 
-# Android/iOS, Download button when the add-on is not downloaded
-msgid "DOWNLOAD"
-msgstr ""
-
-# Android/iOS, Download button when the add-on is being downloaded
-msgid "DOWNLOADING"
-msgstr ""
-
 # Android/iOS/Mac/Windows, Tab for deep sky objects in Star Browser
 msgid "DSOs"
 msgstr "DSOs"
@@ -784,16 +776,12 @@ msgstr "Info-Anzeige:"
 msgid "Information"
 msgstr "Information"
 
-# Windows, Install an add-on
+# Android/iOS/Windows, Install an add-on
 msgid "Install"
 msgstr ""
 
 # Android/iOS/Windows, Title for the list of installed add-ons
 msgid "Installed"
-msgstr ""
-
-# Android/iOS, Download button when the add-on is installed
-msgid "INSTALLED"
 msgstr ""
 
 # Mac, Set simulation time based on Julian date
@@ -1256,7 +1244,7 @@ msgstr "Referenzvektoren sind nur für das ausgewählte Solarsystem-Objekt sicht
 msgid "Refresh"
 msgstr "Aktualisieren"
 
-# Android/iOS/Windows, Release date for an add-on
+# Windows, Release date for an add-on
 #, c-format
 msgid "Release date: %s"
 msgstr ""
@@ -1680,7 +1668,7 @@ msgstr ""
 msgid "Unable to uninstall add-on."
 msgstr ""
 
-# Windows, Uninstall an add-on
+# Android/iOS/Windows, Uninstall an add-on
 msgid "Uninstall"
 msgstr ""
 

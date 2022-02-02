@@ -158,7 +158,7 @@ msgstr "В разработке принимали участие"
 msgid "Authors:"
 msgstr "В разработке принимали участие:"
 
-# Android/iOS/Windows, Authors for an add-on
+# Windows, Authors for an add-on
 #, c-format
 msgid "Authors: %s"
 msgstr "Создатели: %s"
@@ -469,14 +469,6 @@ msgstr "Вниз"
 msgid "Down Arrow"
 msgstr "Стрелка вниз"
 
-# Android/iOS, Download button when the add-on is not downloaded
-msgid "DOWNLOAD"
-msgstr "СКАЧАТЬ"
-
-# Android/iOS, Download button when the add-on is being downloaded
-msgid "DOWNLOADING"
-msgstr "ЗАГРУЗКА"
-
 # Android/iOS/Mac/Windows, Tab for deep sky objects in Star Browser
 msgid "DSOs"
 msgstr "Объекты глубокого космоса"
@@ -782,17 +774,13 @@ msgstr "Информация:"
 msgid "Information"
 msgstr "Об объекте"
 
-# Windows, Install an add-on
+# Android/iOS/Windows, Install an add-on
 msgid "Install"
 msgstr "Скачать"
 
 # Android/iOS/Windows, Title for the list of installed add-ons
 msgid "Installed"
 msgstr "Установлено"
-
-# Android/iOS, Download button when the add-on is installed
-msgid "INSTALLED"
-msgstr "УСТАНОВЛЕНО"
 
 # Mac, Set simulation time based on Julian date
 msgid "Julian Date:"
@@ -1254,7 +1242,7 @@ msgstr "Опорные векторы видны только для текущ�
 msgid "Refresh"
 msgstr "Обновить"
 
-# Android/iOS/Windows, Release date for an add-on
+# Windows, Release date for an add-on
 #, c-format
 msgid "Release date: %s"
 msgstr "Дата выпуска: %s"
@@ -1678,7 +1666,7 @@ msgstr "Расположение папки указано неверно, уб�
 msgid "Unable to uninstall add-on."
 msgstr "Не удаётся удалить дополнение."
 
-# Windows, Uninstall an add-on
+# Android/iOS/Windows, Uninstall an add-on
 msgid "Uninstall"
 msgstr "Удалить"
 

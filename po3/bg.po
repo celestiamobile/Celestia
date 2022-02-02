@@ -160,7 +160,7 @@ msgstr "Автори"
 msgid "Authors:"
 msgstr "Автори:"
 
-# Android/iOS/Windows, Authors for an add-on
+# Windows, Authors for an add-on
 #, c-format
 msgid "Authors: %s"
 msgstr "Автори: %s"
@@ -471,14 +471,6 @@ msgstr "Надолу"
 msgid "Down Arrow"
 msgstr "Стрелка надолу"
 
-# Android/iOS, Download button when the add-on is not downloaded
-msgid "DOWNLOAD"
-msgstr "ИЗТЕГЛИ"
-
-# Android/iOS, Download button when the add-on is being downloaded
-msgid "DOWNLOADING"
-msgstr "ИЗТЕГЛЯНЕ"
-
 # Android/iOS/Mac/Windows, Tab for deep sky objects in Star Browser
 msgid "DSOs"
 msgstr "ОДН"
@@ -784,17 +776,13 @@ msgstr "Информационен екран:"
 msgid "Information"
 msgstr "Информация"
 
-# Windows, Install an add-on
+# Android/iOS/Windows, Install an add-on
 msgid "Install"
 msgstr "Инсталирай"
 
 # Android/iOS/Windows, Title for the list of installed add-ons
 msgid "Installed"
 msgstr "Инсталирани"
-
-# Android/iOS, Download button when the add-on is installed
-msgid "INSTALLED"
-msgstr "ИНСТАЛИРАНА"
 
 # Mac, Set simulation time based on Julian date
 msgid "Julian Date:"
@@ -1256,7 +1244,7 @@ msgstr "Отправни вектори са видими само за теку
 msgid "Refresh"
 msgstr "Опресни"
 
-# Android/iOS/Windows, Release date for an add-on
+# Windows, Release date for an add-on
 #, c-format
 msgid "Release date: %s"
 msgstr "Дата на излизане: %s"
@@ -1680,7 +1668,7 @@ msgstr "Пътят не е разпознат, моля, изберете път
 msgid "Unable to uninstall add-on."
 msgstr "Добавката не може да се премахне."
 
-# Windows, Uninstall an add-on
+# Android/iOS/Windows, Uninstall an add-on
 msgid "Uninstall"
 msgstr "Премахни"
 
