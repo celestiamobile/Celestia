@@ -197,13 +197,13 @@ msgstr "Bokmerker"
 msgid "Brightest Stars"
 msgstr "Stjerner"
 
+# Android/iOS/Mac/Windows
+msgid "Brightest Stars (Absolute Magnitude)"
+msgstr ""
+
 # Mac, System menu item, bring all windows to front
 msgid "Bring All to Front"
 msgstr ""
-
-# Android/iOS/Mac/Windows, Object browser
-msgid "Browser"
-msgstr "Objektfinner"
 
 # Android/iOS/Mac
 msgid "c (lightspeed)"
@@ -544,11 +544,11 @@ msgid "Failed to download or install this add-on."
 msgstr ""
 
 # Android/iOS
-msgid "Failed to load add-on categories."
+msgid "Failed to load add-ons."
 msgstr ""
 
 # Android/iOS
-msgid "Failed to load add-ons."
+msgid "Failed to load news."
 msgstr ""
 
 # Mac
@@ -994,6 +994,14 @@ msgstr "Ny mappe…"
 # Windows, Enter new name for a bookmark node
 msgid "New name"
 msgstr "Nytt navn"
+
+# Android/iOS, Updates and featured content
+msgid "News"
+msgstr ""
+
+# Android/iOS, Archive for updates and featured content
+msgid "News Archive"
+msgstr ""
 
 # Android/iOS/Mac/Windows
 msgid "Night Lights"
@@ -1495,6 +1503,10 @@ msgid "Square"
 msgstr "Kvadrat"
 
 # Android/iOS/Mac/Windows
+msgid "Star Browser"
+msgstr "Objektfinner"
+
+# Android/iOS/Mac/Windows
 msgid "Star Style"
 msgstr "Stjernestil"
 
@@ -1667,7 +1679,7 @@ msgstr ""
 msgid "Unknown"
 msgstr "Ukjent feil ved åpning av skript"
 
-# iOS
+# iOS/Android
 msgid "Unknown error"
 msgstr ""
 

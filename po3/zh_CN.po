@@ -198,13 +198,13 @@ msgstr "书签"
 msgid "Brightest Stars"
 msgstr "最亮的恒星"
 
+# Android/iOS/Mac/Windows
+msgid "Brightest Stars (Absolute Magnitude)"
+msgstr "最亮的恒星（绝对星等）"
+
 # Mac, System menu item, bring all windows to front
 msgid "Bring All to Front"
 msgstr "前置全部窗口"
-
-# Android/iOS/Mac/Windows, Object browser
-msgid "Browser"
-msgstr "星体浏览器"
 
 # Android/iOS/Mac
 msgid "c (lightspeed)"
@@ -545,12 +545,12 @@ msgid "Failed to download or install this add-on."
 msgstr "下载或安装插件失败。"
 
 # Android/iOS
-msgid "Failed to load add-on categories."
-msgstr "无法加载插件目录。"
-
-# Android/iOS
 msgid "Failed to load add-ons."
 msgstr "无法加载插件列表。"
+
+# Android/iOS
+msgid "Failed to load news."
+msgstr "加载新闻失败。"
 
 # Mac
 msgid "Failed to start OpenGL."
@@ -1001,6 +1001,14 @@ msgstr "新建文件夹…"
 # Windows, Enter new name for a bookmark node
 msgid "New name"
 msgstr "新名称"
+
+# Android/iOS, Updates and featured content
+msgid "News"
+msgstr "新闻"
+
+# Android/iOS, Archive for updates and featured content
+msgid "News Archive"
+msgstr "新闻存档"
 
 # Android/iOS/Mac/Windows
 msgid "Night Lights"
@@ -1504,6 +1512,10 @@ msgid "Square"
 msgstr "正方形"
 
 # Android/iOS/Mac/Windows
+msgid "Star Browser"
+msgstr "星体浏览器"
+
+# Android/iOS/Mac/Windows
 msgid "Star Style"
 msgstr "恒星样式"
 
@@ -1676,7 +1688,7 @@ msgstr "卸载"
 msgid "Unknown"
 msgstr "未知"
 
-# iOS
+# iOS/Android
 msgid "Unknown error"
 msgstr "未知错误"
 

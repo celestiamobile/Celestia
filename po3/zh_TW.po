@@ -197,13 +197,13 @@ msgstr "書籤"
 msgid "Brightest Stars"
 msgstr "星體"
 
+# Android/iOS/Mac/Windows
+msgid "Brightest Stars (Absolute Magnitude)"
+msgstr "最亮的恆星（絕對星等）"
+
 # Mac, System menu item, bring all windows to front
 msgid "Bring All to Front"
 msgstr "將此程式所有視窗移至最前"
-
-# Android/iOS/Mac/Windows, Object browser
-msgid "Browser"
-msgstr "天球瀏覽"
 
 # Android/iOS/Mac
 msgid "c (lightspeed)"
@@ -544,12 +544,12 @@ msgid "Failed to download or install this add-on."
 msgstr "下載或安裝外掛失敗。"
 
 # Android/iOS
-msgid "Failed to load add-on categories."
-msgstr "無法載入外掛目錄。"
-
-# Android/iOS
 msgid "Failed to load add-ons."
 msgstr "無法載入外掛列表。"
+
+# Android/iOS
+msgid "Failed to load news."
+msgstr "載入新聞失敗。"
 
 # Mac
 msgid "Failed to start OpenGL."
@@ -1000,6 +1000,14 @@ msgstr "新資料夾…"
 # Windows, Enter new name for a bookmark node
 msgid "New name"
 msgstr "新名稱"
+
+# Android/iOS, Updates and featured content
+msgid "News"
+msgstr "新聞"
+
+# Android/iOS, Archive for updates and featured content
+msgid "News Archive"
+msgstr "新聞存檔"
 
 # Android/iOS/Mac/Windows
 msgid "Night Lights"
@@ -1503,6 +1511,10 @@ msgid "Square"
 msgstr "方形"
 
 # Android/iOS/Mac/Windows
+msgid "Star Browser"
+msgstr "天球瀏覽"
+
+# Android/iOS/Mac/Windows
 msgid "Star Style"
 msgstr "恆星樣式"
 
@@ -1675,7 +1687,7 @@ msgstr "解除安裝"
 msgid "Unknown"
 msgstr "開啟腳本時發生未知的錯誤"
 
-# iOS
+# iOS/Android
 msgid "Unknown error"
 msgstr "未知錯誤"
 

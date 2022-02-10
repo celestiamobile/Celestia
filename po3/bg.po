@@ -198,13 +198,13 @@ msgstr "Отметки"
 msgid "Brightest Stars"
 msgstr "Най-ярки звезди"
 
+# Android/iOS/Mac/Windows
+msgid "Brightest Stars (Absolute Magnitude)"
+msgstr ""
+
 # Mac, System menu item, bring all windows to front
 msgid "Bring All to Front"
 msgstr "Всички отпред"
-
-# Android/iOS/Mac/Windows, Object browser
-msgid "Browser"
-msgstr "Търсачка"
 
 # Android/iOS/Mac
 msgid "c (lightspeed)"
@@ -545,12 +545,12 @@ msgid "Failed to download or install this add-on."
 msgstr "Неуспешно изтегляне или инсталиране на добавката."
 
 # Android/iOS
-msgid "Failed to load add-on categories."
-msgstr "Неуспешно зареждане на категориите с добавки."
-
-# Android/iOS
 msgid "Failed to load add-ons."
 msgstr "Неуспешно зареждане на добавките."
+
+# Android/iOS
+msgid "Failed to load news."
+msgstr ""
 
 # Mac
 msgid "Failed to start OpenGL."
@@ -1001,6 +1001,14 @@ msgstr "Нова папка"
 # Windows, Enter new name for a bookmark node
 msgid "New name"
 msgstr "Ново наименование"
+
+# Android/iOS, Updates and featured content
+msgid "News"
+msgstr ""
+
+# Android/iOS, Archive for updates and featured content
+msgid "News Archive"
+msgstr ""
 
 # Android/iOS/Mac/Windows
 msgid "Night Lights"
@@ -1504,6 +1512,10 @@ msgid "Square"
 msgstr "Квадрат"
 
 # Android/iOS/Mac/Windows
+msgid "Star Browser"
+msgstr "Търсачка"
+
+# Android/iOS/Mac/Windows
 msgid "Star Style"
 msgstr "Стил на звездите"
 
@@ -1676,7 +1688,7 @@ msgstr "Премахни"
 msgid "Unknown"
 msgstr "Неизвестно"
 
-# iOS
+# iOS/Android
 msgid "Unknown error"
 msgstr "Неизвестна грешка"
 

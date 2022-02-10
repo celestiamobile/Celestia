@@ -198,13 +198,13 @@ msgstr "ブックマーク"
 msgid "Brightest Stars"
 msgstr "明るい恒星"
 
+# Android/iOS/Mac/Windows
+msgid "Brightest Stars (Absolute Magnitude)"
+msgstr ""
+
 # Mac, System menu item, bring all windows to front
 msgid "Bring All to Front"
 msgstr "すべてを前面に表示"
-
-# Android/iOS/Mac/Windows, Object browser
-msgid "Browser"
-msgstr "天体ブラウザ"
 
 # Android/iOS/Mac
 msgid "c (lightspeed)"
@@ -545,11 +545,11 @@ msgid "Failed to download or install this add-on."
 msgstr ""
 
 # Android/iOS
-msgid "Failed to load add-on categories."
+msgid "Failed to load add-ons."
 msgstr ""
 
 # Android/iOS
-msgid "Failed to load add-ons."
+msgid "Failed to load news."
 msgstr ""
 
 # Mac
@@ -1001,6 +1001,14 @@ msgstr "新規フォルダ"
 # Windows, Enter new name for a bookmark node
 msgid "New name"
 msgstr "変更後の名前"
+
+# Android/iOS, Updates and featured content
+msgid "News"
+msgstr ""
+
+# Android/iOS, Archive for updates and featured content
+msgid "News Archive"
+msgstr ""
 
 # Android/iOS/Mac/Windows
 msgid "Night Lights"
@@ -1504,6 +1512,10 @@ msgid "Square"
 msgstr "正方形(□)"
 
 # Android/iOS/Mac/Windows
+msgid "Star Browser"
+msgstr "天体ブラウザ"
+
+# Android/iOS/Mac/Windows
 msgid "Star Style"
 msgstr "恒星表示方法"
 
@@ -1676,7 +1688,7 @@ msgstr ""
 msgid "Unknown"
 msgstr "不明"
 
-# iOS
+# iOS/Android
 msgid "Unknown error"
 msgstr "不明なエラー"
 

@@ -198,13 +198,13 @@ msgstr "Favoritos"
 msgid "Brightest Stars"
 msgstr "Estrelas Mais Brilhantes"
 
+# Android/iOS/Mac/Windows
+msgid "Brightest Stars (Absolute Magnitude)"
+msgstr ""
+
 # Mac, System menu item, bring all windows to front
 msgid "Bring All to Front"
 msgstr "Trazer Todos à Frente"
-
-# Android/iOS/Mac/Windows, Object browser
-msgid "Browser"
-msgstr "Navegador"
 
 # Android/iOS/Mac
 msgid "c (lightspeed)"
@@ -545,11 +545,11 @@ msgid "Failed to download or install this add-on."
 msgstr ""
 
 # Android/iOS
-msgid "Failed to load add-on categories."
+msgid "Failed to load add-ons."
 msgstr ""
 
 # Android/iOS
-msgid "Failed to load add-ons."
+msgid "Failed to load news."
 msgstr ""
 
 # Mac
@@ -1001,6 +1001,14 @@ msgstr "Nova Pasta"
 # Windows, Enter new name for a bookmark node
 msgid "New name"
 msgstr "Novo Nome"
+
+# Android/iOS, Updates and featured content
+msgid "News"
+msgstr ""
+
+# Android/iOS, Archive for updates and featured content
+msgid "News Archive"
+msgstr ""
 
 # Android/iOS/Mac/Windows
 msgid "Night Lights"
@@ -1504,6 +1512,10 @@ msgid "Square"
 msgstr "Quadrado"
 
 # Android/iOS/Mac/Windows
+msgid "Star Browser"
+msgstr "Navegador"
+
+# Android/iOS/Mac/Windows
 msgid "Star Style"
 msgstr "Estilo das Estrelas"
 
@@ -1676,7 +1688,7 @@ msgstr ""
 msgid "Unknown"
 msgstr "Desconhecido"
 
-# iOS
+# iOS/Android
 msgid "Unknown error"
 msgstr "Erro desconhecido"
 
