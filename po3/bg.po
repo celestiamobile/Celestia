@@ -8,7 +8,7 @@ msgstr ""
 "Project-Id-Version: celestia 1.7.0\n"
 "Report-Msgid-Bugs-To: team@celestia.space\n"
 "POT-Creation-Date: 2020-04-15 20:22+0800\n"
-"PO-Revision-Date: 2021-12-27 19:23+0200\n"
+"PO-Revision-Date: 2022-02-10 21:31+0200\n"
 "Last-Translator: Georgi Georgiev (Жоро) <g.georgiev.shumen@gmail.com>\n"
 "Language-Team: Bulgarian <g.georgiev.shumen@gmail.com>\n"
 "Language: bg\n"
@@ -200,7 +200,7 @@ msgstr "Най-ярки звезди"
 
 # Android/iOS/Mac/Windows
 msgid "Brightest Stars (Absolute Magnitude)"
-msgstr ""
+msgstr "Най-ярки звезди (абсолютна величина)"
 
 # Mac, System menu item, bring all windows to front
 msgid "Bring All to Front"
@@ -550,7 +550,7 @@ msgstr "Неуспешно зареждане на добавките."
 
 # Android/iOS
 msgid "Failed to load news."
-msgstr ""
+msgstr "Неуспешно зареждане на новините."
 
 # Mac
 msgid "Failed to start OpenGL."
@@ -1004,11 +1004,11 @@ msgstr "Ново наименование"
 
 # Android/iOS, Updates and featured content
 msgid "News"
-msgstr ""
+msgstr "Новини"
 
 # Android/iOS, Archive for updates and featured content
 msgid "News Archive"
-msgstr ""
+msgstr "Архив"
 
 # Android/iOS/Mac/Windows
 msgid "Night Lights"
