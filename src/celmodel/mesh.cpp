@@ -14,9 +14,15 @@
 #include <iterator>
 #include <tuple>
 #include <utility>
+#include <celutil/logger.h>
+
+#ifdef HAVE_MESHOPTIMIZER
+#include <meshoptimizer.h>
+#endif
 
 #include "mesh.h"
 
+using celestia::util::GetLogger;
 
 namespace cmod
 {
@@ -36,6 +42,13 @@ VertexDescription appendingAttributes(const VertexDescription& desc, It begin, I
     }
 
     return VertexDescription(std::move(allAttributes));
+}
+
+bool
+isOpaqueMaterial(const Material &material)
+{
+    return (!(material.opacity > 0.01f && material.opacity < 1.0f)) &&
+             material.blend != BlendMode::AdditiveBlend;
 }
 
 } // end unnamed namespace
@@ -320,13 +333,7 @@ Mesh::addGroup(PrimitiveGroupType prim,
 {
     PrimitiveGroup g;
     if (prim == PrimitiveGroupType::LineStrip || prim == PrimitiveGroupType::LineList)
-    {
         g = createLinePrimitiveGroup(prim == PrimitiveGroupType::LineStrip, indices);
-    }
-    else
-    {
-        g.primOverride = prim;
-    }
 
     g.indices = std::move(indices);
     g.prim = prim;
@@ -393,8 +400,79 @@ Mesh::aggregateByMaterial()
               {
                   return g0.materialIndex < g1.materialIndex;
               });
+    mergePrimitiveGroups();
 }
 
+
+void
+Mesh::mergePrimitiveGroups()
+{
+    if (groups.size() < 2)
+        return;
+
+    std::vector<PrimitiveGroup> newGroups;
+    for (size_t i = 0; i < groups.size(); i++)
+    {
+        auto &g = groups[i];
+
+        if (g.vertexCountOverride == 0 && g.prim == PrimitiveGroupType::TriStrip)
+        {
+            std::vector<Index32> newIndices;
+            newIndices.reserve(g.indices.size() * 2);
+            for (size_t j = 0, e = g.indices.size() - 2; j < e; j++)
+            {
+                auto x = g.indices[j + 0];
+                auto y = g.indices[j + 1];
+                auto z = g.indices[j + 2];
+                // skip degenerated triangles
+                if (x == y || y == z || z == x)
+                    continue;
+                if ((j & 1) != 0) // FIXME: CCW hardcoded
+                    std::swap(y, z);
+                newIndices.push_back(x);
+                newIndices.push_back(y);
+                newIndices.push_back(z);
+            }
+            g.indices = std::move(newIndices);
+            g.prim = PrimitiveGroupType::TriList;
+        }
+
+        if (i == 0 || g.vertexCountOverride != 0 || g.prim != PrimitiveGroupType::TriList)
+        {
+            newGroups.push_back(std::move(g));
+        }
+        else
+        {
+            auto &p = newGroups.back();
+            if (p.prim != g.prim || p.materialIndex != g.materialIndex)
+            {
+                newGroups.push_back(std::move(g));
+            }
+            else
+            {
+                p.indices.reserve(p.indices.size() + g.indices.size());
+                p.indices.insert(p.indices.end(), g.indices.begin(), g.indices.end());
+            }
+        }
+    }
+    GetLogger()->info("Optimized mesh groups: had {} groups, now: {} of them.\n", groups.size(), newGroups.size());
+    groups = std::move(newGroups);
+}
+
+void
+Mesh::optimize()
+{
+#ifdef HAVE_MESHOPTIMIZER
+    if (groups.size() > 1)
+        return;
+
+    auto &g = groups.front();
+
+    meshopt_optimizeVertexCache(g.indices.data(), g.indices.data(), g.indices.size(), nVertices);
+    meshopt_optimizeOverdraw(g.indices.data(), g.indices.data(), g.indices.size(), reinterpret_cast<float*>(vertices.data()), nVertices, vertexDesc.strideBytes, 1.05f);
+    meshopt_optimizeVertexFetch(vertices.data(), g.indices.data(), g.indices.size(), vertices.data(), nVertices, vertexDesc.strideBytes);
+#endif
+}
 
 bool
 Mesh::pick(const Eigen::Vector3d& rayOrigin, const Eigen::Vector3d& rayDirection, PickResult* result) const
@@ -661,6 +739,54 @@ Mesh::getPrimitiveCount() const
         count += group.getPrimitiveCount();
 
     return count;
+}
+
+void
+Mesh::merge(const Mesh &other)
+{
+    auto &ti = groups.front().indices;
+    const auto &oi = other.groups.front().indices;
+
+    ti.reserve(ti.size() + oi.size());
+    for (auto i : oi)
+        ti.push_back(i + nVertices);
+
+    vertices.reserve(vertices.size() + other.vertices.size());
+    vertices.insert(vertices.end(), other.vertices.begin(), other.vertices.end());
+
+    nVertices += other.nVertices;
+}
+
+bool
+Mesh::canMerge(const Mesh &other, const std::vector<Material> &materials) const
+{
+    if (getGroupCount() != 1 || other.getGroupCount() != 1)
+        return false;
+
+    const auto &tg = groups.front();
+    const auto &og = other.groups.front();
+
+    if (tg.vertexCountOverride != 0 || og.vertexCountOverride != 0 || tg.prim != PrimitiveGroupType::TriList)
+        return false;
+
+    if (std::tie(tg.materialIndex, tg.prim, vertexDesc.strideBytes) !=
+        std::tie(og.materialIndex, og.prim, other.vertexDesc.strideBytes))
+        return false;
+
+    if (!isOpaqueMaterial(materials[tg.materialIndex]) || !isOpaqueMaterial(materials[og.materialIndex]))
+        return false;
+
+    for (auto i = VertexAttributeSemantic::Position;
+         i < VertexAttributeSemantic::SemanticMax;
+         i = static_cast<VertexAttributeSemantic>(1 + static_cast<uint16_t>(i)))
+    {
+        auto &ta = vertexDesc.getAttribute(i);
+        auto &oa = other.vertexDesc.getAttribute(i);
+        if (ta.format != oa.format || ta.offsetWords != oa.offsetWords)
+            return false;
+    }
+
+    return true;
 }
 
 } // end namespace cmod

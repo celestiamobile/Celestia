@@ -15,8 +15,11 @@
 
 #include <Eigen/Geometry>
 
+#include <celutil/logger.h>
+
 #include "model.h"
 
+using celestia::util::GetLogger;
 
 namespace cmod
 {
@@ -315,7 +318,6 @@ Model::usesTextureType(TextureSemantic t) const
 }
 
 
-
 bool
 Model::OpacityComparator::operator()(const Mesh& a, const Mesh& b) const
 {
@@ -335,6 +337,25 @@ Model::sortMeshes(const MeshComparator& comparator)
 
     // Sort the meshes so that completely opaque ones are first
     std::sort(meshes.begin(), meshes.end(), std::ref(comparator));
+
+    std::vector<Mesh> newMeshes;
+    newMeshes.push_back(meshes[0].clone());
+
+    for (size_t i = 1; i < meshes.size(); i++)
+    {
+        auto &p = newMeshes.back();
+        if (!p.canMerge(meshes[i], materials))
+        {
+            newMeshes.push_back(meshes[i].clone());
+            continue;
+        }
+        p.merge(meshes[i]);
+    }
+    GetLogger()->info("Merged similar meshes: {} -> {}.\n", meshes.size(), newMeshes.size());
+
+    for (auto &mesh : newMeshes)
+        mesh.optimize();
+    meshes = std::move(newMeshes);
 }
 
 } // end namespace cmod

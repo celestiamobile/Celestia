@@ -35,9 +35,9 @@ public:
         Spectral_G     = 4,
         Spectral_K     = 5,
         Spectral_M     = 6,
-        Spectral_R     = 7, // superceded by class C
+        Spectral_R     = 7, // superseded by class C
         Spectral_S     = 8,
-        Spectral_N     = 9, // superceded by class C
+        Spectral_N     = 9, // superseded by class C
         Spectral_WC    = 10,
         Spectral_WN    = 11,
         Spectral_WO    = 12,
@@ -98,8 +98,6 @@ public:
     Color getApparentColor() const;
     Color getApparentColor(StellarClass::SpectralClass sc) const;
 
-    std::string str() const;
-
     static StellarClass parse(const std::string&);
 
     friend bool operator<(const StellarClass& sc0, const StellarClass& sc1);
@@ -122,8 +120,6 @@ private:
     unsigned int subclass;
 };
 
-
-std::ostream& operator<<(std::ostream& os, const StellarClass& sc);
 
 // A rough ordering of stellar classes, from 'early' to 'late' . . .
 // Useful for organizing a list of stars by spectral class.
