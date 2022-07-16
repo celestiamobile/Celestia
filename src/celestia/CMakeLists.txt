@@ -16,18 +16,15 @@ set(CELESTIA_SOURCES
   moviecapture.h
   scriptmenu.cpp
   scriptmenu.h
+  textprintposition.cpp
+  textprintposition.h
   url.cpp
   url.h
   view.cpp
   view.h
 )
 
-if(WIN32)
-  list(APPEND CELESTIA_SOURCES
-    avicapture.cpp
-    avicapture.h
-  )
-elseif(ENABLE_FFMPEG)
+if(ENABLE_FFMPEG)
   list(APPEND CELESTIA_SOURCES
     ffmpegcapture.cpp
     ffmpegcapture.h
