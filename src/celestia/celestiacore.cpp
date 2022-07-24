@@ -57,6 +57,9 @@
 #include <celengine/rectangle.h>
 #include <celengine/mapmanager.h>
 #include <fmt/ostream.h>
+#ifdef USE_MINIAUDIO
+#include "miniaudiosession.h"
+#endif
 
 #ifdef CELX
 #include <celephem/scriptobject.h>
@@ -1305,12 +1308,20 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
     case ' ':
         if (sim->getPauseState() == true)
         {
+#ifdef USE_MINIAUDIO
+            resumeAudioIfNeeded();
+#endif
+    
             if (scriptState == ScriptPaused)
                 scriptState = ScriptRunning;
             sim->setPauseState(false);
         }
         else
         {
+#ifdef USE_MINIAUDIO
+            pauseAudioIfNeeded();
+#endif
+
             sim->setPauseState(true);
 
             // If there's a script running then pause it.  This has the
@@ -2261,6 +2272,11 @@ void CelestiaCore::setSafeAreaInsets(int left, int top, int right, int bottom)
 std::tuple<int, int, int, int> CelestiaCore::getSafeAreaInsets() const
 {
     return make_tuple(safeAreaInsets.left, safeAreaInsets.top, safeAreaInsets.right, safeAreaInsets.bottom);
+}
+
+std::tuple<int, int> CelestiaCore::getWindowDimension() const
+{
+    return make_tuple(width, height);
 }
 
 float CelestiaCore::getPickTolerance() const
@@ -4816,6 +4832,99 @@ bool CelestiaCore::saveScreenShot(const fs::path& filename, ContentType type) co
     }
     return false;
 }
+
+#ifdef USE_MINIAUDIO
+std::shared_ptr<celestia::AudioSession> CelestiaCore::getAudioSession(int channel) const
+{
+    auto it = audioSessions.find(channel);
+    return it == audioSessions.end() ? nullptr : it->second;
+}
+
+bool CelestiaCore::isPlayingAudio(int channel) const
+{
+    auto audioSession = getAudioSession(channel);
+    return audioSession && audioSession->isPlaying();
+}
+
+bool CelestiaCore::playAudio(int channel, const fs::path &path, double startTime, float volume, float pan, bool loop, bool nopause)
+{
+    stopAudio(channel);
+    auto audioSession = make_shared<MiniAudioSession>(path, volume, pan, loop, nopause);
+    audioSessions[channel] = audioSession;
+    return audioSession->play(startTime);
+}
+
+bool CelestiaCore::resumeAudio(int channel)
+{
+    auto audioSession = getAudioSession(channel);
+    return audioSession ? audioSession->play() : false;
+}
+
+void CelestiaCore::pauseAudio(int channel)
+{
+    auto audioSession = getAudioSession(channel);
+    if (audioSession)
+        audioSession->stop();
+}
+
+void CelestiaCore::stopAudio(int channel)
+{
+    auto audioSession = getAudioSession(channel);
+    if (audioSession)
+    {
+        audioSession->stop();
+        audioSessions.erase(channel);
+    }
+}
+
+bool CelestiaCore::seekAudio(int channel, double seconds)
+{
+    auto audioSession = getAudioSession(channel);
+    return audioSession ? audioSession->seek(seconds) : false;
+}
+
+void CelestiaCore::setAudioVolume(int channel, float volume)
+{
+    auto audioSession = getAudioSession(channel);
+    if (audioSession)
+        audioSession->setVolume(volume);
+}
+
+void CelestiaCore::setAudioPan(int channel, float pan)
+{
+    auto audioSession = getAudioSession(channel);
+    if (audioSession)
+        audioSession->setPan(pan);
+}
+
+void CelestiaCore::setAudioLoop(int channel, bool loop)
+{
+    auto audioSession = getAudioSession(channel);
+    if (audioSession)
+        audioSession->setLoop(loop);
+}
+
+void CelestiaCore::setAudioNoPause(int channel, bool nopause)
+{
+    auto audioSession = getAudioSession(channel);
+    if (audioSession)
+        audioSession->setNoPause(nopause);
+}
+
+void CelestiaCore::pauseAudioIfNeeded()
+{
+    for (auto const &[_, value] : audioSessions)
+        if (!value->nopause())
+            value->stop();
+}
+
+void CelestiaCore::resumeAudioIfNeeded()
+{
+    for (auto const &[_, value] : audioSessions)
+        if (!value->nopause())
+            value->play();
+}
+#endif
 
 void CelestiaCore::setMeasurementSystem(CelestiaCore::MeasurementSystem newMeasurement)
 {

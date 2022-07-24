@@ -51,6 +51,9 @@ class Console;
 namespace celestia
 {
 class TextPrintPosition;
+#ifdef USE_MINIAUDIO
+class AudioSession;
+#endif
 }
 
 typedef Watcher<CelestiaCore> CelestiaWatcher;
@@ -317,6 +320,7 @@ class CelestiaCore // : public Watchable<CelestiaCore>
     void setDistanceToScreen(int);
     void setSafeAreaInsets(int left, int top, int right, int bottom);
     std::tuple<int, int, int, int> getSafeAreaInsets() const;  // left, top, right, bottom
+    std::tuple<int, int> getWindowDimension() const;
     int getSafeAreaWidth() const;
     int getSafeAreaHeight() const;
     float getPickTolerance() const;
@@ -388,6 +392,22 @@ class CelestiaCore // : public Watchable<CelestiaCore>
     void getCaptureInfo(std::array<int, 4>& viewport, celestia::PixelFormat& format) const;
     bool captureImage(std::uint8_t* buffer, const std::array<int, 4>& viewport, celestia::PixelFormat format) const;
     bool saveScreenShot(const fs::path&, ContentType = Content_Unknown) const;
+
+#ifdef USE_MINIAUDIO
+    bool isPlayingAudio(int channel) const;
+    bool playAudio(int channel, const fs::path& path, double startTime, float volume, float pan, bool loop, bool nopause);
+    bool resumeAudio(int channel);
+    void pauseAudio(int channel);
+    void stopAudio(int channel);
+    bool seekAudio(int channel, double time);
+    void setAudioVolume(int channel, float volume);
+    void setAudioPan(int channel, float pan);
+    void setAudioLoop(int channel, bool loop);
+    void setAudioNoPause(int channel, bool nopause);
+
+    void pauseAudioIfNeeded();
+    void resumeAudioIfNeeded();
+#endif
 
     void setMeasurementSystem(MeasurementSystem);
     MeasurementSystem getMeasurementSystem() const;
@@ -492,6 +512,12 @@ class CelestiaCore // : public Watchable<CelestiaCore>
 
     MovieCapture* movieCapture{ nullptr };
     bool recording{ false };
+
+#ifdef USE_MINIAUDIO
+    std::map<int, std::shared_ptr<celestia::AudioSession>> audioSessions;
+
+    std::shared_ptr<celestia::AudioSession> getAudioSession(int channel) const;
+#endif
 
     Alerter* alerter{ nullptr };
     std::vector<CelestiaWatcher*> watchers;
