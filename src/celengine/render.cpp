@@ -14,7 +14,7 @@
 
 #include <Eigen/Geometry>
 
-#include <fmt/printf.h>
+#include <fmt/format.h>
 
 #include "render.h"
 #include "boundaries.h"
@@ -612,17 +612,17 @@ float Renderer::getPointHeight() const
 
 float Renderer::getLineWidthX() const
 {
-    return ((renderFlags | ShowSmoothLines) ? 1.5f : 1.0f) * getPointWidth();
+    return ((renderFlags & ShowSmoothLines) != 0 ? 1.5f : 1.0f) * getPointWidth();
 }
 
 float Renderer::getLineWidthY() const
 {
-    return ((renderFlags | ShowSmoothLines) ? 1.5f : 1.0f) * getPointHeight();
+    return ((renderFlags & ShowSmoothLines) != 0 ? 1.5f : 1.0f) * getPointHeight();
 }
 
 float Renderer::getRasterizedLineWidth(float multiplier) const
 {
-    return multiplier * ((renderFlags | ShowSmoothLines) ? 1.5f : 1.0f) * getScaleFactor();
+    return multiplier * ((renderFlags & ShowSmoothLines) != 0 ? 1.5f : 1.0f) * getScaleFactor();
 }
 
 bool Renderer::shouldDrawLineAsTriangles(float multiplier) const
@@ -5427,7 +5427,7 @@ bool Renderer::getInfo(map<string, string>& info) const
 #ifndef GL_ES
     GLfloat pointSizeGran = 0;
     glGetFloatv(GL_SMOOTH_POINT_SIZE_GRANULARITY, &pointSizeGran);
-    info["PointSizeGran"] = fmt::sprintf("%.2f", pointSizeGran);
+    info["PointSizeGran"] = fmt::format("{:.2f}", pointSizeGran);
 
     GLint maxVaryings = 0;
     glGetIntegerv(GL_MAX_VARYING_FLOATS, &maxVaryings);
@@ -5438,7 +5438,7 @@ bool Renderer::getInfo(map<string, string>& info) const
     {
         float maxAnisotropy = 0.0f;
         glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAnisotropy);
-        info["MaxAnisotropy"] = fmt::sprintf("%.2f", maxAnisotropy);
+        info["MaxAnisotropy"] = fmt::format("{:.2f}", maxAnisotropy);
     }
 
 #if 0 // we don't use cubemaps yet
