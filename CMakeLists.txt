@@ -412,6 +412,7 @@ set(BASE_DATA_SOURCES
   start.cel
   celestia.cfg
   controls.txt
+  COPYING
 )
 install(FILES ${BASE_DATA_SOURCES} DESTINATION ${DATADIR})
 install(FILES "splash.png" DESTINATION "${DATADIR}/splash")
@@ -427,6 +428,7 @@ add_subdirectory(images)
 add_subdirectory(locale)
 add_subdirectory(scripts)
 add_subdirectory(shaders)
+add_subdirectory(help)
 
 if(ENABLE_TESTS)
   enable_testing()
