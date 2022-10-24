@@ -57,34 +57,6 @@ static void DumpTextureMipmapInfo(GLenum target)
 #define DumpTextureMipmapInfo(target) (void)target
 #endif
 
-static bool testMaxLevel()
-{
-#ifndef GL_ES
-    unsigned char texels[64];
-    GLuint textureID;
-    glGenTextures(1, &textureID);
-    glBindTexture(GL_TEXTURE_2D, textureID);
-    // Test whether GL_TEXTURE_MAX_LEVEL is supported . . .
-    glTexImage2D(GL_TEXTURE_2D,
-                 0,
-                 GL_LUMINANCE,
-                 8, 8,
-                 0,
-                 GL_LUMINANCE,
-                 GL_UNSIGNED_BYTE,
-                 texels);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 2);
-    float maxLev = -1.0f;
-    glGetTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, &maxLev);
-    glDeleteTextures(1, &textureID);
-
-    return maxLev == 2;
-#else
-    return false;
-#endif
-}
-
-
 static const TextureCaps& GetTextureCaps()
 {
     static bool texCapsInitialized = false;
@@ -223,6 +195,9 @@ static void SetBorderColor(Color borderColor, GLenum target)
 static void LoadMipmapSet(Image& img, GLenum target)
 {
     int internalFormat = getInternalFormat(img.getFormat());
+#ifndef GL_ES
+    glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, img.getMipLevelCount() - 1);
+#endif
 
     for (int mip = 0; mip < img.getMipLevelCount(); mip++)
     {
@@ -410,7 +385,7 @@ ImageTexture::ImageTexture(Image& img,
     }
 
     bool genMipmaps = mipmap && !precomputedMipMaps;
-#if !defined(GL_ES)
+#ifndef GL_ES
     if (genMipmaps && !FramebufferObject::isSupported())
         glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_TRUE);
 #endif
@@ -418,13 +393,23 @@ ImageTexture::ImageTexture(Image& img,
     if (mipmap)
     {
         if (precomputedMipMaps)
+        {
             LoadMipmapSet(img, GL_TEXTURE_2D);
+        }
         else if (mipMapMode == DefaultMipMaps)
+        {
             LoadMiplessTexture(img, GL_TEXTURE_2D);
+#ifndef GL_ES
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mipLevelCount - 1);
+#endif
+        }
     }
     else
     {
         LoadMiplessTexture(img, GL_TEXTURE_2D);
+#ifndef GL_ES
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+#endif
     }
     if (genMipmaps && FramebufferObject::isSupported())
         glGenerateMipmap(GL_TEXTURE_2D);

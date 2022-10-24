@@ -100,7 +100,6 @@ struct TextureFontPrivate
 
     GLuint             m_texName{ 0 };   // texture object
     std::vector<Glyph> m_glyphs;         // character information
-    GLint              m_maxTextureSize; // max supported texture size
 
     std::array<UnicodeBlock, 2> m_unicodeBlocks;
     int                         m_commonGlyphsCount{ 0 };
@@ -135,8 +134,6 @@ TextureFontPrivate::TextureFontPrivate(const Renderer *renderer) : m_renderer(re
 {
     m_unicodeBlocks[0] = { 0x0020, 0x007E }; // Basic Latin
     m_unicodeBlocks[1] = { 0x03B1, 0x03CF }; // Lower case Greek
-
-    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &m_maxTextureSize);
 }
 
 TextureFontPrivate::~TextureFontPrivate()
@@ -197,7 +194,7 @@ TextureFontPrivate::computeTextureSize()
     {
         if (c.ch == 0) continue; // skip bad glyphs
 
-        if (roww + c.bw + 1 >= m_maxTextureSize)
+        if (roww + c.bw + 1 >= celestia::gl::maxTextureSize)
         {
             w = std::max(w, roww);
             h += rowh;
@@ -250,6 +247,10 @@ TextureFontPrivate::buildAtlas()
     // Linear filtering usually looks best for text
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+#ifndef GL_ES
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+#endif
 
     // Paste all glyph bitmaps into the texture, remembering the offset
     int ox = 0;
