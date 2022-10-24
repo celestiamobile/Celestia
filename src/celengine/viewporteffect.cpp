@@ -14,6 +14,8 @@
 #include "shadermanager.h"
 #include "mapmanager.h"
 
+using celestia::render::VertexObject;
+
 static const Renderer::PipelineState ps;
 
 bool ViewportEffect::preprocess(Renderer* renderer, FramebufferObject* fbo)
@@ -63,7 +65,7 @@ bool PassthroughViewportEffect::render(Renderer* renderer, FramebufferObject* fb
     return true;
 }
 
-void PassthroughViewportEffect::initializeVO(celgl::VertexObject& vo)
+void PassthroughViewportEffect::initializeVO(VertexObject& vo)
 {
     static float quadVertices[] = {
         // positions   // texCoords
@@ -76,11 +78,13 @@ void PassthroughViewportEffect::initializeVO(celgl::VertexObject& vo)
          1.0f,  1.0f,  1.0f, 1.0f
     };
     vo.allocate(sizeof(quadVertices), quadVertices);
-    vo.setVertices(2, GL_FLOAT, false, 4 * sizeof(float), 0);
-    vo.setTextureCoords(2, GL_FLOAT, false, 4 * sizeof(float), 2 * sizeof(float));
+    vo.setVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex,
+                            2, GL_FLOAT, false, 4 * sizeof(float), 0);
+    vo.setVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex,
+                            2, GL_FLOAT, false, 4 * sizeof(float), 2 * sizeof(float));
 }
 
-void PassthroughViewportEffect::draw(celgl::VertexObject& vo)
+void PassthroughViewportEffect::draw(VertexObject& vo)
 {
     vo.draw(GL_TRIANGLES, 6);
 }
@@ -121,17 +125,20 @@ bool WarpMeshViewportEffect::render(Renderer* renderer, FramebufferObject* fbo, 
     return true;
 }
 
-void WarpMeshViewportEffect::initializeVO(celgl::VertexObject& vo)
+void WarpMeshViewportEffect::initializeVO(VertexObject& vo)
 {
     mesh->scopedDataForRendering([&vo](float *data, int size){
         vo.allocate(size, data);
-        vo.setVertices(2, GL_FLOAT, false, 5 * sizeof(float), 0);
-        vo.setTextureCoords(2, GL_FLOAT, false, 5 * sizeof(float), 2 * sizeof(float));
-        vo.setVertexAttribArray(CelestiaGLProgram::IntensityAttributeIndex, 1, GL_FLOAT, false, 5 * sizeof(float), 4 * sizeof(float));
+        vo.setVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex,
+                                2, GL_FLOAT, false, 5 * sizeof(float), 0);
+        vo.setVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex,
+                                2, GL_FLOAT, false, 5 * sizeof(float), 2 * sizeof(float));
+        vo.setVertexAttribArray(CelestiaGLProgram::IntensityAttributeIndex,
+                                1, GL_FLOAT, false, 5 * sizeof(float), 4 * sizeof(float));
     });
 }
 
-void WarpMeshViewportEffect::draw(celgl::VertexObject& vo)
+void WarpMeshViewportEffect::draw(VertexObject& vo)
 {
     vo.draw(GL_TRIANGLES, mesh->count());
 }
