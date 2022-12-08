@@ -336,7 +336,7 @@ List of supported parameters (passed as `-DPARAMETER=VALUE`):
 | ENABLE_GLUT          | bool | OFF     | Build simple Glut frontend
 | ENABLE_GTK           | bool | \*\*OFF   | Build legacy GTK2 frontend
 | ENABLE_QT            | bool | ON      | Build Qt frontend
-| ENABLE_SDL           | bool | OFF     | Build SQL frontend
+| ENABLE_SDL           | bool | OFF     | Build SDL frontend
 | ENABLE_WIN           | bool | \*\*\*ON   | Build Windows native frontend
 | ENABLE_FFMPEG        | bool | OFF     | Support video capture using ffmpeg
 | ENABLE_LIBAVIF       | bool | OFF     | Support AVIF texture using libavif
@@ -371,10 +371,27 @@ Please note that not all options are compatible:
 - `ENABLE_GLES` is not compatible with `ENABLE_GLUT` and with `ENABLE_QT` if
   your `glut` or Qt5 installation don't support OpenGL ES.
 
+## Installing the content
+
+See that the above build instructions are *not* enough to get a running
+Celestia installation, as they are only for the binaries.
+The content -- which is kept in a separate git repository at
+https://github.com/CelestiaProject/CelestiaContent -- also needs to be
+installed:
+
+```
+git clone https://github.com/CelestiaProject/CelestiaContent.git
+cd CelestiaContent
+mkdir build
+cmake ..
+make
+sudo make install
+```
+
 Executable files
 ----------------
 
-As said prevously Celestia provides several user interfaces, accordingly with
+As said previously Celestia provides several user interfaces, accordingly with
 interfaces it's built with it has different executable files installed to
 ${CMAKE_INSTALL_PREFIX}/bin (e.g. with default CMAKE_INSTALL_PREFIX on
 Unix-like systems they are installed into `/usr/local/bin`).
