@@ -43,9 +43,10 @@ using celestia::util::GetLogger;
  *         z coordinates. Units for the position are kilometers.
  */
 bool
-ScriptedOrbit::initialize(const std::string& moduleName,
+ScriptedOrbit::initialize(const std::string* moduleName,
                           const std::string& funcName,
-                          Hash* parameters)
+                          const Hash* parameters,
+                          const fs::path& path)
 {
     if (parameters == nullptr)
         return false;
@@ -57,7 +58,7 @@ ScriptedOrbit::initialize(const std::string& moduleName,
         return false;
     }
 
-    if (!moduleName.empty())
+    if (moduleName != nullptr && !moduleName->empty())
     {
         lua_getglobal(luaState, "require");
         if (!lua_isfunction(luaState, -1))
@@ -67,7 +68,7 @@ ScriptedOrbit::initialize(const std::string& moduleName,
             return false;
         }
 
-        lua_pushstring(luaState, moduleName.c_str());
+        lua_pushstring(luaState, moduleName->c_str());
         if (lua_pcall(luaState, 1, 1, 0) != 0)
         {
             GetLogger()->error("Failed to load module for ScriptedOrbit: {}\n", lua_tostring(luaState, -1));
@@ -92,6 +93,13 @@ ScriptedOrbit::initialize(const std::string& moduleName,
     lua_newtable(luaState);
 
     SetLuaVariables(luaState, parameters);
+    // set the addon path
+    {
+        std::string pathStr = path.string();
+        lua_pushstring(luaState, "AddonPath");
+        lua_pushstring(luaState, pathStr.c_str());
+        lua_settable(luaState, -3);
+    }
 
     // Call the generator function
     if (lua_pcall(luaState, 1, 1, 0) != 0)

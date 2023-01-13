@@ -9,18 +9,20 @@
 // of the License, or (at your option) any later version.
 
 #include <algorithm>
-#include <iostream>
 #include <iomanip>
+#include <limits>
+#include <ostream>
+
+#include <celengine/hash.h>
 #include <celengine/parser.h>
-#include <celutil/tokenizer.h>
+#include <celengine/value.h>
 #include <celutil/logger.h>
+#include <celutil/tokenizer.h>
 #include "favorites.h"
 
-using namespace Eigen;
-using namespace std;
 using celestia::util::GetLogger;
 
-FavoritesList* ReadFavoritesList(istream& in)
+FavoritesList* ReadFavoritesList(std::istream& in)
 {
     auto* favorites = new FavoritesList();
     Tokenizer tokenizer(&in);
@@ -31,31 +33,27 @@ FavoritesList* ReadFavoritesList(istream& in)
         if (tokenizer.getTokenType() != Tokenizer::TokenString)
         {
             GetLogger()->error("Error parsing favorites file.\n");
-            for_each(favorites->begin(), favorites->end(), [](FavoritesEntry* fav) { delete fav; });
+            std::for_each(favorites->begin(), favorites->end(), [](FavoritesEntry* fav) { delete fav; });
             delete favorites;
             return nullptr;
         }
 
         FavoritesEntry* fav = new FavoritesEntry(); // FIXME: check
-        fav->name = tokenizer.getStringValue();
+        fav->name = *tokenizer.getStringValue();
 
-        Value* favParamsValue = parser.readValue();
-        if (favParamsValue == nullptr || favParamsValue->getType() != Value::HashType)
+        const Value favParamsValue = parser.readValue();
+        const Hash* favParams = favParamsValue.getHash();
+        if (favParams == nullptr)
         {
             GetLogger()->error("Error parsing favorites entry {}\n", fav->name);
-            for_each(favorites->begin(), favorites->end(), [](FavoritesEntry* fav) { delete fav; });
+            std::for_each(favorites->begin(), favorites->end(), [](FavoritesEntry* fav) { delete fav; });
             delete favorites;
-            if (favParamsValue != nullptr)
-                delete favParamsValue;
             delete fav;
             return nullptr;
         }
 
-        Hash* favParams = favParamsValue->getHash();
-
         //If this is a folder, don't get any other params.
-        if(!favParams->getBoolean("isFolder", fav->isFolder))
-            fav->isFolder = false;
+        fav->isFolder = favParams->getBoolean("isFolder").value_or(false);
         if(fav->isFolder)
         {
             favorites->push_back(fav);
@@ -63,40 +61,38 @@ FavoritesList* ReadFavoritesList(istream& in)
         }
 
         // Get parentFolder
-        favParams->getString("parentFolder", fav->parentFolder);
+        if (const std::string* parentFolder = favParams->getString("parentFolder"); parentFolder != nullptr)
+            fav->parentFolder = *parentFolder;
 
         // Get position. It is stored as a base in light years with an offset
         // in microlight years. Bad idea, but we need to stay compatible.
-        Vector3d base(Vector3d::Zero());
-        Vector3d offset(Vector3d::Zero());
-        favParams->getVector("base", base);
-        favParams->getVector("offset", offset);
+        auto base = favParams->getVector3<double>("base").value_or(Eigen::Vector3d::Zero());
+        auto offset = favParams->getVector3<double>("offset").value_or(Eigen::Vector3d::Zero());
         fav->position = UniversalCoord::CreateLy(base) + UniversalCoord::CreateLy(offset * 1.0e-6);
 
         // Get orientation
-        Vector3d axis = Vector3d::UnitX();
-        double angle = 0.0;
-        favParams->getVector("axis", axis);
-        favParams->getNumber("angle", angle);
-        fav->orientation = Quaternionf(AngleAxisf((float) angle, axis.cast<float>()));
+        auto axis = favParams->getVector3<double>("axis").value_or(Eigen::Vector3d::UnitX());
+        auto angle = favParams->getNumber<double>("angle").value_or(0.0);
+        fav->orientation = Eigen::Quaternionf(Eigen::AngleAxisf((float) angle, axis.cast<float>()));
 
         // Get time
-        fav->jd = 0.0;
-        favParams->getNumber("time", fav->jd);
+        fav->jd = favParams->getNumber<double>("time").value_or(0.0);
 
         // Get the selected object
-        favParams->getString("selection", fav->selectionName);
+        if (const std::string* selectionName = favParams->getString("selection"); selectionName != nullptr)
+            fav->selectionName = *selectionName;
 
-        string coordSysName;
-        favParams->getString("coordsys", coordSysName);
-        if (coordSysName == "ecliptical")
-            fav->coordSys = ObserverFrame::Ecliptical;
-        else if (coordSysName == "equatorial")
-            fav->coordSys = ObserverFrame::Equatorial;
-        else if (coordSysName == "geographic")
-            fav->coordSys = ObserverFrame::BodyFixed;
-        else
-            fav->coordSys = ObserverFrame::Universal;
+        if (const std::string* coordSysName = favParams->getString("coordsys"); coordSysName != nullptr)
+        {
+            if (*coordSysName == "ecliptical")
+                fav->coordSys = ObserverFrame::Ecliptical;
+            else if (*coordSysName == "equatorial")
+                fav->coordSys = ObserverFrame::Equatorial;
+            else if (*coordSysName == "geographic")
+                fav->coordSys = ObserverFrame::BodyFixed;
+            else
+                fav->coordSys = ObserverFrame::Universal;
+        }
 
         favorites->push_back(fav);
     }
@@ -105,23 +101,23 @@ FavoritesList* ReadFavoritesList(istream& in)
 }
 
 
-void WriteFavoritesList(FavoritesList& favorites, ostream& out)
+void WriteFavoritesList(FavoritesList& favorites, std::ostream& out)
 {
     for (const auto fav : favorites)
     {
-        AngleAxisf aa(fav->orientation);
-        Vector3f axis = aa.axis();
+        Eigen::AngleAxisf aa(fav->orientation);
+        Eigen::Vector3f axis = aa.axis();
         float angle = aa.angle();
 
         // Ugly conversion from a universal coordinate to base+offset, with base
         // in light years and offset in microlight years. This is a bad way to
         // store position, but we need to maintain compatibility with older version
         // of Celestia (for now...)
-        Vector3d baseUly((double) fav->position.x, (double) fav->position.y, (double) fav->position.z);
-        Vector3d offset((double) (fav->position.x - (BigFix) baseUly.x()),
-                        (double) (fav->position.y - (BigFix) baseUly.y()),
-                        (double) (fav->position.z - (BigFix) baseUly.z()));
-        Vector3d base = baseUly * 1e-6; // Base is in micro-light years
+        Eigen::Vector3d baseUly((double) fav->position.x, (double) fav->position.y, (double) fav->position.z);
+        Eigen::Vector3d offset((double) (fav->position.x - (BigFix) baseUly.x()),
+                               (double) (fav->position.y - (BigFix) baseUly.y()),
+                               (double) (fav->position.z - (BigFix) baseUly.z()));
+        Eigen::Vector3d base = baseUly * 1e-6; // Base is in micro-light years
 
         out << '"' << fav->name << "\" {\n";
         if(fav->isFolder)
@@ -130,13 +126,13 @@ void WriteFavoritesList(FavoritesList& favorites, ostream& out)
         {
             out << "\tisFolder " << "false\n";
             out << "\tparentFolder \"" << fav->parentFolder << "\"\n";
-            out << setprecision(16);
+            out << std::setprecision(std::numeric_limits<double>::max_digits10);
             out << "\tbase   [ " << base.x()   << ' ' << base.y()   << ' ' << base.z()   << " ]\n";
             out << "\toffset [ " << offset.x() << ' ' << offset.y() << ' ' << offset.z() << " ]\n";
-            out << setprecision(6);
+            out << std::setprecision(std::numeric_limits<float>::max_digits10);
             out << "\taxis   [ " << axis.x() << ' ' << axis.y() << ' ' << axis.z() << " ]\n";
             out << "\tangle  " << angle << '\n';
-            out << setprecision(16);
+            out << std::setprecision(std::numeric_limits<double>::max_digits10);
             out << "\ttime   " << fav->jd << '\n';
             out << "\tselection \"" << fav->selectionName << "\"\n";
             out << "\tcoordsys \"";

@@ -8,22 +8,29 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#ifndef _CELENGINE_STARDB_H_
-#define _CELENGINE_STARDB_H_
+#pragma once
 
-#include <iostream>
-#include <vector>
+#include <cstdint>
+#include <iosfwd>
 #include <map>
-#include <celutil/blockarray.h>
-#include <celengine/constellation.h>
-#include <celengine/starname.h>
-#include <celengine/star.h>
-#include <celengine/staroctree.h>
+#include <string>
+#include <vector>
+
+#include <Eigen/Core>
+#include <Eigen/Geometry>
+
+#include <celcompat/filesystem.h>
 #include <celengine/parseobject.h>
+#include <celutil/blockarray.h>
+#include "astroobj.h"
+#include "hash.h"
+#include "staroctree.h"
 
 
-static const unsigned int MAX_STAR_NAMES = 10;
+class StarNameDatabase;
 
+
+constexpr inline unsigned int MAX_STAR_NAMES = 10;
 
 class StarDatabase
 {
@@ -32,8 +39,8 @@ class StarDatabase
     ~StarDatabase();
 
 
-    inline Star*  getStar(const uint32_t) const;
-    inline uint32_t size() const;
+    inline Star* getStar(const std::uint32_t) const;
+    inline std::uint32_t size() const;
 
     Star* find(AstroCatalog::IndexNumber catalogNumber) const;
     Star* find(const std::string&, bool i18n) const;
@@ -53,8 +60,7 @@ class StarDatabase
                         const Eigen::Vector3f& obsPosition,
                         float radius) const;
 
-    std::string getStarName    (const Star&, bool i18n = false) const;
-    void getStarName(const Star& star, char* nameBuffer, unsigned int bufferSize, bool i18n = false) const;
+    std::string getStarName(const Star&, bool i18n = false) const;
     std::string getStarNameList(const Star&, const unsigned int maxNames = MAX_STAR_NAMES) const;
 
     StarNameDatabase* getNameDatabase() const;
@@ -73,7 +79,7 @@ class StarDatabase
 
     // Not exact, but any star with a catalog number greater than this is assumed to not be
     // a HIPPARCOS stars.
-    static const AstroCatalog::IndexNumber MAX_HIPPARCOS_NUMBER = 999999;
+    static constexpr AstroCatalog::IndexNumber MAX_HIPPARCOS_NUMBER = 999999;
 
     struct CrossIndexEntry
     {
@@ -83,22 +89,20 @@ class StarDatabase
         bool operator<(const CrossIndexEntry&) const;
     };
 
-    typedef std::vector<CrossIndexEntry> CrossIndex;
+    using CrossIndex = std::vector<CrossIndexEntry>;
 
-    bool   loadCrossIndex  (const Catalog, std::istream&);
+    bool loadCrossIndex(const Catalog, std::istream&);
     AstroCatalog::IndexNumber searchCrossIndexForCatalogNumber(const Catalog, const AstroCatalog::IndexNumber number) const;
-    Star*  searchCrossIndex(const Catalog, const AstroCatalog::IndexNumber number) const;
+    Star* searchCrossIndex(const Catalog, const AstroCatalog::IndexNumber number) const;
     AstroCatalog::IndexNumber crossIndex(const Catalog, const AstroCatalog::IndexNumber number) const;
 
     void finish();
-
-    static StarDatabase* read(std::istream&);
 
 private:
     bool createStar(Star* star,
                     DataDisposition disposition,
                     AstroCatalog::IndexNumber catalogNumber,
-                    Hash* starData,
+                    const Hash* starData,
                     const fs::path& path,
                     const bool isBarycenter);
 
@@ -106,7 +110,7 @@ private:
     void buildIndexes();
     Star* findWhileLoading(AstroCatalog::IndexNumber catalogNumber) const;
 
-    int nStars{ 0 };
+    std::uint32_t nStars{ 0 };
 
     Star*             stars{ nullptr };
     StarNameDatabase* namesDB{ nullptr };
@@ -134,14 +138,12 @@ private:
 };
 
 
-Star* StarDatabase::getStar(const uint32_t n) const
+Star* StarDatabase::getStar(const std::uint32_t n) const
 {
     return stars + n;
 }
 
-uint32_t StarDatabase::size() const
+std::uint32_t StarDatabase::size() const
 {
     return nStars;
 }
-
-#endif // _CELENGINE_STARDB_H_

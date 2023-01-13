@@ -9,10 +9,12 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#include <fmt/format.h>
-#include "scriptobject.h"
+#include <cstddef>
 
-using namespace std;
+#include <fmt/format.h>
+
+#include <celengine/value.h>
+#include "scriptobject.h"
 
 
 // global script context for scripted orbits and rotations
@@ -44,10 +46,10 @@ GetScriptedObjectContext()
 /*! Generate a unique name for this script orbit object so that
  * we can refer to it later.
  */
-string
+std::string
 GenerateScriptObjectName()
 {
-    string buf;
+    std::string buf;
     buf = fmt::format("{}{}", ScriptedObjectNamePrefix, ScriptedObjectNameIndex);
     ScriptedObjectNameIndex++;
 
@@ -61,7 +63,7 @@ GenerateScriptObjectName()
 void
 GetLuaTableEntry(lua_State* state,
                  int tableIndex,
-                 const string& key)
+                 const std::string& key)
 {
     lua_pushvalue(state, tableIndex);
     lua_pushstring(state, key.c_str());
@@ -76,7 +78,7 @@ GetLuaTableEntry(lua_State* state,
 double
 SafeGetLuaNumber(lua_State* state,
                  int tableIndex,
-                 const string& key,
+                 const std::string& key,
                  double defaultValue)
 {
     double v = defaultValue;
@@ -95,33 +97,33 @@ SafeGetLuaNumber(lua_State* state,
  *  only number, string, and boolean values are converted.
  */
 void
-SetLuaVariables(lua_State* state, Hash* parameters)
+SetLuaVariables(lua_State* state, const Hash* parameters)
 {
-    for (const auto& param : *parameters)
+    parameters->for_all([state](const std::string& key, const Value& value)
     {
-        size_t percentPos = param.first.find('%');
-        if (percentPos == string::npos)
+        std::size_t percentPos = key.find('%');
+        if (percentPos == std::string::npos)
         {
-            switch (param.second->getType())
+            switch (value.getType())
             {
-            case Value::NumberType:
-                lua_pushstring(state, param.first.c_str());
-                lua_pushnumber(state, param.second->getNumber());
+            case ValueType::NumberType:
+                lua_pushstring(state, key.c_str());
+                lua_pushnumber(state, *value.getNumber());
                 lua_settable(state, -3);
                 break;
-            case Value::StringType:
-                lua_pushstring(state, param.first.c_str());
-                lua_pushstring(state, param.second->getString().c_str());
+            case ValueType::StringType:
+                lua_pushstring(state, key.c_str());
+                lua_pushstring(state, value.getString()->c_str());
                 lua_settable(state, -3);
                 break;
-            case Value::BooleanType:
-                lua_pushstring(state, param.first.c_str());
-                lua_pushboolean(state, param.second->getBoolean());
+            case ValueType::BooleanType:
+                lua_pushstring(state, key.c_str());
+                lua_pushboolean(state, *value.getBoolean());
                 lua_settable(state, -3);
                 break;
             default:
                 break;
             }
         }
-    }
+    });
 }

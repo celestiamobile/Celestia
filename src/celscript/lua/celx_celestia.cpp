@@ -9,8 +9,23 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
+#include <iostream>
 #include <optional>
+
 #include <fmt/format.h>
+
+#include <celcompat/filesystem.h>
+#include <celengine/category.h>
+#include <celengine/texture.h>
+#include <celestia/audiosession.h>
+#include <celestia/url.h>
+#include <celestia/celestiacore.h>
+#include <celestia/view.h>
+#include <celscript/common/scriptmaps.h>
+#include <celttf/truetypefont.h>
+#include <celutil/gettext.h>
+#include <celutil/logger.h>
+#include <celutil/stringutils.h>
 #include "celx.h"
 #include "celx_internal.h"
 #include "celx_celestia.h"
@@ -22,17 +37,6 @@
 #include "celx_rotation.h"
 #include "celx_vector.h"
 #include "celx_category.h"
-#include <celestia/audiosession.h>
-#include <celestia/url.h>
-#include <celestia/celestiacore.h>
-#include <celestia/view.h>
-#include <celscript/common/scriptmaps.h>
-#include <celutil/gettext.h>
-#include <celutil/logger.h>
-#include <celttf/truetypefont.h>
-#include <celengine/category.h>
-#include <celengine/texture.h>
-#include <celcompat/filesystem.h>
 
 
 using namespace std;
@@ -595,8 +599,8 @@ static int celestia_showconstellations(lua_State* l)
 
     if (lua_type(l, 2) == LUA_TNONE) // No argument passed
     {
-        for (const auto ast : *asterisms)
-            ast->setActive(true);
+        for (auto& ast : *asterisms)
+            ast.setActive(true);
     }
     else if (!lua_istable(l, 2))
     {
@@ -618,10 +622,10 @@ static int celestia_showconstellations(lua_State* l)
                 Celx_DoError(l, "Values in table-argument to celestia:showconstellations() must be strings");
                 return 0;
             }
-            for (const auto ast : *asterisms)
+            for (auto& ast : *asterisms)
             {
-                if (compareIgnoringCase(constellation, ast->getName(false)) == 0)
-                    ast->setActive(true);
+                if (compareIgnoringCase(constellation, ast.getName(false)) == 0)
+                    ast.setActive(true);
             }
             lua_pop(l,1);
         }
@@ -640,8 +644,8 @@ static int celestia_hideconstellations(lua_State* l)
 
     if (lua_type(l, 2) == LUA_TNONE) // No argument passed
     {
-        for (const auto ast : *asterisms)
-            ast->setActive(false);
+        for (auto& ast : *asterisms)
+            ast.setActive(false);
     }
     else if (!lua_istable(l, 2))
     {
@@ -663,10 +667,10 @@ static int celestia_hideconstellations(lua_State* l)
                 Celx_DoError(l, "Values in table-argument to celestia:hideconstellations() must be strings");
                 return 0;
             }
-            for (const auto ast : *asterisms)
+            for (auto& ast : *asterisms)
             {
-                if (compareIgnoringCase(constellation, ast->getName(false)) == 0)
-                    ast->setActive(false);
+                if (compareIgnoringCase(constellation, ast.getName(false)) == 0)
+                    ast.setActive(false);
             }
             lua_pop(l,1);
         }
@@ -690,8 +694,8 @@ static int celestia_setconstellationcolor(lua_State* l)
 
     if (lua_type(l, 5) == LUA_TNONE) // Fourth argument omited
     {
-        for (const auto ast : *asterisms)
-            ast->setOverrideColor(constellationColor);
+        for (auto& ast : *asterisms)
+            ast.setOverrideColor(constellationColor);
     }
     else if (!lua_istable(l, 5))
     {
@@ -706,9 +710,9 @@ static int celestia_setconstellationcolor(lua_State* l)
             if (lua_isstring(l, -1))
             {
                 const char* constellation = lua_tostring(l, -1);
-                for (const auto ast : *asterisms)
-                    if (compareIgnoringCase(constellation, ast->getName(false)) == 0)
-                        ast->setOverrideColor(constellationColor);
+                for (auto& ast : *asterisms)
+                    if (compareIgnoringCase(constellation, ast.getName(false)) == 0)
+                        ast.setOverrideColor(constellationColor);
             }
             else
             {
@@ -2653,10 +2657,9 @@ static int celestia_getparamstring(lua_State* l)
     Celx_CheckArgs(l, 2, 2, "One argument expected to celestia:getparamstring()");
     CelestiaCore* appCore = this_celestia(l);
     const char* s = Celx_SafeGetString(l, 2, AllErrors, "Argument to celestia:getparamstring must be a string");
-    std::string paramString; // HWR
     CelestiaConfig* config = appCore->getConfig();
-    config->configParams->getString(s, paramString);
-    lua_pushstring(l,paramString.c_str());
+    const std::string* paramString = config->configParams->getString(s);
+    lua_pushstring(l, paramString == nullptr ? "" : paramString->c_str());
     return 1;
 }
 
@@ -2872,7 +2875,7 @@ void ExtendCelestiaMetaTable(lua_State* l)
     celx.pushClassName(Celx_Celestia);
     lua_rawget(l, LUA_REGISTRYINDEX);
     if (lua_type(l, -1) != LUA_TTABLE)
-        cout << "Metatable for " << CelxLua::ClassNames[Celx_Celestia] << " not found!\n";
+        std::cout << "Metatable for " << CelxLua::ClassNames[Celx_Celestia] << " not found!\n";
     celx.registerMethod("log", celestia_log);
     celx.registerMethod("settimeslice", celestia_settimeslice);
     celx.registerMethod("setluahook", celestia_setluahook);

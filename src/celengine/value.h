@@ -11,64 +11,87 @@
 #pragma once
 
 #include <cassert>
+#include <cstdint>
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
+#include "astro.h"
 #include "hash.h"
 
+enum class ValueType : std::uint8_t
+{
+    NullType       = 0,
+    NumberType     = 1,
+    StringType     = 2,
+    ArrayType      = 3,
+    HashType       = 4,
+    BooleanType    = 5
+};
+
 class Value;
-using Array = std::vector<Value*>;
-using ValueArray = Array;
+using ValueArray = std::vector<Value>;
 
 class Value
 {
  public:
-    enum ValueType
+    struct Units
     {
-        NullType       = 0,
-        NumberType     = 1,
-        StringType     = 2,
-        ArrayType      = 3,
-        HashType       = 4,
-        BooleanType    = 5
+        astro::LengthUnit length{ astro::LengthUnit::Default };
+        astro::TimeUnit time{ astro::TimeUnit::Default };
+        astro::AngleUnit angle{ astro::AngleUnit::Default };
+        astro::MassUnit mass{ astro::MassUnit::Default };
     };
 
     Value() = default;
     ~Value();
     Value(const Value&) = delete;
-    Value(Value&&) = default;
+    Value(Value&&) noexcept;
     Value& operator=(const Value&) = delete;
-    Value& operator=(Value&&) = default;
+    Value& operator=(Value&&) noexcept;
 
-    Value(double d) : type(NumberType)
+    explicit Value(double d) : type(ValueType::NumberType)
     {
         data.d = d;
     }
-    Value(const char *s) : type(StringType)
+    explicit Value(const char *s) : type(ValueType::StringType)
     {
         data.s = new std::string(s);
     }
-    explicit Value(const std::string_view sv) : type(StringType)
+    explicit Value(const std::string_view sv) : type(ValueType::StringType)
     {
         data.s = new std::string(sv);
     }
-    explicit Value(const std::string &s) : type(StringType)
+    explicit Value(const std::string &s) : type(ValueType::StringType)
     {
         data.s = new std::string(s);
     }
-    Value(Array *a) : type(ArrayType)
+    explicit Value(std::string&& s) : type(ValueType::StringType)
     {
-        data.a = a;
+        data.s = new std::string(std::move(s));
     }
-    Value(Hash *h) : type(HashType)
+    explicit Value(std::unique_ptr<ValueArray>&& a) : type(ValueType::ArrayType)
     {
-        data.h = h;
+        data.a = a.release();
     }
-    Value(bool b) : type(BooleanType)
+    explicit Value(std::unique_ptr<Hash>&& h) : type(ValueType::HashType)
+    {
+        data.h = h.release();
+    }
+
+    // C++ likes implicit conversions to bool, so use template magic
+    // to restrict this constructor to exactly bool
+    template<typename T, std::enable_if_t<std::is_same_v<T, bool>, int> = 0>
+    explicit Value(T b) : type(ValueType::BooleanType)
     {
         data.d = b ? 1.0 : 0.0;
     }
+
+    void setUnits(Units _units) { units = _units; }
 
     ValueType getType() const
     {
@@ -76,43 +99,54 @@ class Value
     }
     bool isNull() const
     {
-        return type == NullType;
+        return type == ValueType::NullType;
     }
-    double getNumber() const
+    std::optional<double> getNumber() const
     {
-        assert(type == NumberType);
-        return data.d;
+        return type == ValueType::NumberType
+            ? std::make_optional(data.d)
+            : std::nullopt;
     }
-    std::string getString() const
+    const std::string* getString() const
     {
-        assert(type == StringType);
-        return *data.s;
+        return type == ValueType::StringType
+            ? data.s
+            : nullptr;
     }
-    Array* getArray() const
+    const ValueArray* getArray() const
     {
-        assert(type == ArrayType);
-        return data.a;
+        return type == ValueType::ArrayType
+            ? data.a
+            : nullptr;
     }
-    Hash* getHash() const
+    const Hash* getHash() const
     {
-        assert(type == HashType);
-        return data.h;
+        return type == ValueType::HashType
+            ? data.h
+            : nullptr;
     }
-    bool getBoolean() const
+    std::optional<bool> getBoolean() const
     {
-        assert(type == BooleanType);
-        return (data.d != 0.0);
+        return type == ValueType::BooleanType
+            ? std::make_optional(data.d != 0.0)
+            : std::nullopt;
     }
+
+    astro::LengthUnit getLengthUnit() const { return units.length; }
+    astro::TimeUnit getTimeUnit() const { return units.time; }
+    astro::AngleUnit getAngleUnit() const { return units.angle; }
+    astro::MassUnit getMassUnit() const { return units.mass; }
 
  private:
     union Data
     {
-        std::string *s;
-        double       d;
-        Array       *a;
-        Hash        *h;
+        const std::string *s;
+        double             d;
+        const ValueArray  *a;
+        const Hash        *h;
     };
 
-    ValueType type { NullType };
+    ValueType type { ValueType::NullType };
+    Units units{ };
     Data data;
 };

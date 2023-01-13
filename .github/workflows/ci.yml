@@ -15,22 +15,13 @@ env:
 
 jobs:
   build-windows:
+    name: "windows-${{matrix.platform}} with ${{matrix.qtversion}}"
     runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
-        platform: [x64, x86]
-        generator_platform: [x64, Win32]
-        include:
-          - platform: x64
-            generator_platform: x64
-          - platform: x86
-            generator_platform: Win32
-        exclude:
-          - platform: x64
-            generator_platform: Win32
-          - platform: x86
-            generator_platform: x64
+        platform: [ x64, x86 ]
+        qtversion: [ Qt5, Qt6 ]
 
     steps:
     - name: 'Setup NuGet Credentials'
@@ -45,15 +36,29 @@ jobs:
         -password "${{ secrets.GITHUB_TOKEN }}"
 
     - name: 'Install dependencies'
-      run: vcpkg --triplet=${{matrix.platform}}-windows install --recurse libpng libjpeg-turbo gettext lua fmt libepoxy eigen3 freetype cspice qt5-base ffmpeg[x264]
+      shell: cmd
+      run: |
+        set QtBasePkg=qtbase
+        set QtCompatPkg=qt5compat
+        if ${{matrix.qtversion}}==Qt5 (
+            set QtBasePkg=qt5-base
+            unset QtCompatPkg
+        )
+        vcpkg --triplet=${{matrix.platform}}-windows install --recurse libpng libjpeg-turbo gettext luajit fmt libepoxy eigen3 freetype cspice ffmpeg[x264] %QtBasePkg% %QtCompatPkg%
 
     - name: 'Checkout source code'
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         submodules: true
 
     - name: 'Configure CMake'
-      run: cmake -B ${{github.workspace}}/build -DCMAKE_TOOLCHAIN_FILE=c:/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=${{matrix.platform}}-windows -DCMAKE_GENERATOR_PLATFORM=${{matrix.generator_platform}} -DENABLE_SPICE=ON -DENABLE_TOOLS=ON -DENABLE_TESTS=ON -DENABLE_SDL=OFF -DENABLE_QT=ON -DENABLE_FFMPEG=ON -DENABLE_MINIAUDIO=ON
+      shell: cmd
+      run: |
+        set UseQt6=OFF
+        set GeneratorPlatform=${{matrix.platform}}
+        if ${{matrix.qtversion}}==Qt6 set UseQt6=ON
+        if ${{matrix.platform}}==x86 set GeneratorPlatform=Win32
+        cmake -B ${{github.workspace}}/build -DCMAKE_TOOLCHAIN_FILE=c:/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=${{matrix.platform}}-windows -DCMAKE_GENERATOR_PLATFORM=%GeneratorPlatform% -DENABLE_SPICE=ON -DENABLE_TOOLS=ON -DENABLE_TESTS=ON -DENABLE_SDL=OFF -DENABLE_QT=ON -DUSE_QT6=%UseQt6% -DENABLE_FFMPEG=ON -DENABLE_MINIAUDIO=ON
 
     - name: Build
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- /maxcpucount:2 /nologo
@@ -68,31 +73,63 @@ jobs:
       working-directory: ${{github.workspace}}/build
       run: ctest -C ${{env.BUILD_TYPE}}
 
-    - name: Package artifacts
+    - name: Run winqtdeploy
       working-directory: ${{github.workspace}}/build/src/celestia
+      if: matrix.qtversion == 'Qt5'
       run: |
-        7z a celestia-dep.${{matrix.platform}}.7z ${{env.BUILD_TYPE}}\*
-        7z a celestia-win.${{matrix.platform}}.7z win32\${{env.BUILD_TYPE}}\* win32\res\${{env.BUILD_TYPE}}\res_*.dll
         c:\vcpkg\ports\qt5-base\qtdeploy.ps1 qt\${{env.BUILD_TYPE}}\
-        7z a celestia-qt.${{matrix.platform}}.7z qt\${{env.BUILD_TYPE}}\*
-        cd ..\tools
-        7z a celestia-tools.${{matrix.platform}}.7z xyzv2bin\${{env.BUILD_TYPE}}\*.exe spice2xyzv\${{env.BUILD_TYPE}}\*.exe
+
+    - name: Run winqtdeploy
+      working-directory: ${{github.workspace}}/build/src/celestia
+      if: matrix.qtversion == 'Qt6'
+      run: |
+        C:/vcpkg/installed/${{matrix.platform}}-windows/tools/Qt6/bin/windeployqt.exe qt\${{env.BUILD_TYPE}}\celestia-qt.exe
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       if: success()
       with:
-        name: celestia-${{matrix.platform}}
-        path: ${{github.workspace}}/build/src/*/*.7z
+        name: celestia-${{matrix.platform}}-${{matrix.qtversion}}
+        path: |
+          ${{github.workspace}}/build/src/**/*.exe
+          ${{github.workspace}}/build/src/**/*.dll
+          ${{github.workspace}}/build/po/**/*.gmo
+          ${{github.workspace}}/build/tools/**/*.exe
 
-  build-ubuntu-old:
+  build-posix:
+    name: "${{matrix.config.os}} with ${{matrix.qtversion}}"
     strategy:
       fail-fast: false
       matrix:
-        platform: [ ubuntu-18.04 ]
-    runs-on: ${{matrix.platform}}
+        config:
+        - os: ubuntu-18.04
+          avif: OFF     # Not supported on Ubuntu18.04
+          gles: ON
+          glut: ON
+          gtk3: ON
+          minaudio: OFF # Requires newer g++
+        - os: ubuntu-22.04
+          avif: ON
+          gles: ON
+          glut: ON
+          gtk3: ON
+          minaudio: ON
+        - os: macos-latest
+          avif: ON
+          gles: OFF     # Native macOS applications can't access GLES APIs
+          glut: ON
+          gtk3: OFF     # macOS is not a primary target for GTK frontend
+          minaudio: ON
+        qtversion: [ Qt5, Qt6 ]
+        exclude:
+        - config:
+            os: ubuntu-18.04
+          qtversion: Qt6
+
+    runs-on: ${{matrix.config.os}}
     steps:
     - name: 'Install dependencies'
+      if: matrix.config.os != 'macos-latest'
       run: |
         sudo apt update
         sudo apt install -y libeigen3-dev \
@@ -104,33 +141,71 @@ jobs:
                             libjpeg-dev \
                             libpng-dev \
                             libglu1-mesa-dev \
-                            qtbase5-dev \
-                            qtbase5-dev-tools \
-                            libqt5opengl5-dev \
                             libgtk-3-dev \
                             libfreetype6-dev \
                             libsdl2-dev \
                             libluajit-5.1-dev \
                             libfmt-dev \
+                            freeglut3-dev \
                             ninja-build
+        if [ "${{matrix.qtversion}}" = "Qt5" ]; then
+            sudo apt install -y qtbase5-dev qtbase5-dev-tools
+        else
+            sudo apt install -y qt6-base-dev qt6-base-dev-tools libqt6core5compat6-dev
+        fi
+        if [ "${{matrix.config.avif}}" = "ON" ]; then
+            sudo apt install -y libavif-dev
+        fi
+
+    - name: 'Install dependencies'
+      if: matrix.config.os == 'macos-latest'
+      run: |
+        brew install pkg-config \
+                     ninja \
+                     eigen \
+                     ffmpeg \
+                     gtk+ \
+                     gtkglext \
+                     cspice \
+                     fmt \
+                     jpeg \
+                     gettext \
+                     libpng \
+                     lua \
+                     freetype \
+                     libepoxy \
+                     sdl2 \
+                     freeglut \
+                     libavif
+        if [ "${{matrix.qtversion}}" = "Qt5" ]; then
+            brew install qt5
+        else
+            brew install qt6
+        fi
 
     - name: 'Checkout source code'
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         submodules: true
 
     - name: 'Configure CMake'
       run: |
-        cmake -B ${{github.workspace}}/build  \
-              -G Ninja                        \
-              -DENABLE_GLES=ON                \
-              -DENABLE_SPICE=ON               \
-              -DENABLE_TOOLS=OFF              \
-              -DENABLE_TESTS=ON               \
-              -DENABLE_SDL=ON                 \
-              -DENABLE_GTK=ON                 \
-              -DUSE_GTK3=ON                   \
-              -DENABLE_FFMPEG=ON
+        [ "${{matrix.qtversion}}" = "Qt6" ] && UseQt6=ON
+        cmake -B ${{github.workspace}}/build            \
+              -G Ninja                                  \
+              -DENABLE_GLES=${{matrix.config.gles}}     \
+              -DENABLE_SPICE=ON                         \
+              -DENABLE_TOOLS=OFF                        \
+              -DENABLE_TESTS=ON                         \
+              -DENABLE_SDL=ON                           \
+              -DENABLE_GLUT=${{matrix.config.glut}}     \
+              -DENABLE_GTK=ON                           \
+              -DUSE_GTK3=${{matrix.config.gtk3}}        \
+              -DENABLE_QT=ON                            \
+              -DUSE_QT6=${UseQt6:OFF}                   \
+              -DENABLE_FFMPEG=ON                        \
+              -DENABLE_LIBAVIF=${{matrix.config.avif}}  \
+              -DENABLE_MINIAUDIO=${{matrix.config.minaudio}}
 
     - name: Build
       working-directory: ${{github.workspace}}/build
@@ -160,7 +235,7 @@ jobs:
                             gcc-toolset-11-gcc-c++
 
     - name: 'Checkout source code'
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         submodules: true
 
@@ -190,7 +265,6 @@ jobs:
       working-directory: ${{github.workspace}}/build
       run: ctest
 
-
   sonarscanner:
     runs-on: sonarscanner
     steps:
@@ -215,7 +289,7 @@ jobs:
                             cmake
 
     - name: 'Checkout source code'
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         submodules: true
         # Disabling shallow clone is recommended for improving relevancy of reporting

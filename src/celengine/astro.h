@@ -8,40 +8,55 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#ifndef _CELENGINE_ASTRO_H_
-#define _CELENGINE_ASTRO_H_
+#pragma once
 
 #include <Eigen/Geometry>
 #include <iosfwd>
+#include <optional>
 #include <string>
-#include <string_view>
 #include <celmath/mathlib.h>
 #include <celutil/array_view.h>
 
-#define SOLAR_ABSMAG   4.83f
-#define LN_MAG         1.085736
-#define LY_PER_PARSEC  3.26167
-#define KM_PER_LY      9460730472580.8
+constexpr inline float SOLAR_ABSMAG = 4.83f;
+constexpr inline float LN_MAG = 1.085736f;
+
+template<typename T>
+constexpr inline T LY_PER_PARSEC = static_cast<T>(3.26167);
+
+template<typename T>
+constexpr inline T KM_PER_LY = static_cast<T>(9460730472580.8);
+
 // Old incorrect value; will be required for cel:// URL compatibility
 // #define OLD_KM_PER_LY     9466411842000.000
-#define KM_PER_AU      149597870.7
-#define AU_PER_LY      (KM_PER_LY / KM_PER_AU)
-#define KM_PER_PARSEC  (KM_PER_LY * LY_PER_PARSEC)
+
+template<typename T>
+constexpr inline T KM_PER_AU = static_cast<T>(149597870.7);
+
+template<typename T>
+constexpr inline T AU_PER_LY = KM_PER_LY<T> / KM_PER_AU<T>;
+
+template<typename T>
+constexpr inline T KM_PER_PARSEC = KM_PER_LY<T> * LY_PER_PARSEC<T>;
 
 // Julian year
-#define DAYS_PER_YEAR  365.25
+constexpr inline double DAYS_PER_YEAR = 365.25;
 
-#define SECONDS_PER_DAY 86400.0
-#define MINUTES_PER_DAY 1440.0
-#define HOURS_PER_DAY   24.0
+constexpr inline double SECONDS_PER_DAY = 86400.0;
+constexpr inline double MINUTES_PER_DAY = 1440.0;
+constexpr inline double HOURS_PER_DAY   = 24.0;
 
-#define MINUTES_PER_DEG 60.0
-#define SECONDS_PER_DEG 3600.0
-#define DEG_PER_HRA     15.0
+constexpr inline double MINUTES_PER_DEG = 60.0;
+constexpr inline double SECONDS_PER_DEG = 3600.0;
+constexpr inline double DEG_PER_HRA     = 15.0;
 
-#define EARTH_RADIUS   6378.14
-#define JUPITER_RADIUS 71492.0
-#define SOLAR_RADIUS   696000.0
+template<typename T>
+constexpr inline T EARTH_RADIUS = static_cast<T>(6378.14);
+
+template<typename T>
+constexpr inline T JUPITER_RADIUS = static_cast<T>(71492.0);
+
+template<typename T>
+constexpr inline T SOLAR_RADIUS = static_cast<T>(696000.0);
 
 class UniversalCoord;
 
@@ -127,63 +142,65 @@ namespace astro
 
     template<class T> constexpr T absToAppMag(T absMag, T lyrs)
     {
-        return (T) (absMag - 5 + 5 * log10(lyrs / LY_PER_PARSEC));
+        using std::log10;
+        return (T) (absMag - 5 + 5 * log10(lyrs / LY_PER_PARSEC<T>));
     }
 
     template<class T> constexpr T appToAbsMag(T appMag, T lyrs)
     {
-        return (T) (appMag + 5 - 5 * log10(lyrs / LY_PER_PARSEC));
+        using std::log10;
+        return (T) (appMag + 5 - 5 * log10(lyrs / LY_PER_PARSEC<T>));
     }
 
     // Distance conversions
     template<class T> constexpr T lightYearsToParsecs(T ly)
     {
-        return ly / (T) LY_PER_PARSEC;
+        return ly / LY_PER_PARSEC<T>;
     }
     template<class T> constexpr T parsecsToLightYears(T pc)
     {
-        return pc * (T) LY_PER_PARSEC;
+        return pc * LY_PER_PARSEC<T>;
     }
     template<class T> constexpr T lightYearsToKilometers(T ly)
     {
-        return ly * (T) KM_PER_LY;
+        return ly * KM_PER_LY<T>;
     }
     template<class T> constexpr T kilometersToLightYears(T km)
     {
-        return km / (T) KM_PER_LY;
+        return km / KM_PER_LY<T>;
     }
     template<class T> constexpr T lightYearsToAU(T ly)
     {
-        return ly * (T) AU_PER_LY;
+        return ly * AU_PER_LY<T>;
     }
     template<class T> constexpr T AUtoLightYears(T au)
     {
-        return au / (T) AU_PER_LY;
+        return au / AU_PER_LY<T>;
     }
     template<class T> constexpr T AUtoKilometers(T au)
     {
-        return au * (T) KM_PER_AU;
+        return au * KM_PER_AU<T>;
     }
     template<class T> constexpr T kilometersToAU(T km)
     {
-        return km / (T) KM_PER_AU;
+        return km / KM_PER_AU<T>;
     }
 
     template<class T> constexpr T microLightYearsToKilometers(T ly)
     {
-        return ly * ((T) KM_PER_LY * 1e-6);
+        return ly * (KM_PER_LY<T> * 1e-6);
     }
     template<class T> constexpr T kilometersToMicroLightYears(T km)
     {
-        return km / ((T) KM_PER_LY * 1e-6);
+        return km / (KM_PER_LY<T> * 1e-6);
     }
     template<class T> constexpr T microLightYearsToAU(T ly)
     {
-        return ly * ((T) AU_PER_LY * 1e-6);
+        return ly * (AU_PER_LY<T> * 1e-6);
     }
     template<class T> constexpr T AUtoMicroLightYears(T au)
     {
-        return au / ((T) AU_PER_LY * 1e-6);
+        return au / (AU_PER_LY<T> * 1e-6);
     }
 
 
@@ -196,14 +213,54 @@ namespace astro
         return jd * SECONDS_PER_DAY;
     }
 
-    bool isLengthUnit(std::string_view unitName);
-    bool isTimeUnit(std::string_view unitName);
-    bool isAngleUnit(std::string_view unitName);
-    bool isMassUnit(std::string_view unitName);
-    bool getLengthScale(std::string_view unitName, double& scale);
-    bool getTimeScale(std::string_view unitName, double& scale);
-    bool getAngleScale(std::string_view unitName, double& scale);
-    bool getMassScale(std::string_view unitName, double& scale);
+    enum class LengthUnit : std::uint8_t
+    {
+        Default = 0,
+        Kilometer,
+        Meter,
+        EarthRadius,
+        JupiterRadius,
+        SolarRadius,
+        AstronomicalUnit,
+        LightYear,
+        Parsec,
+        Kiloparsec,
+        Megaparsec,
+    };
+
+    enum class TimeUnit : std::uint8_t
+    {
+        Default = 0,
+        Second,
+        Minute,
+        Hour,
+        Day,
+        JulianYear,
+    };
+
+    enum class AngleUnit : std::uint8_t
+    {
+        Default = 0,
+        Milliarcsecond,
+        Arcsecond,
+        Arcminute,
+        Degree,
+        Hour,
+        Radian,
+    };
+
+    enum class MassUnit : std::uint8_t
+    {
+        Default = 0,
+        Kilogram,
+        EarthMass,
+        JupiterMass,
+    };
+
+    std::optional<double> getLengthScale(LengthUnit unit);
+    std::optional<double> getTimeScale(TimeUnit unit);
+    std::optional<double> getAngleScale(AngleUnit unit);
+    std::optional<double> getMassScale(MassUnit unit);
 
     void decimalToDegMinSec(double angle, int& degrees, int& minutes, double& seconds);
     double degMinSecToDecimal(int degrees, int minutes, double seconds);
@@ -269,5 +326,3 @@ namespace astro
 // Convert a date structure to a Julian date
 
 std::ostream& operator<<(std::ostream& s, const astro::Date&);
-
-#endif // _CELENGINE_ASTRO_H_

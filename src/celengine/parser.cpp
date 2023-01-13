@@ -7,17 +7,113 @@
 // modify it under the terms of the GNU General Public License
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
-
+#include <map>
 #include <string_view>
+#include <utility>
+#include <variant>
 
 #include <celutil/tokenizer.h>
 #include "astro.h"
 #include "parser.h"
-#include "value.h"
 
-using namespace std;
-using namespace Eigen;
-using namespace celmath;
+using namespace std::string_view_literals;
+
+
+namespace
+{
+
+using MeasurementUnit = std::variant<std::monostate,
+                                     astro::LengthUnit,
+                                     astro::TimeUnit,
+                                     astro::AngleUnit,
+                                     astro::MassUnit>;
+
+class UnitsVisitor
+{
+public:
+    explicit UnitsVisitor(Value::Units* _units) : units(_units) {}
+
+    void operator()(std::monostate) const { /* nothing to update */ }
+    void operator()(astro::LengthUnit unit) const { units->length = unit; }
+    void operator()(astro::TimeUnit unit) const { units->time = unit; }
+    void operator()(astro::AngleUnit unit) const { units->angle = unit; }
+    void operator()(astro::MassUnit unit) const { units->mass = unit; }
+
+private:
+    Value::Units* units;
+};
+
+
+MeasurementUnit parseUnit(std::string_view name)
+{
+    static const std::map<std::string_view, MeasurementUnit>* unitMap = nullptr;
+
+    if (!unitMap)
+    {
+        unitMap = new std::map<std::string_view, MeasurementUnit>
+        {
+            { "km"sv, astro::LengthUnit::Kilometer },
+            { "m"sv, astro::LengthUnit::Meter },
+            { "rE"sv, astro::LengthUnit::EarthRadius },
+            { "rJ"sv, astro::LengthUnit::JupiterRadius },
+            { "rS"sv, astro::LengthUnit::SolarRadius },
+            { "AU"sv, astro::LengthUnit::AstronomicalUnit },
+            { "ly"sv, astro::LengthUnit::LightYear },
+            { "pc"sv, astro::LengthUnit::Parsec },
+            { "kpc"sv, astro::LengthUnit::Kiloparsec },
+            { "Mpc"sv, astro::LengthUnit::Megaparsec },
+
+            { "s"sv, astro::TimeUnit::Second },
+            { "min"sv, astro::TimeUnit::Minute },
+            { "h"sv, astro::TimeUnit::Hour },
+            { "d"sv, astro::TimeUnit::Day },
+            { "y"sv, astro::TimeUnit::JulianYear },
+
+            { "mas"sv, astro::AngleUnit::Milliarcsecond },
+            { "arcsec"sv, astro::AngleUnit::Arcsecond },
+            { "arcmin"sv, astro::AngleUnit::Arcminute },
+            { "deg"sv, astro::AngleUnit::Degree },
+            { "hRA"sv, astro::AngleUnit::Hour },
+            { "rad"sv, astro::AngleUnit::Radian },
+
+            { "kg"sv, astro::MassUnit::Kilogram },
+            { "mE"sv, astro::MassUnit::EarthMass },
+            { "mJ"sv, astro::MassUnit::JupiterMass },
+        };
+    }
+
+    auto it = unitMap->find(name);
+    return it == unitMap->end()
+        ? MeasurementUnit(std::in_place_type<std::monostate>)
+        : it->second;
+}
+
+
+Value::Units readUnits(Tokenizer& tokenizer)
+{
+    Value::Units units;
+
+    if (tokenizer.nextToken() != Tokenizer::TokenBeginUnits)
+    {
+        tokenizer.pushBack();
+        return units;
+    }
+
+    UnitsVisitor visitor(&units);
+
+    while (tokenizer.nextToken() != Tokenizer::TokenEndUnits)
+    {
+        auto tokenValue = tokenizer.getNameValue();
+        if (!tokenValue.has_value()) { continue; }
+
+        MeasurementUnit unit = parseUnit(*tokenValue);
+        std::visit(visitor, unit);
+    }
+
+    return units;
+}
+
+} // end unnamed namespace
 
 
 /****** Parser method implementation ******/
@@ -28,7 +124,7 @@ Parser::Parser(Tokenizer* _tokenizer) :
 }
 
 
-ValueArray* Parser::readArray()
+std::unique_ptr<ValueArray> Parser::readArray()
 {
     Tokenizer::TokenType tok = tokenizer->nextToken();
     if (tok != Tokenizer::TokenBeginArray)
@@ -37,12 +133,12 @@ ValueArray* Parser::readArray()
         return nullptr;
     }
 
-    ValueArray* array = new ValueArray();
+    auto array = std::make_unique<ValueArray>();
 
-    Value* v = readValue();
-    while (v != nullptr)
+    Value v = readValue();
+    while (!v.isNull())
     {
-        array->push_back(v);
+        array->push_back(std::move(v));
         v = readValue();
     }
 
@@ -50,7 +146,6 @@ ValueArray* Parser::readArray()
     if (tok != Tokenizer::TokenEndArray)
     {
         tokenizer->pushBack();
-        delete array;
         return nullptr;
     }
 
@@ -58,7 +153,7 @@ ValueArray* Parser::readArray()
 }
 
 
-Hash* Parser::readHash()
+std::unique_ptr<Hash> Parser::readHash()
 {
     Tokenizer::TokenType tok = tokenizer->nextToken();
     if (tok != Tokenizer::TokenBeginGroup)
@@ -67,35 +162,32 @@ Hash* Parser::readHash()
         return nullptr;
     }
 
-    auto* hash = new Hash();
+    auto hash = std::make_unique<Hash>();
 
     tok = tokenizer->nextToken();
     while (tok != Tokenizer::TokenEndGroup)
     {
-        if (tok != Tokenizer::TokenName)
+        std::string name;
+        if (auto tokenValue = tokenizer->getNameValue(); tokenValue.has_value())
+        {
+            name = *tokenValue;
+        }
+        else
         {
             tokenizer->pushBack();
-            delete hash;
             return nullptr;
         }
-        string name(tokenizer->getStringValue());
 
-#ifndef USE_POSTFIX_UNITS
-        readUnits(name, hash);
-#endif
+        Value::Units units = readUnits(*tokenizer);
 
-        Value* value = readValue();
-        if (value == nullptr)
+        Value value = readValue();
+        if (value.isNull())
         {
-            delete hash;
             return nullptr;
         }
 
-        hash->addValue(name, *value);
-
-#ifdef USE_POSTFIX_UNITS
-        readUnits(name, hash);
-#endif
+        value.setUnits(units);
+        hash->addValue(std::move(name), std::move(value));
 
         tok = tokenizer->nextToken();
     }
@@ -104,110 +196,50 @@ Hash* Parser::readHash()
 }
 
 
-/**
- * Reads a units section into the hash.
- * @param[in] propertyName Name of the current property.
- * @param[in] hash Hash to add units quantities into.
- * @return True if a units section was successfully read, false otherwise.
- */
-bool Parser::readUnits(const string& propertyName, Hash* hash)
-{
-    Tokenizer::TokenType tok = tokenizer->nextToken();
-    if (tok != Tokenizer::TokenBeginUnits)
-    {
-        tokenizer->pushBack();
-        return false;
-    }
-
-    tok = tokenizer->nextToken();
-    while (tok != Tokenizer::TokenEndUnits)
-    {
-        if (tok != Tokenizer::TokenName)
-        {
-            tokenizer->pushBack();
-            return false;
-        }
-
-        std::string_view unit = tokenizer->getStringValue();
-        Value* value = new Value(unit);
-
-        if (astro::isLengthUnit(unit))
-        {
-            string keyName(propertyName + "%Length");
-            hash->addValue(keyName, *value);
-        }
-        else if (astro::isTimeUnit(unit))
-        {
-            string keyName(propertyName + "%Time");
-            hash->addValue(keyName, *value);
-        }
-        else if (astro::isAngleUnit(unit))
-        {
-            string keyName(propertyName + "%Angle");
-            hash->addValue(keyName, *value);
-        }
-        else if (astro::isMassUnit(unit))
-        {
-            string keyName(propertyName + "%Mass");
-            hash->addValue(keyName, *value);
-        }
-        else
-        {
-            delete value;
-            return false;
-        }
-
-        tok = tokenizer->nextToken();
-    }
-
-    return true;
-}
-
-
-Value* Parser::readValue()
+Value Parser::readValue()
 {
     Tokenizer::TokenType tok = tokenizer->nextToken();
     switch (tok)
     {
     case Tokenizer::TokenNumber:
-        return new Value(tokenizer->getNumberValue());
+        return Value(*tokenizer->getNumberValue());
 
     case Tokenizer::TokenString:
-        return new Value(tokenizer->getStringValue());
+        return Value(*tokenizer->getStringValue());
 
     case Tokenizer::TokenName:
-        if (tokenizer->getStringValue() == "false")
-            return new Value(false);
-        else if (tokenizer->getStringValue() == "true")
-            return new Value(true);
+        if (tokenizer->getNameValue() == "false")
+            return Value(false);
+        else if (tokenizer->getNameValue() == "true")
+            return Value(true);
         else
         {
             tokenizer->pushBack();
-            return nullptr;
+            return Value();
         }
 
     case Tokenizer::TokenBeginArray:
         tokenizer->pushBack();
         {
-            auto* array = readArray();
+            std::unique_ptr<ValueArray> array = readArray();
             if (array == nullptr)
-                return nullptr;
+                return Value();
             else
-                return new Value(array);
+                return Value(std::move(array));
         }
 
     case Tokenizer::TokenBeginGroup:
         tokenizer->pushBack();
         {
-            Hash* hash = readHash();
+            std::unique_ptr<Hash> hash = readHash();
             if (hash == nullptr)
-                return nullptr;
+                return Value();
             else
-                return new Value(hash);
+                return Value(std::move(hash));
         }
 
     default:
         tokenizer->pushBack();
-        return nullptr;
+        return Value();
     }
 }

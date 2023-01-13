@@ -51,7 +51,7 @@ public:
     std::string scriptSystemAccessPolicy;
 #ifdef CELX
     fs::path luaHook;
-    Hash* configParams;
+    const Hash* configParams;
 #endif
 
     fs::path HDCrossIndexFile;
@@ -69,10 +69,7 @@ public:
 
     unsigned int consoleLogRows;
 
-    Hash* params;
-
-    float getFloatValue(const std::string& name);
-    const std::string getStringValue(const std::string& name);
+    const Hash* params;
 
     float SolarSystemMaxDistance;
     unsigned ShadowMapSize;

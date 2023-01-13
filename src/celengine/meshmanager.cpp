@@ -54,52 +54,35 @@ LoadCelestiaMesh(const fs::path& filename)
     Tokenizer tokenizer(&meshFile);
     Parser parser(&tokenizer);
 
-    if (tokenizer.nextToken() != Tokenizer::TokenName)
+    tokenizer.nextToken();
+    if (auto tokenValue = tokenizer.getNameValue(); !tokenValue.has_value())
     {
         GetLogger()->error("Mesh file {} is invalid.\n", filename);
         return nullptr;
     }
-
-    if (tokenizer.getStringValue() != "SphereDisplacementMesh")
+    else if (*tokenValue != "SphereDisplacementMesh")
     {
         GetLogger()->error("{}: Unrecognized mesh type {}.\n",
-                filename, tokenizer.getStringValue());
+                           filename, *tokenValue);
         return nullptr;
     }
 
-    Value* meshDefValue = parser.readValue();
-    if (meshDefValue == nullptr)
+    const Value meshDefValue = parser.readValue();
+    const Hash* meshDef = meshDefValue.getHash();
+    if (meshDef == nullptr)
     {
         GetLogger()->error("{}: Bad mesh file.\n", filename);
         return nullptr;
     }
-
-    if (meshDefValue->getType() != Value::HashType)
-    {
-        GetLogger()->error("{}: Bad mesh file.\n", filename);
-        delete meshDefValue;
-        return nullptr;
-    }
-
-    Hash* meshDef = meshDefValue->getHash();
 
     SphereMeshParameters params{};
 
-    params.size = Eigen::Vector3f::Ones();
-    params.offset = Eigen::Vector3f::Constant(10.0f);
-    params.featureHeight = 0.0f;
-    params.octaves = 1;
-    params.slices = 20;
-    params.rings = 20;
-
-    meshDef->getVector("Size", params.size);
-    meshDef->getVector("NoiseOffset", params.offset);
-    meshDef->getNumber("FeatureHeight", params.featureHeight);
-    meshDef->getNumber("Octaves", params.octaves);
-    meshDef->getNumber("Slices", params.slices);
-    meshDef->getNumber("Rings", params.rings);
-
-    delete meshDefValue;
+    params.size = meshDef->getVector3<float>("Size").value_or(Eigen::Vector3f::Ones());
+    params.offset = meshDef->getVector3<float>("NoiseOffset").value_or(Eigen::Vector3f::Constant(10.0f));
+    params.featureHeight = meshDef->getNumber<float>("FeatureHeight").value_or(0.0f);
+    params.octaves = meshDef->getNumber<float>("Octaves").value_or(1.0f);
+    params.slices = meshDef->getNumber<float>("Slices").value_or(20.0f);
+    params.rings = meshDef->getNumber<float>("Rings").value_or(20.0f);
 
     auto model = std::make_unique<cmod::Model>();
     SphereMesh sphereMesh(params.size,

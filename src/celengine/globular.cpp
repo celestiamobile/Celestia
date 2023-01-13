@@ -34,7 +34,7 @@
 #include "vecgl.h"
 
 namespace vecgl = celestia::vecgl;
-
+using celestia::render::VertexObject;
 
 struct GlobularForm
 {
@@ -157,7 +157,7 @@ void centerCloudTexEval(float u, float v, float /*w*/, std::uint8_t *pixel)
     pixel[3] = static_cast<std::uint8_t>(relStarDensity(eta) * profile_2d * 255.99f);
 }
 
-void initGlobularData(celgl::VertexObject& vo,
+void initGlobularData(VertexObject& vo,
                       const std::vector<GlobularForm::Blob>& points,
                       GLint sizeLoc,
                       GLint etaLoc)
@@ -219,9 +219,12 @@ void initGlobularData(celgl::VertexObject& vo,
     }
 
     vo.allocate(globularVtx.size() * sizeof(GlobularVtx), globularVtx.data());
-    vo.setVertices(3, GL_FLOAT, false, sizeof(GlobularVtx), 0);
-    vo.setTextureCoords(2, GL_FLOAT, false, sizeof(GlobularVtx), offsetof(GlobularVtx, starSize)); //HACK!!! used only for tidal
-    vo.setColors(4, GL_UNSIGNED_BYTE, true, sizeof(GlobularVtx), offsetof(GlobularVtx, color));
+    vo.setVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex,
+                            3, GL_FLOAT, false, sizeof(GlobularVtx), 0);
+    vo.setVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex,
+                            2, GL_FLOAT, false, sizeof(GlobularVtx), offsetof(GlobularVtx, starSize)); //HACK!!! used only for tidal
+    vo.setVertexAttribArray(CelestiaGLProgram::ColorAttributeIndex,
+                            4, GL_UNSIGNED_BYTE, true, sizeof(GlobularVtx), offsetof(GlobularVtx, color));
     vo.setVertexAttribArray(sizeLoc, 1, GL_FLOAT, false, sizeof(GlobularVtx), offsetof(GlobularVtx, starSize));
     vo.setVertexAttribArray(etaLoc,  1, GL_FLOAT, false, sizeof(GlobularVtx), offsetof(GlobularVtx, eta));
 }
@@ -543,7 +546,7 @@ bool Globular::pick(const Eigen::ParametrizedLine<double, 3>& ray,
                                      cosAngleToBoundCenter);
 }
 
-bool Globular::load(AssociativeArray* params, const fs::path& resPath)
+bool Globular::load(const AssociativeArray* params, const fs::path& resPath)
 {
     // Load the basic DSO parameters first
 
@@ -551,18 +554,14 @@ bool Globular::load(AssociativeArray* params, const fs::path& resPath)
     if (!ok)
         return false;
 
-    if (params->getNumber("Detail", detail))
-        setDetail(static_cast<float>(detail));
+    if (auto detailVal = params->getNumber<float>("Detail"); detailVal.has_value())
+        setDetail(*detailVal);
 
-    double coreRadius;
-    if (params->getAngle("CoreRadius", coreRadius, 1.0 / MINUTES_PER_DEG))
-    {
-        r_c = coreRadius;
-        setCoreRadius(r_c);
-    }
+    if (auto coreRadius = params->getAngle<float>("CoreRadius", 1.0 / MINUTES_PER_DEG); coreRadius.has_value())
+        setCoreRadius(*coreRadius);
 
-    if (params->getNumber("KingConcentration", c))
-        setConcentration(c);
+    if (auto king = params->getNumber<float>("KingConcentration"); king.has_value())
+        setConcentration(*king);
 
     return true;
 }

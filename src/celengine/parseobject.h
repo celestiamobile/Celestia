@@ -10,8 +10,7 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#ifndef _CELENGINE_PARSEOBJECT_H_
-#define _CELENGINE_PARSEOBJECT_H_
+#pragma once
 
 #include <string>
 #include <memory>
@@ -34,27 +33,24 @@ enum class DataDisposition
 };
 
 
-bool ParseDate(Hash* hash, const std::string& name, double& jd);
+bool ParseDate(const Hash* hash, const std::string& name, double& jd);
 
 Orbit* CreateOrbit(const Selection& centralObject,
-                   Hash* planetData,
+                   const Hash* planetData,
                    const fs::path& path,
                    bool usePlanetUnits);
 
-RotationModel* CreateRotationModel(Hash* rotationData,
+RotationModel* CreateRotationModel(const Hash* rotationData,
                                    const fs::path& path,
                                    double syncRotationPeriod);
 
 RotationModel* CreateDefaultRotationModel(double syncRotationPeriod);
 
 ReferenceFrame::SharedConstPtr CreateReferenceFrame(const Universe& universe,
-                                     Value* frameValue,
-                                     const Selection& defaultCenter,
-                                     Body* defaultObserver);
+                                                    const Value* frameValue,
+                                                    const Selection& defaultCenter,
+                                                    Body* defaultObserver);
 
 std::shared_ptr<const TwoVectorFrame> CreateTopocentricFrame(const Selection& center,
-                                       const Selection& target,
-                                       const Selection& observer);
-
-
-#endif // _CELENGINE_PARSEOBJECT_H_
+                                                             const Selection& target,
+                                                             const Selection& observer);

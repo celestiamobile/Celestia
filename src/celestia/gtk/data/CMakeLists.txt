@@ -1,6 +1,8 @@
-set(GTK_DATA_FILES
-  celestiaui.xml
-  celestia-logo.png
-)
-
-install(FILES ${GTK_DATA_FILES} DESTINATION "${DATADIR}")
+install(FILES celestiaui.xml
+        DESTINATION "${DATADIR}")
+install(FILES celestia-gtk.desktop
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+install(FILES space.celestia-gtk.metainfo.xml
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
+install(FILES celestia-gtk.1
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/man/man1")

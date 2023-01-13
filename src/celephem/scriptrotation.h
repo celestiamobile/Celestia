@@ -23,9 +23,10 @@ class ScriptedRotation : public RotationModel
     ScriptedRotation() = default;
     ~ScriptedRotation() = default;
 
-    bool initialize(const std::string& moduleName,
+    bool initialize(const std::string* moduleName,
                     const std::string& funcName,
-                    Hash* parameters);
+                    const Hash* parameters,
+                    const fs::path& path);
 
     virtual Eigen::Quaterniond spin(double tjd) const;
 

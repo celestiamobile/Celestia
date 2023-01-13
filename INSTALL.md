@@ -23,7 +23,7 @@ uid                           home:munix9 OBS Project <home:munix9@build.opensus
 ❯ sudo apt update && sudo apt install celestia
 ```
 
-### On Ubuntu 18.04/20.04 and derived systems:
+### On Ubuntu 20.04/22.04 and derived systems:
 
 ```
 curl https://download.opensuse.org/repositories/home:/munix9:/unstable/Ubuntu_${VERSION}/Release.key | sudo apt-key add -
@@ -31,18 +31,18 @@ echo "deb https://download.opensuse.org/repositories/home:/munix9:/unstable/Ubun
 sudo apt update && sudo apt install celestia
 ```
 
-Where VERSION is 18.04 or 20.04.
+Where VERSION is 20.04 or 22.04.
 
 
 ### On openSUSE Leap/Tumbleweed:
 
 ```
-sudo zypper addrepo https://download.opensuse.org/repositories/home:munix9:unstable/openSUSE_${VERSION}/home:munix9:unstable.repo
+sudo zypper addrepo https://download.opensuse.org/repositories/home:munix9:unstable/${VERSION}/home:munix9:unstable.repo
 sudo zypper refresh
 sudo zypper install celestia
 ```
 
-Where VERSION is 'Leap_15.2', 'Leap_15.3' or 'Tumbleweed'.
+Where VERSION is '15.3', '15.4', '15.5' or 'openSUSE_Tumbleweed'.
 
 See also the download package sites on OBS for [celestia](https://software.opensuse.org/download.html?project=home:munix9:unstable&package=celestia) and [celestia-data](https://software.opensuse.org/download.html?project=home:munix9:unstable&package=celestia-data).
 
@@ -50,7 +50,7 @@ See also the download package sites on OBS for [celestia](https://software.opens
 
 Try experimental portable AppImage (see https://github.com/CelestiaProject/Celestia/issues/333):
 ```
-wget https://download.opensuse.org/repositories/home:/munix9:/unstable/AppImage/celestia-1.7.0-git-x86_64.AppImage
+wget -O celestia-1.7.0-git-x86_64.AppImage https://download.opensuse.org/repositories/home:/munix9:/unstable/AppImage/celestia-latest-x86_64.AppImage
 chmod 755 celestia-1.7.0-git-x86_64.AppImage
 ```
 
@@ -317,10 +317,6 @@ Celestia will be installed into /usr/local by default, with data files landing
 in /usr/local/share/celestia, but you may want to specify a new location with
 the following option to cmake: `-DCMAKE_INSTALL_PREFIX=/another/path`.
 
-To build the application bundle, pass -DNATIVE_OSX_APP=ON to the cmake command,
-the application bundle will be located in the "build" folder that you previously
-created.
-
 ## Supported CMake parameters
 
 List of supported parameters (passed as `-DPARAMETER=VALUE`):
@@ -344,14 +340,12 @@ List of supported parameters (passed as `-DPARAMETER=VALUE`):
 | ENABLE_TOOLS         | bool | OFF     | Build tools for Celestia data files
 | ENABLE_DATA          | bool | OFF     | Use CelestiaContent submodule for data
 | ENABLE_GLES          | bool | OFF     | Use OpenGL ES 2.0 in rendering code
-| NATIVE_OSX_APP       | bool | OFF     | Support native OSX data paths
 | USE_GTKGLEXT         | bool | ON      | Use libgtkglext1 in GTK2 frontend
 | USE_GTK3             | bool | OFF     | Use Gtk3 instead of Gtk2 in GTK2 frontend
 
 Notes:
  \* /usr/local on Unix-like systems, c:\Program Files or c:\Program Files (x86)
    on Windows depending on OS type (32 or 64 bit) and build configuration.
-   This option effect is overriden by NATIVE_OSX_APP.
  \*\* Ignored on Windows systems.
  \*\*\* Ignored on Unix-like systems.
  `USE_GTK3` requires `ENABLE_GTK`

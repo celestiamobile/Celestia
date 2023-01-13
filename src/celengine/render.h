@@ -17,12 +17,13 @@
 
 #include <Eigen/Core>
 
+#include <celengine/lightenv.h>
 #include <celengine/universe.h>
 #include <celengine/selection.h>
 #include <celengine/starcolors.h>
 #include <celengine/rendcontext.h>
 #include <celengine/renderlistentry.h>
-#include "vertexobject.h"
+#include <celrender/vertexobject.h>
 
 class RendererWatcher;
 class FrameTree;
@@ -32,6 +33,7 @@ class PointStarVertexBuffer;
 class AsterismRenderer;
 class BoundariesRenderer;
 class Observer;
+class Surface;
 class TextureFont;
 class FramebufferObject;
 
@@ -51,20 +53,6 @@ struct Matrices
     const Eigen::Matrix4f *modelview;
 };
 
-struct LineStripEnd
-{
-    LineStripEnd(Eigen::Vector3f point, float scale) : point(point), scale(scale) {};
-    Eigen::Vector3f point;
-    float scale;
-};
-
-struct LineEnds
-{
-    LineEnds(Eigen::Vector3f point1, Eigen::Vector3f point2, float scale) : point1(point1), point2(point2), scale(scale) {};
-    Eigen::Vector3f point1;
-    Eigen::Vector3f point2;
-    float scale;
-};
 
 struct LightSource
 {
@@ -284,10 +272,6 @@ class Renderer
     float getScaleFactor() const;
     float getPointWidth() const;
     float getPointHeight() const;
-    float getLineWidthX() const;
-    float getLineWidthY() const;
-    float getRasterizedLineWidth(float multiplier) const;
-    bool shouldDrawLineAsTriangles(float multiplier = 1.0f) const;
 
     // GL wrappers
     void getViewport(int* x, int* y, int* w, int* h) const;
@@ -426,7 +410,7 @@ class Renderer
 
     ShaderManager& getShaderManager() const { return *shaderManager; }
 
-    celgl::VertexObject& getVertexObject(VOType, GLenum, GLsizeiptr, GLenum);
+    celestia::render::VertexObject& getVertexObject(VOType, GLenum, GLsizeiptr, GLenum);
 
     // Callbacks for renderables; these belong in a special renderer interface
     // only visible in object's render methods.
@@ -737,8 +721,7 @@ class Renderer
                      const Eigen::Quaterniond& cameraOrientation,
                      const celmath::Frustum& frustum,
                      float nearDist,
-                     float farDist,
-                     const Matrices&);
+                     float farDist);
 
     void renderSolarSystemObjects(const Observer &observer,
                                   int nIntervals,
@@ -835,8 +818,8 @@ class Renderer
 
     bool settingsChanged;
 
-    AsterismRenderer* m_asterismRenderer { nullptr };
-    BoundariesRenderer* m_boundariesRenderer { nullptr };
+    std::unique_ptr<AsterismRenderer> m_asterismRenderer;
+    std::unique_ptr<BoundariesRenderer> m_boundariesRenderer;
 
     // True if we're in between a begin/endObjectAnnotations
     bool objectAnnotationSetOpen;
@@ -852,7 +835,7 @@ class Renderer
     unsigned m_shadowMapSize { 0 };
     std::unique_ptr<FramebufferObject> m_shadowFBO;
 
-    std::array<celgl::VertexObject*, static_cast<size_t>(VOType::Count)> m_VertexObjects;
+    std::array<celestia::render::VertexObject*, static_cast<size_t>(VOType::Count)> m_VertexObjects;
 
     // Saturation magnitude used to calculate a point star size
     float satPoint;

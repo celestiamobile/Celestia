@@ -7,19 +7,21 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
+#include <memory>
+#include <utility>
+
 #include <celutil/gettext.h>
 #include <celutil/greek.h>
 #include <celutil/logger.h>
 #include <celutil/tokenizer.h>
-#include "stardb.h"
 #include "asterism.h"
 #include "parser.h"
+#include "star.h"
+#include "stardb.h"
 
-
-using namespace std;
 using celestia::util::GetLogger;
 
-Asterism::Asterism(string_view _name) :
+Asterism::Asterism(std::string_view _name) :
     name(_name)
 {
 #ifdef ENABLE_NLS
@@ -27,7 +29,7 @@ Asterism::Asterism(string_view _name) :
 #endif
 }
 
-string Asterism::getName(bool i18n) const
+std::string Asterism::getName(bool i18n) const
 {
 #ifdef ENABLE_NLS
     return i18n ? i18nName : name;
@@ -43,12 +45,12 @@ int Asterism::getChainCount() const
 
 const Asterism::Chain& Asterism::getChain(int index) const
 {
-    return *chains[index];
+    return chains[index];
 }
 
-void Asterism::addChain(Asterism::Chain& chain)
+void Asterism::addChain(Asterism::Chain&& chain)
 {
-    chains.push_back(&chain);
+    chains.emplace_back(std::move(chain));
 }
 
 
@@ -106,71 +108,66 @@ bool Asterism::isColorOverridden() const
 }
 
 
-AsterismList* ReadAsterismList(istream& in, const StarDatabase& stardb)
+AsterismList* ReadAsterismList(std::istream& in, const StarDatabase& stardb)
 {
-    auto* asterisms = new AsterismList();
+    auto asterisms = std::make_unique<AsterismList>();
     Tokenizer tokenizer(&in);
     Parser parser(&tokenizer);
 
     while (tokenizer.nextToken() != Tokenizer::TokenEnd)
     {
-        if (tokenizer.getTokenType() != Tokenizer::TokenString)
+        auto tokenValue = tokenizer.getStringValue();
+        if (!tokenValue.has_value())
         {
             GetLogger()->error("Error parsing asterism file.\n");
-            for_each(asterisms->begin(), asterisms->end(), [](Asterism* ast) { delete ast; });
-            delete asterisms;
             return nullptr;
         }
 
-        Asterism* ast = new Asterism(tokenizer.getStringValue());
+        Asterism& ast = asterisms->emplace_back(*tokenValue);
 
-        Value* chainsValue = parser.readValue();
-        if (chainsValue == nullptr || chainsValue->getType() != Value::ArrayType)
+        const Value chainsValue = parser.readValue();
+        const ValueArray* chains = chainsValue.getArray();
+        if (chains == nullptr)
         {
-            GetLogger()->error("Error parsing asterism {}\n", ast->getName());
-            for_each(asterisms->begin(), asterisms->end(), [](Asterism* ast) { delete ast; });
-            delete ast;
-            delete asterisms;
-            delete chainsValue;
+            GetLogger()->error("Error parsing asterism {}\n", ast.getName());
             return nullptr;
         }
 
-        Array* chains = chainsValue->getArray();
-
-        for (const auto chain : *chains)
+        for (const auto& chain : *chains)
         {
-            if (chain->getType() == Value::ArrayType)
+            const ValueArray* a = chain.getArray();
+            if (a == nullptr)
+                continue;
+
+            // skip empty (without or only with a single star) chains
+            if (a->size() <= 1)
+                continue;
+
+            Asterism::Chain new_chain;
+            for (const auto& i : *a)
             {
-                Array* a = chain->getArray();
-                // skip empty (without or only with a single star) chains
-                if (a->size() <= 1)
+                const std::string* iStr = i.getString();
+                if (iStr == nullptr)
                     continue;
 
-                Asterism::Chain* new_chain = new Asterism::Chain();
-                for (const auto i : *a)
+                const Star* star = stardb.find(*iStr, false);
+                if (star == nullptr)
+                    star = stardb.find(ReplaceGreekLetterAbbr(*iStr), false);
+                if (star != nullptr)
                 {
-                    if (i->getType() == Value::StringType)
-                    {
-                        Star* star = stardb.find(i->getString(), false);
-                        if (star == nullptr)
-                            star = stardb.find(ReplaceGreekLetterAbbr(i->getString()), false);
-                        if (star != nullptr)
-                            new_chain->push_back(star->getPosition());
-                        else
-                            GetLogger()->error("Error loading star \"{}\" for asterism \"{}\".\n",
-                                               i->getString(),
-                                               ast->getName());
-                    }
+                    new_chain.push_back(star->getPosition());
                 }
-
-                ast->addChain(*new_chain);
+                else
+                {
+                    GetLogger()->error("Error loading star \"{}\" for asterism \"{}\".\n",
+                                        *iStr,
+                                        ast.getName());
+                }
             }
+
+            ast.addChain(std::move(new_chain));
         }
-
-        asterisms->push_back(ast);
-
-        delete chainsValue;
     }
 
-    return asterisms;
+    return asterisms.release();
 }

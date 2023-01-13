@@ -23,9 +23,10 @@ class ScriptedOrbit : public CachingOrbit
     ScriptedOrbit() = default;
     ~ScriptedOrbit() = default;
 
-    bool initialize(const std::string& moduleName,
+    bool initialize(const std::string* moduleName,
                     const std::string& funcName,
-                    Hash* parameters);
+                    const Hash* parameters,
+                    const fs::path& path);
 
     virtual Eigen::Vector3d computePosition(double tjd) const;
     //virtual Vec3d computeVelocity(double tjd) const;

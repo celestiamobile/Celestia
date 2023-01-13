@@ -10,31 +10,42 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#include <config.h>
 #include <cassert>
+#include <iostream>
 #include <limits>
-#include <fmt/format.h>
-#include <fmt/printf.h>
-#include <celmath/mathlib.h>
-#include <celutil/logger.h>
-#include <celutil/gettext.h>
-#include <celutil/tokenizer.h>
-#include "astro.h"
-#include "parser.h"
-#include "texmanager.h"
-#include "meshmanager.h"
-#include "universe.h"
-#include "multitexture.h"
-#include "parseobject.h"
-#include "frametree.h"
-#include "timeline.h"
-#include "timelinephase.h"
-#include "atmosphere.h"
+#include <memory>
+#include <string>
+#include <vector>
 
-using namespace Eigen;
-using namespace std;
-using namespace celmath;
+#include <Eigen/Geometry>
+#include <fmt/printf.h>
+
+#include <celmath/mathlib.h>
+#include <celutil/color.h>
+#include <celutil/gettext.h>
+#include <celutil/logger.h>
+#include <celutil/stringutils.h>
+#include <celutil/tokenizer.h>
+#include "atmosphere.h"
+#include "body.h"
+#include "hash.h"
+#include "frame.h"
+#include "frametree.h"
+#include "location.h"
+#include "meshmanager.h"
+#include "parseobject.h"
+#include "parser.h"
+#include "solarsys.h"
+#include "surface.h"
+#include "texmanager.h"
+#include "universe.h"
+#include "value.h"
+
+
 using celestia::util::GetLogger;
+
+namespace
+{
 
 enum BodyType
 {
@@ -78,8 +89,8 @@ enum BodyType
   The name and parent name are both mandatory.
 */
 
-static void sscError(const Tokenizer& tok,
-                     const string& msg)
+void sscError(const Tokenizer& tok,
+              const std::string& msg)
 {
     GetLogger()->error(_("Error in .ssc file (line {}): {}\n"),
                       tok.getLineNumber(), msg);
@@ -87,23 +98,23 @@ static void sscError(const Tokenizer& tok,
 
 
 // Object class properties
-static const int CLASSES_UNCLICKABLE           = Body::Invisible |
-                                                 Body::Diffuse;
+const int CLASSES_UNCLICKABLE           = Body::Invisible |
+                                          Body::Diffuse;
 
-static const int CLASSES_INVISIBLE_AS_POINT    = Body::Invisible      |
-                                                 Body::SurfaceFeature |
-                                                 Body::Component      |
-                                                 Body::Diffuse;
+const int CLASSES_INVISIBLE_AS_POINT    = Body::Invisible      |
+                                          Body::SurfaceFeature |
+                                          Body::Component      |
+                                          Body::Diffuse;
 
-static const int CLASSES_SECONDARY_ILLUMINATOR = Body::Planet      |
-                                                 Body::Moon        |
-                                                 Body::MinorMoon   |
-                                                 Body::DwarfPlanet |
-                                                 Body::Asteroid    |
-                                                 Body::Comet;
+const int CLASSES_SECONDARY_ILLUMINATOR = Body::Planet      |
+                                          Body::Moon        |
+                                          Body::MinorMoon   |
+                                          Body::DwarfPlanet |
+                                          Body::Asteroid    |
+                                          Body::Comet;
 
-typedef map<std::string, int, CompareIgnoringCasePredicate> ClassificationTable;
-static ClassificationTable Classifications;
+using ClassificationTable = std::map<std::string, int, CompareIgnoringCasePredicate>;
+ClassificationTable Classifications;
 
 void InitializeClassifications()
 {
@@ -120,7 +131,7 @@ void InitializeClassifications()
     Classifications["diffuse"]        = Body::Diffuse;
 }
 
-int GetClassificationId(const string& className)
+int GetClassificationId(const std::string& className)
 {
     if (Classifications.empty())
         InitializeClassifications();
@@ -133,43 +144,36 @@ int GetClassificationId(const string& className)
 
 
 //! Maximum depth permitted for nested frames.
-static unsigned int MaxFrameDepth = 50;
+unsigned int MaxFrameDepth = 50;
 
-static bool isFrameCircular(const ReferenceFrame& frame, ReferenceFrame::FrameType frameType)
+bool isFrameCircular(const ReferenceFrame& frame, ReferenceFrame::FrameType frameType)
 {
     return frame.nestingDepth(MaxFrameDepth, frameType) > MaxFrameDepth;
 }
 
 
 
-static Location* CreateLocation(Hash* locationData,
-                                Body* body)
+Location* CreateLocation(const Hash* locationData,
+                         Body* body)
 {
     Location* location = new Location();
 
-    Vector3d longlat(Vector3d::Zero());
-    locationData->getSphericalTuple("LongLat", longlat);
-
-    Vector3f position = body->planetocentricToCartesian(longlat).cast<float>();
+    auto longlat = locationData->getSphericalTuple("LongLat").value_or(Eigen::Vector3d::Zero());
+    Eigen::Vector3f position = body->planetocentricToCartesian(longlat).cast<float>();
     location->setPosition(position);
 
-    double size = 1.0;
-    locationData->getLength("Size", size);
+    auto size = locationData->getLength<float>("Size").value_or(1.0f);
+    location->setSize(size);
 
-    location->setSize((float) size);
+    auto importance = locationData->getNumber<float>("Importance").value_or(-1.0f);
+    location->setImportance(importance);
 
-    double importance = -1.0;
-    locationData->getNumber("Importance", importance);
-    location->setImportance((float) importance);
+    if (const std::string* featureTypeName = locationData->getString("Type"); featureTypeName != nullptr)
+        location->setFeatureType(Location::parseFeatureType(*featureTypeName));
 
-    string featureTypeName;
-    if (locationData->getString("Type", featureTypeName))
-        location->setFeatureType(Location::parseFeatureType(featureTypeName));
-
-    Color labelColor;
-    if (locationData->getColor("LabelColor", labelColor))
+    if (auto labelColor = locationData->getColor("LabelColor"); labelColor.has_value())
     {
-        location->setLabelColor(labelColor);
+        location->setLabelColor(*labelColor);
         location->setLabelColorOverridden(true);
     }
 
@@ -186,77 +190,67 @@ inline void SetOrUnset(Dst &dst, Flag flag, bool cond)
 }
 
 
-static void FillinSurface(Hash* surfaceData,
-                          Surface* surface,
-                          const fs::path& path)
+void FillinSurface(const Hash* surfaceData,
+                   Surface* surface,
+                   const fs::path& path)
 {
-    surfaceData->getColor("Color", surface->color);
-    surfaceData->getColor("SpecularColor", surface->specularColor);
-    surfaceData->getNumber("SpecularPower", surface->specularPower);
+    if (auto color = surfaceData->getColor("Color"); color.has_value())
+        surface->color = *color;
+    if (auto specularColor = surfaceData->getColor("SpecularColor"); specularColor.has_value())
+        surface->specularColor = *specularColor;
+    if (auto specularPower = surfaceData->getNumber<float>("SpecularPower"); specularPower.has_value())
+        surface->specularPower = *specularPower;
+    if (auto lunarLambert = surfaceData->getNumber<float>("LunarLambert"); lunarLambert.has_value())
+        surface->lunarLambert = *lunarLambert;
 
-    surfaceData->getNumber("LunarLambert", surface->lunarLambert);
-
-    string baseTexture;
-    string bumpTexture;
-    string nightTexture;
-    string specularTexture;
-    string normalTexture;
-    string overlayTexture;
-    bool applyBaseTexture = surfaceData->getString("Texture", baseTexture);
-    bool applyBumpMap = surfaceData->getString("BumpMap", bumpTexture);
-    bool applyNightMap = surfaceData->getString("NightTexture", nightTexture);
-    bool separateSpecular = surfaceData->getString("SpecularTexture",
-                                                   specularTexture);
-    bool applyNormalMap = surfaceData->getString("NormalMap", normalTexture);
-    bool applyOverlay = surfaceData->getString("OverlayTexture",
-                                               overlayTexture);
+    const std::string* baseTexture = surfaceData->getString("Texture");
+    const std::string* bumpTexture = surfaceData->getString("BumpMap");
+    const std::string* nightTexture = surfaceData->getString("NightTexture");
+    const std::string* specularTexture = surfaceData->getString("SpecularTexture");
+    const std::string* normalTexture = surfaceData->getString("NormalMap");
+    const std::string* overlayTexture = surfaceData->getString("OverlayTexture");
 
     unsigned int baseFlags = TextureInfo::WrapTexture | TextureInfo::AllowSplitting;
     unsigned int bumpFlags = TextureInfo::WrapTexture | TextureInfo::AllowSplitting;
     unsigned int nightFlags = TextureInfo::WrapTexture | TextureInfo::AllowSplitting;
     unsigned int specularFlags = TextureInfo::WrapTexture | TextureInfo::AllowSplitting;
 
-    float bumpHeight = 2.5f;
-    surfaceData->getNumber("BumpHeight", bumpHeight);
+    auto bumpHeight = surfaceData->getNumber<float>("BumpHeight").value_or(2.5f);
 
-    bool blendTexture = false;
-    surfaceData->getBoolean("BlendTexture", blendTexture);
+    bool blendTexture = surfaceData->getBoolean("BlendTexture").value_or(false);
+    bool emissive = surfaceData->getBoolean("Emissive").value_or(false);
+    bool compressTexture = surfaceData->getBoolean("CompressTexture").value_or(false);
 
-    bool emissive = false;
-    surfaceData->getBoolean("Emissive", emissive);
-
-    bool compressTexture = false;
-    surfaceData->getBoolean("CompressTexture", compressTexture);
     SetOrUnset(baseFlags, TextureInfo::CompressTexture, compressTexture);
 
     SetOrUnset(surface->appearanceFlags, Surface::BlendTexture, blendTexture);
     SetOrUnset(surface->appearanceFlags, Surface::Emissive, emissive);
-    SetOrUnset(surface->appearanceFlags, Surface::ApplyBaseTexture, applyBaseTexture);
-    SetOrUnset(surface->appearanceFlags, Surface::ApplyBumpMap, (applyBumpMap || applyNormalMap));
-    SetOrUnset(surface->appearanceFlags, Surface::ApplyNightMap, applyNightMap);
-    SetOrUnset(surface->appearanceFlags, Surface::SeparateSpecularMap, separateSpecular);
-    SetOrUnset(surface->appearanceFlags, Surface::ApplyOverlay, applyOverlay);
+    SetOrUnset(surface->appearanceFlags, Surface::ApplyBaseTexture, baseTexture != nullptr);
+    SetOrUnset(surface->appearanceFlags, Surface::ApplyBumpMap, (bumpTexture != nullptr || normalTexture != nullptr));
+    SetOrUnset(surface->appearanceFlags, Surface::ApplyNightMap, nightTexture != nullptr);
+    SetOrUnset(surface->appearanceFlags, Surface::SeparateSpecularMap, specularTexture != nullptr);
+    SetOrUnset(surface->appearanceFlags, Surface::ApplyOverlay, overlayTexture != nullptr);
     SetOrUnset(surface->appearanceFlags, Surface::SpecularReflection, surface->specularColor != Color(0.0f, 0.0f, 0.0f));
 
-    if (applyBaseTexture)
-        surface->baseTexture.setTexture(baseTexture, path, baseFlags);
-    if (applyNightMap)
-        surface->nightTexture.setTexture(nightTexture, path, nightFlags);
-    if (separateSpecular)
-        surface->specularTexture.setTexture(specularTexture, path, specularFlags);
+    if (baseTexture != nullptr)
+        surface->baseTexture.setTexture(*baseTexture, path, baseFlags);
+    if (nightTexture != nullptr)
+        surface->nightTexture.setTexture(*nightTexture, path, nightFlags);
+    if (specularTexture != nullptr)
+        surface->specularTexture.setTexture(*specularTexture, path, specularFlags);
 
     // If both are present, NormalMap overrides BumpMap
-    if (applyNormalMap)
-        surface->bumpTexture.setTexture(normalTexture, path, bumpFlags);
-    else if (applyBumpMap)
-        surface->bumpTexture.setTexture(bumpTexture, path, bumpHeight, bumpFlags);
+    if (normalTexture != nullptr)
+        surface->bumpTexture.setTexture(*normalTexture, path, bumpFlags);
+    else if (bumpTexture != nullptr)
+        surface->bumpTexture.setTexture(*bumpTexture, path, bumpHeight, bumpFlags);
 
-    if (applyOverlay)
-        surface->overlayTexture.setTexture(overlayTexture, path, baseFlags);
+    if (overlayTexture != nullptr)
+        surface->overlayTexture.setTexture(*overlayTexture, path, baseFlags);
 }
 
 
-static Selection GetParentObject(PlanetarySystem* system)
+Selection GetParentObject(PlanetarySystem* system)
 {
     Selection parent;
     Body* primary = system->getPrimaryBody();
@@ -271,7 +265,7 @@ static Selection GetParentObject(PlanetarySystem* system)
 
 TimelinePhase::SharedConstPtr CreateTimelinePhase(Body* body,
                                                   Universe& universe,
-                                                  Hash* phaseData,
+                                                  const Hash* phaseData,
                                                   const fs::path& path,
                                                   const ReferenceFrame::SharedConstPtr& defaultOrbitFrame,
                                                   const ReferenceFrame::SharedConstPtr& defaultBodyFrame,
@@ -280,7 +274,7 @@ TimelinePhase::SharedConstPtr CreateTimelinePhase(Body* body,
                                                   double previousPhaseEnd)
 {
     double beginning = previousPhaseEnd;
-    double ending = numeric_limits<double>::infinity();
+    double ending = std::numeric_limits<double>::infinity();
 
     // Beginning is optional for the first phase of a timeline, and not
     // allowed for the other phases, where beginning is always the ending
@@ -302,7 +296,7 @@ TimelinePhase::SharedConstPtr CreateTimelinePhase(Body* body,
 
     // Get the orbit reference frame.
     ReferenceFrame::SharedConstPtr orbitFrame;
-    Value* frameValue = phaseData->getValue("OrbitFrame");
+    const Value* frameValue = phaseData->getValue("OrbitFrame");
     if (frameValue != nullptr)
     {
         orbitFrame = CreateReferenceFrame(universe, frameValue, defaultOrbitFrame->getCenter(), body);
@@ -319,7 +313,7 @@ TimelinePhase::SharedConstPtr CreateTimelinePhase(Body* body,
 
     // Get the body reference frame
     ReferenceFrame::SharedConstPtr bodyFrame;
-    Value* bodyFrameValue = phaseData->getValue("BodyFrame");
+    const Value* bodyFrameValue = phaseData->getValue("BodyFrame");
     if (bodyFrameValue != nullptr)
     {
         bodyFrame = CreateReferenceFrame(universe, bodyFrameValue, defaultBodyFrame->getCenter(), body);
@@ -355,7 +349,7 @@ TimelinePhase::SharedConstPtr CreateTimelinePhase(Body* body,
         // TODO: Should distinguish between a missing rotation model (where it's
         // appropriate to use a default one) and a bad rotation model (where
         // we should report an error.)
-        rotationModel = new ConstantOrientation(Quaterniond::Identity());
+        rotationModel = new ConstantOrientation(Eigen::Quaterniond::Identity());
     }
 
     auto phase = TimelinePhase::CreateTimelinePhase(universe,
@@ -374,26 +368,32 @@ TimelinePhase::SharedConstPtr CreateTimelinePhase(Body* body,
 
 Timeline* CreateTimelineFromArray(Body* body,
                                   Universe& universe,
-                                  ValueArray* timelineArray,
+                                  const ValueArray* timelineArray,
                                   const fs::path& path,
                                   const ReferenceFrame::SharedConstPtr& defaultOrbitFrame,
                                   const ReferenceFrame::SharedConstPtr& defaultBodyFrame)
 {
-    auto* timeline = new Timeline();
-    double previousEnding = -numeric_limits<double>::infinity();
+    auto timeline = std::make_unique<Timeline>();
+    double previousEnding = -std::numeric_limits<double>::infinity();
 
-    for (ValueArray::const_iterator iter = timelineArray->begin(); iter != timelineArray->end(); iter++)
+    if (timelineArray->empty())
     {
-        Hash* phaseData = (*iter)->getHash();
+        GetLogger()->error("Error in timeline of '{}': timeline array is empty.\n", body->getName());
+        return nullptr;
+    }
+
+    const auto finalIter = timelineArray->end() - 1;
+    for (auto iter = timelineArray->begin(); iter != timelineArray->end(); iter++)
+    {
+        const Hash* phaseData = iter->getHash();
         if (phaseData == nullptr)
         {
             GetLogger()->error("Error in timeline of '{}': phase {} is not a property group.\n", body->getName(), iter - timelineArray->begin() + 1);
-            delete timeline;
             return nullptr;
         }
 
         bool isFirstPhase = iter == timelineArray->begin();
-        bool isLastPhase = *iter == timelineArray->back();
+        bool isLastPhase =  iter == finalIter;
 
         auto phase = CreateTimelinePhase(body, universe, phaseData,
                                          path,
@@ -405,7 +405,6 @@ Timeline* CreateTimelineFromArray(Body* body,
             GetLogger()->error("Error in timeline of '{}', phase {}.\n",
                                body->getName(),
                                iter - timelineArray->begin() + 1);
-            delete timeline;
             return nullptr;
         }
 
@@ -414,17 +413,17 @@ Timeline* CreateTimelineFromArray(Body* body,
         timeline->appendPhase(phase);
     }
 
-    return timeline;
+    return timeline.release();
 }
 
 
-static bool CreateTimeline(Body* body,
-                           PlanetarySystem* system,
-                           Universe& universe,
-                           Hash* planetData,
-                           const fs::path& path,
-                           DataDisposition disposition,
-                           BodyType bodyType)
+bool CreateTimeline(Body* body,
+                    PlanetarySystem* system,
+                    Universe& universe,
+                    const Hash* planetData,
+                    const fs::path& path,
+                    DataDisposition disposition,
+                    BodyType bodyType)
 {
     FrameTree* parentFrameTree = nullptr;
     Selection parentObject = GetParentObject(system);
@@ -451,7 +450,7 @@ static bool CreateTimeline(Body* body,
     ReferenceFrame::SharedConstPtr defaultBodyFrame;
     if (bodyType == SurfaceObject)
     {
-        defaultOrbitFrame = shared_ptr<BodyFixedFrame>(new BodyFixedFrame(parentObject, parentObject));
+        defaultOrbitFrame = std::shared_ptr<BodyFixedFrame>(new BodyFixedFrame(parentObject, parentObject));
         defaultBodyFrame = CreateTopocentricFrame(parentObject, parentObject, Selection(body));
     }
     else
@@ -462,16 +461,17 @@ static bool CreateTimeline(Body* body,
 
     // If there's an explicit timeline definition, parse that. Otherwise, we'll do
     // things the old way.
-    Value* value = planetData->getValue("Timeline");
+    const Value* value = planetData->getValue("Timeline");
     if (value != nullptr)
     {
-        if (value->getType() != Value::ArrayType)
+        const ValueArray* timelineArray = value->getArray();
+        if (timelineArray == nullptr)
         {
             GetLogger()->error("Error: Timeline must be an array\n");
             return false;
         }
 
-        Timeline* timeline = CreateTimelineFromArray(body, universe, value->getArray(), path,
+        Timeline* timeline = CreateTimelineFromArray(body, universe, timelineArray, path,
                                                      defaultOrbitFrame, defaultBodyFrame);
 
         if (!timeline)
@@ -486,8 +486,8 @@ static bool CreateTimeline(Body* body,
     ReferenceFrame::SharedConstPtr bodyFrame;
     Orbit* orbit                 = nullptr;
     RotationModel* rotationModel = nullptr;
-    double beginning             = -numeric_limits<double>::infinity();
-    double ending                =  numeric_limits<double>::infinity();
+    double beginning             = -std::numeric_limits<double>::infinity();
+    double ending                =  std::numeric_limits<double>::infinity();
 
     // If any new timeline values are specified, we need to overrideOldTimeline will
     // be set to true.
@@ -516,7 +516,7 @@ static bool CreateTimeline(Body* body,
 
     // Get the object's orbit reference frame.
     bool newOrbitFrame = false;
-    Value* frameValue = planetData->getValue("OrbitFrame");
+    const Value* frameValue = planetData->getValue("OrbitFrame");
     if (frameValue != nullptr)
     {
         auto frame = CreateReferenceFrame(universe, frameValue, parentObject, body);
@@ -530,7 +530,7 @@ static bool CreateTimeline(Body* body,
 
     // Get the object's body frame.
     bool newBodyFrame = false;
-    Value* bodyFrameValue = planetData->getValue("BodyFrame");
+    const Value* bodyFrameValue = planetData->getValue("BodyFrame");
     if (bodyFrameValue != nullptr)
     {
         auto frame = CreateReferenceFrame(universe, bodyFrameValue, parentObject, body);
@@ -666,14 +666,14 @@ static bool CreateTimeline(Body* body,
 // Create a body (planet, moon, spacecraft, etc.) using the values from a
 // property list. The usePlanetsUnits flags specifies whether period and
 // semi-major axis are in years and AU rather than days and kilometers.
-static Body* CreateBody(const string& name,
-                        PlanetarySystem* system,
-                        Universe& universe,
-                        Body* existingBody,
-                        Hash* planetData,
-                        const fs::path& path,
-                        DataDisposition disposition,
-                        BodyType bodyType)
+Body* CreateBody(const std::string& name,
+                 PlanetarySystem* system,
+                 Universe& universe,
+                 Body* existingBody,
+                 const Hash* planetData,
+                 const fs::path& path,
+                 DataDisposition disposition,
+                 BodyType bodyType)
 {
     Body* body = nullptr;
 
@@ -715,45 +715,51 @@ static Body* CreateBody(const string& name,
     // If the body also has a mesh, it is always scaled in x, y, and z by
     // the maximum semiaxis, never anisotropically.
 
-    auto radius = (double) body->getRadius();
+    auto radius = static_cast<double>(body->getRadius());
     bool radiusSpecified = false;
-    if (planetData->getLength("Radius", radius))
+    if (auto rad = planetData->getLength<double>("Radius"); rad.has_value())
     {
-        body->setSemiAxes(Vector3f::Constant((float) radius));
+        radius = *rad;
+        body->setSemiAxes(Eigen::Vector3f::Constant((float) radius));
         radiusSpecified = true;
     }
 
-    Vector3d semiAxes = Vector3d::Ones();
-    if (planetData->getVector("SemiAxes", semiAxes))
+    bool semiAxesSpecified = false;
+    if (radiusSpecified)
     {
-        if (radiusSpecified)
+        if (auto semiAxes = planetData->getVector3<double>("SemiAxes"); semiAxes.has_value())
         {
-            // if the radius has been specified, treat SemiAxes as dimensionless
-            // (i.e. ignore units) and multiply the radius by the SemiAxes
-            semiAxes *= radius;
+            // If the radius has been specified, treat SemiAxes as dimensionless
+            // (ignore units) and multiply the SemiAxes by the Radius.
+            *semiAxes *= radius;
+            // Swap y and z to match internal coordinate system
+            semiAxes->tail<2>().reverseInPlace();
+            body->setSemiAxes(semiAxes->cast<float>());
+            semiAxesSpecified = true;
         }
-        else
-        {
-            double semiAxesScale = 1.0;
-            planetData->getLengthScale("SemiAxes", semiAxesScale);
-            semiAxes *= semiAxesScale;
-        }
-        // Swap y and z to match internal coordinate system
-        body->setSemiAxes(Vector3f((float) semiAxes.x(), (float) semiAxes.z(), (float) semiAxes.y()));
     }
     else
     {
-        double oblateness = 0.0;
-        if (planetData->getNumber("Oblateness", oblateness))
+        if (auto semiAxes = planetData->getLengthVector<double>("SemiAxes"); semiAxes.has_value())
         {
-            body->setSemiAxes((float) body->getRadius() * Vector3f(1.0f, 1.0f - (float) oblateness, 1.0f));
+            // Swap y and z to match internal coordinate system
+            semiAxes->tail<2>().reverseInPlace();
+            body->setSemiAxes(semiAxes->cast<float>());
+            semiAxesSpecified = true;
+        }
+    }
+
+    if (!semiAxesSpecified)
+    {
+        if (auto oblateness = planetData->getNumber<float>("Oblateness"); oblateness.has_value())
+        {
+            body->setSemiAxes(body->getRadius() * Eigen::Vector3f(1.0f, 1.0f - *oblateness, 1.0f));
         }
     }
 
     int classification = body->getClassification();
-    string classificationName;
-    if (planetData->getString("Class", classificationName))
-        classification = GetClassificationId(classificationName);
+    if (const std::string* classificationName = planetData->getString("Class"); classificationName != nullptr)
+        classification = GetClassificationId(*classificationName);
 
     if (classification == Body::Unknown)
     {
@@ -786,81 +792,75 @@ static Body* CreateBody(const string& name,
     if (classification & CLASSES_UNCLICKABLE)
         body->setClickable(false);
 
-    string infoURL; // FIXME: should be own class
-    if (planetData->getString("InfoURL", infoURL))
+    // FIXME: should be own class
+    if (const std::string* infoURL = planetData->getString("InfoURL"); infoURL != nullptr)
     {
-        if (infoURL.find(':') == string::npos)
+        std::string modifiedURL;
+        if (infoURL->find(':') == std::string::npos)
         {
             // Relative URL, the base directory is the current one,
             // not the main installation directory
-            string p = path.string();
+            std::string p = path.string();
             if (p[1] == ':')
                 // Absolute Windows path, file:/// is required
-                infoURL = "file:///" + p + "/" + infoURL;
+                modifiedURL = "file:///" + p + "/" + *infoURL;
             else if (!p.empty())
-                infoURL = p + "/" + infoURL;
+                modifiedURL = p + "/" + *infoURL;
         }
-        body->setInfoURL(infoURL);
+        body->setInfoURL(modifiedURL.empty() ? *infoURL : modifiedURL);
     }
 
-    double t;
-    if (planetData->getNumber("Albedo", t))
+    if (auto albedo = planetData->getNumber<float>("Albedo"); albedo.has_value())
     {
         // TODO: make this warn
         GetLogger()->verbose("Deprecated parameter Albedo used in {} definition.\nUse GeomAlbedo & BondAlbedo instead.\n", name);
-        body->setGeomAlbedo((float) t);
+        body->setGeomAlbedo(*albedo);
     }
 
-    if (planetData->getNumber("GeomAlbedo", t))
+    if (auto albedo = planetData->getNumber<float>("GeomAlbedo"); albedo.has_value())
     {
-        if (t > 0.0)
+        if (*albedo > 0.0)
         {
-            body->setGeomAlbedo((float) t);
+            body->setGeomAlbedo(*albedo);
             // Set the BondAlbedo and Reflectivity values if it is <1, otherwise as 1.
-            if (t > 1.0)
-                t = 1.0;
-            body->setBondAlbedo((float) t);
-            body->setReflectivity((float) t);
+            if (*albedo > 1.0)
+                albedo = 1.0;
+            body->setBondAlbedo(*albedo);
+            body->setReflectivity(*albedo);
         }
         else
         {
-            GetLogger()->error(_("Incorrect GeomAlbedo value: {}\n"), t);
+            GetLogger()->error(_("Incorrect GeomAlbedo value: {}\n"), *albedo);
         }
     }
 
-    if (planetData->getNumber("Reflectivity", t))
+    if (auto reflectivity = planetData->getNumber<float>("Reflectivity"); reflectivity.has_value())
     {
-        if (t >= 0.0 && t <= 1.0)
-            body->setReflectivity((float) t);
+        if (*reflectivity >= 0.0f && *reflectivity <= 1.0f)
+            body->setReflectivity(*reflectivity);
         else
-            GetLogger()->error(_("Incorrect Reflectivity value: {}\n"), t);
+            GetLogger()->error(_("Incorrect Reflectivity value: {}\n"), *reflectivity);
     }
 
-    if (planetData->getNumber("BondAlbedo", t))
+    if (auto albedo = planetData->getNumber<float>("BondAlbedo"); albedo.has_value())
     {
-        if (t >= 0.0 && t <= 1.0)
-            body->setBondAlbedo((float) t);
+        if (*albedo >= 0.0f && *albedo <= 1.0f)
+            body->setBondAlbedo(*albedo);
         else
-            GetLogger()->error(_("Incorrect BondAlbedo value: {}\n"), t);
+            GetLogger()->error(_("Incorrect BondAlbedo value: {}\n"), *albedo);
     }
 
-    if (planetData->getNumber("Temperature", t))
-        body->setTemperature((float) t);
+    if (auto temperature = planetData->getNumber<float>("Temperature"); temperature.has_value() && *temperature > 0.0f)
+        body->setTemperature(*temperature);
+    if (auto tempDiscrepancy = planetData->getNumber<float>("TempDiscrepancy"); tempDiscrepancy.has_value())
+        body->setTempDiscrepancy(*tempDiscrepancy);
+    if (auto mass = planetData->getMass<float>("Mass", 1.0, 1.0); mass.has_value())
+        body->setMass(*mass);
+    if (auto density = planetData->getNumber<float>("Density"); density.has_value())
+       body->setDensity(*density);
 
-    if (planetData->getNumber("TempDiscrepancy", t))
-        body->setTempDiscrepancy((float) t);
-
-    if (planetData->getMass("Mass", t, 1.0, 1.0))
-        body->setMass((float) t);
-
-    if (planetData->getNumber("Density", t))
-       body->setDensity((float) t);
-
-    Quaternionf orientation = Quaternionf::Identity();
-    if (planetData->getRotation("Orientation", orientation))
-    {
-        body->setGeometryOrientation(orientation);
-    }
+    if (auto orientation = planetData->getRotation("Orientation"); orientation.has_value())
+        body->setGeometryOrientation(*orientation);
 
     Surface surface;
     if (disposition == DataDisposition::Modify)
@@ -874,167 +874,150 @@ static Body* CreateBody(const string& name,
     FillinSurface(planetData, &surface, path);
     body->setSurface(surface);
 
+    if (const std::string* geometry = planetData->getString("Mesh"); geometry != nullptr)
     {
-        string geometry;
-        if (planetData->getString("Mesh", geometry))
-        {
-            Vector3f geometryCenter(Vector3f::Zero());
-            if (planetData->getVector("MeshCenter", geometryCenter))
-            {
-                // TODO: Adjust bounding radius if model center isn't
-                // (0.0f, 0.0f, 0.0f)
-            }
+        auto geometryCenter = planetData->getVector3<float>("MeshCenter").value_or(Eigen::Vector3f::Zero());
+        // TODO: Adjust bounding radius if model center isn't
+        // (0.0f, 0.0f, 0.0f)
 
-            bool isNormalized = true;
-            planetData->getBoolean("NormalizeMesh", isNormalized);
+        bool isNormalized = planetData->getBoolean("NormalizeMesh").value_or(true);
+        auto geometryScale = planetData->getLength<float>("MeshScale").value_or(1.0f);
 
-            float geometryScale = 1.0f;
-            planetData->getLength("MeshScale", geometryScale);
-
-            ResourceHandle geometryHandle = GetGeometryManager()->getHandle(GeometryInfo(geometry, path, geometryCenter, 1.0f, isNormalized));
-            body->setGeometry(geometryHandle);
-            body->setGeometryScale(geometryScale);
-        }
+        ResourceHandle geometryHandle = GetGeometryManager()->getHandle(GeometryInfo(*geometry, path, geometryCenter, 1.0f, isNormalized));
+        body->setGeometry(geometryHandle);
+        body->setGeometryScale(geometryScale);
     }
 
     // Read the atmosphere
+    if (const Value* atmosDataValue = planetData->getValue("Atmosphere"); atmosDataValue != nullptr)
     {
-        Value* atmosDataValue = planetData->getValue("Atmosphere");
-        if (atmosDataValue != nullptr)
+        if (const Hash* atmosData = atmosDataValue->getHash(); atmosData == nullptr)
         {
-            if (atmosDataValue->getType() != Value::HashType)
+            std::cout << "ReadSolarSystem: Atmosphere must be an assoc array.\n";
+        }
+        else
+        {
+            assert(atmosData != nullptr);
+
+            Atmosphere* atmosphere = nullptr;
+            if (disposition == DataDisposition::Modify)
             {
-                cout << "ReadSolarSystem: Atmosphere must be an assoc array.\n";
+                atmosphere = body->getAtmosphere();
+                if (atmosphere == nullptr)
+                {
+                    Atmosphere atm;
+                    body->setAtmosphere(atm);
+                    atmosphere = body->getAtmosphere();
+                }
             }
             else
             {
-                Hash* atmosData = atmosDataValue->getHash();
-                assert(atmosData != nullptr);
-
-                Atmosphere* atmosphere = nullptr;
-                if (disposition == DataDisposition::Modify)
-                {
-                    atmosphere = body->getAtmosphere();
-                    if (atmosphere == nullptr)
-                    {
-                        Atmosphere atm;
-                        body->setAtmosphere(atm);
-                        atmosphere = body->getAtmosphere();
-                    }
-                }
-                else
-                {
-                    atmosphere = new Atmosphere();
-                }
-                atmosData->getLength("Height", atmosphere->height);
-                atmosData->getColor("Lower", atmosphere->lowerColor);
-                atmosData->getColor("Upper", atmosphere->upperColor);
-                atmosData->getColor("Sky", atmosphere->skyColor);
-                atmosData->getColor("Sunset", atmosphere->sunsetColor);
-
-                atmosData->getNumber("Mie", atmosphere->mieCoeff);
-                atmosData->getLength("MieScaleHeight", atmosphere->mieScaleHeight);
-                atmosData->getNumber("MieAsymmetry", atmosphere->miePhaseAsymmetry);
-                atmosData->getVector("Rayleigh", atmosphere->rayleighCoeff);
-                //atmosData->getNumber("RayleighScaleHeight", atmosphere->rayleighScaleHeight);
-                atmosData->getVector("Absorption", atmosphere->absorptionCoeff);
-
-                // Get the cloud map settings
-                atmosData->getLength("CloudHeight", atmosphere->cloudHeight);
-                if (atmosData->getNumber("CloudSpeed", atmosphere->cloudSpeed))
-                    atmosphere->cloudSpeed = degToRad(atmosphere->cloudSpeed);
-
-                string cloudTexture;
-                if (atmosData->getString("CloudMap", cloudTexture))
-                {
-                    atmosphere->cloudTexture.setTexture(cloudTexture,
-                                                        path,
-                                                        TextureInfo::WrapTexture);
-                }
-
-                string cloudNormalMap;
-                if (atmosData->getString("CloudNormalMap", cloudNormalMap))
-                {
-                    atmosphere->cloudNormalMap.setTexture(cloudNormalMap,
-                                                           path,
-                                                           TextureInfo::WrapTexture);
-                }
-
-                double cloudShadowDepth = 0.0;
-                if (atmosData->getNumber("CloudShadowDepth", cloudShadowDepth))
-                {
-                    cloudShadowDepth = std::clamp(cloudShadowDepth, 0.0, 1.0);
-                    atmosphere->cloudShadowDepth = (float) cloudShadowDepth;
-                }
-
-                body->setAtmosphere(*atmosphere);
-                if (disposition != DataDisposition::Modify)
-                    delete atmosphere;
+                atmosphere = new Atmosphere();
             }
+
+            if (auto height = atmosData->getLength<float>("Height"); height.has_value())
+                atmosphere->height = *height;
+            if (auto color = atmosData->getColor("Lower"); color.has_value())
+                atmosphere->lowerColor = *color;
+            if (auto color = atmosData->getColor("Upper"); color.has_value())
+                atmosphere->upperColor = *color;
+            if (auto color = atmosData->getColor("Sky"); color.has_value())
+                atmosphere->skyColor = *color;
+            if (auto color = atmosData->getColor("Sunset"); color.has_value())
+                atmosphere->sunsetColor = *color;
+
+            if (auto mieCoeff = atmosData->getNumber<float>("Mie"); mieCoeff.has_value())
+                atmosphere->mieCoeff = *mieCoeff;
+            if (auto mieScaleHeight = atmosData->getLength<float>("MieScaleHeight"))
+                atmosphere->mieScaleHeight = *mieScaleHeight;
+            if (auto miePhaseAsymmetry = atmosData->getNumber<float>("MieAsymmetry"); miePhaseAsymmetry.has_value())
+                atmosphere->miePhaseAsymmetry = *miePhaseAsymmetry;
+            if (auto rayleighCoeff = atmosData->getVector3<float>("Rayleigh"); rayleighCoeff.has_value())
+                atmosphere->rayleighCoeff = *rayleighCoeff;
+            //atmosData->getNumber("RayleighScaleHeight", atmosphere->rayleighScaleHeight);
+            if (auto absorptionCoeff = atmosData->getVector3<float>("Absorption"); absorptionCoeff.has_value())
+                atmosphere->absorptionCoeff = *absorptionCoeff;
+
+            // Get the cloud map settings
+            if (auto cloudHeight = atmosData->getLength<float>("CloudHeight"); cloudHeight.has_value())
+                atmosphere->cloudHeight = *cloudHeight;
+            if (auto cloudSpeed = atmosData->getNumber<float>("CloudSpeed"); cloudSpeed.has_value())
+                atmosphere->cloudSpeed = celmath::degToRad(*cloudSpeed);
+
+            if (const std::string* cloudTexture = atmosData->getString("CloudMap"); cloudTexture != nullptr)
+            {
+                atmosphere->cloudTexture.setTexture(*cloudTexture,
+                                                    path,
+                                                    TextureInfo::WrapTexture);
+            }
+
+            if (const std::string* cloudNormalMap = atmosData->getString("CloudNormalMap"); cloudNormalMap != nullptr)
+            {
+                atmosphere->cloudNormalMap.setTexture(*cloudNormalMap,
+                                                      path,
+                                                      TextureInfo::WrapTexture);
+            }
+
+            if (auto cloudShadowDepth = atmosData->getNumber<float>("CloudShadowDepth"); cloudShadowDepth.has_value())
+            {
+                cloudShadowDepth = std::clamp(*cloudShadowDepth, 0.0f, 1.0f);
+                atmosphere->cloudShadowDepth = *cloudShadowDepth;
+            }
+
+            body->setAtmosphere(*atmosphere);
+            if (disposition != DataDisposition::Modify)
+                delete atmosphere;
         }
     }
 
     // Read the ring system
+    if (const Value* ringsDataValue = planetData->getValue("Rings"); ringsDataValue != nullptr)
     {
-        Value* ringsDataValue = planetData->getValue("Rings");
-        if (ringsDataValue != nullptr)
+        if (const Hash* ringsData = ringsDataValue->getHash(); ringsData == nullptr)
         {
-            if (ringsDataValue->getType() != Value::HashType)
-            {
-                cout << "ReadSolarSystem: Rings must be an assoc array.\n";
-            }
-            else
-            {
-                Hash* ringsData = ringsDataValue->getHash();
-                // ASSERT(ringsData != nullptr);
+            std::cout << "ReadSolarSystem: Rings must be an assoc array.\n";
+        }
+        else
+        {
+            RingSystem rings(0.0f, 0.0f);
+            if (body->getRings() != nullptr)
+                rings = *body->getRings();
 
-                RingSystem rings(0.0f, 0.0f);
-                if (body->getRings() != nullptr)
-                    rings = *body->getRings();
+            if (auto inner = ringsData->getLength<float>("Inner"); inner.has_value())
+                rings.innerRadius = *inner;
+            if (auto outer = ringsData->getLength<float>("Outer"); outer.has_value())
+                rings.outerRadius = *outer;
 
-                double inner = 0.0, outer = 0.0;
-                if (ringsData->getLength("Inner", inner))
-                    rings.innerRadius = (float) inner;
-                if (ringsData->getLength("Outer", outer))
-                    rings.outerRadius = (float) outer;
+            if (auto color = ringsData->getColor("Color"); color.has_value())
+                rings.color = *color;
 
-                Color color(1.0f, 1.0f, 1.0f);
-                if (ringsData->getColor("Color", color))
-                    rings.color = color;
+            if (const std::string* textureName = ringsData->getString("Texture"); textureName != nullptr)
+                rings.texture = MultiResTexture(*textureName, path);
 
-                string textureName;
-                if (ringsData->getString("Texture", textureName))
-                    rings.texture = MultiResTexture(textureName, path);
-
-                body->setRings(rings);
-            }
+            body->setRings(rings);
         }
     }
 
     // Read comet tail color
-    Color cometTailColor;
-    if(planetData->getColor("TailColor", cometTailColor))
+    if (auto cometTailColor = planetData->getColor("TailColor"); cometTailColor.has_value())
     {
-        body->setCometTailColor(cometTailColor);
+        body->setCometTailColor(*cometTailColor);
     }
 
-    bool clickable = true;
-    if (planetData->getBoolean("Clickable", clickable))
+    if (auto clickable = planetData->getBoolean("Clickable"); clickable.has_value())
     {
-        body->setClickable(clickable);
+        body->setClickable(*clickable);
     }
 
-    bool visible = true;
-    if (planetData->getBoolean("Visible", visible))
+    if (auto visible = planetData->getBoolean("Visible"); visible.has_value())
     {
-        body->setVisible(visible);
+        body->setVisible(*visible);
     }
 
-    Color orbitColor;
-    if (planetData->getColor("OrbitColor", orbitColor))
+    if (auto orbitColor = planetData->getColor("OrbitColor"); orbitColor.has_value())
     {
         body->setOrbitColorOverridden(true);
-        body->setOrbitColor(orbitColor);
+        body->setOrbitColor(*orbitColor);
     }
 
     return body;
@@ -1042,13 +1025,13 @@ static Body* CreateBody(const string& name,
 
 
 // Create a barycenter object using the values from a hash
-static Body* CreateReferencePoint(const string& name,
-                                  PlanetarySystem* system,
-                                  Universe& universe,
-                                  Body* existingBody,
-                                  Hash* refPointData,
-                                  const fs::path& path,
-                                  DataDisposition disposition)
+Body* CreateReferencePoint(const std::string& name,
+                           PlanetarySystem* system,
+                           Universe& universe,
+                           Body* existingBody,
+                           const Hash* refPointData,
+                           const fs::path& path,
+                           DataDisposition disposition)
 {
     Body* body = nullptr;
 
@@ -1064,7 +1047,7 @@ static Body* CreateReferencePoint(const string& name,
         disposition = DataDisposition::Add;
     }
 
-    body->setSemiAxes(Vector3f::Ones());
+    body->setSemiAxes(Eigen::Vector3f::Ones());
     body->setClassification(Body::Invisible);
     body->setVisible(false);
     body->setVisibleAsPoint(false);
@@ -1080,30 +1063,27 @@ static Body* CreateReferencePoint(const string& name,
 
     // Reference points can be marked visible; no geometry is shown, but the label and orbit
     // will be.
-    bool visible = false;
-    if (refPointData->getBoolean("Visible", visible))
+    if (auto visible = refPointData->getBoolean("Visible"); visible.has_value())
     {
-        body->setVisible(visible);
+        body->setVisible(*visible);
     }
 
-    bool clickable = false;
-    if (refPointData->getBoolean("Clickable", clickable))
+    if (auto clickable = refPointData->getBoolean("Clickable"); clickable.has_value())
     {
-        body->setClickable(clickable);
+        body->setClickable(*clickable);
     }
 
-    Color orbitColor;
-    if (refPointData->getColor("OrbitColor", orbitColor))
+    if (auto orbitColor = refPointData->getColor("OrbitColor"); orbitColor.has_value())
     {
         body->setOrbitColorOverridden(true);
-        body->setOrbitColor(orbitColor);
+        body->setOrbitColor(*orbitColor);
     }
 
     return body;
 }
+} // end unnamed namespace
 
-
-bool LoadSolarSystemObjects(istream& in,
+bool LoadSolarSystemObjects(std::istream& in,
                             Universe& universe,
                             const fs::path& directory)
 {
@@ -1111,7 +1091,7 @@ bool LoadSolarSystemObjects(istream& in,
     Parser parser(&tokenizer);
 
 #ifdef ENABLE_NLS
-    string s = directory.string();
+    std::string s = directory.string();
     const char* d = s.c_str();
     bindtextdomain(d, d); // domain name is the same as resource path
 #endif
@@ -1120,19 +1100,19 @@ bool LoadSolarSystemObjects(istream& in,
     {
         // Read the disposition; if none is specified, the default is Add.
         DataDisposition disposition = DataDisposition::Add;
-        if (tokenizer.getTokenType() == Tokenizer::TokenName)
+        if (auto tokenValue = tokenizer.getNameValue(); tokenValue.has_value())
         {
-            if (tokenizer.getStringValue() == "Add")
+            if (*tokenValue == "Add")
             {
                 disposition = DataDisposition::Add;
                 tokenizer.nextToken();
             }
-            else if (tokenizer.getStringValue() == "Replace")
+            else if (*tokenValue == "Replace")
             {
                 disposition = DataDisposition::Replace;
                 tokenizer.nextToken();
             }
-            else if (tokenizer.getStringValue() == "Modify")
+            else if (*tokenValue == "Modify")
             {
                 disposition = DataDisposition::Modify;
                 tokenizer.nextToken();
@@ -1140,49 +1120,50 @@ bool LoadSolarSystemObjects(istream& in,
         }
 
         // Read the item type; if none is specified the default is Body
-        string itemType("Body");
-        if (tokenizer.getTokenType() == Tokenizer::TokenName)
+        std::string itemType("Body");
+        if (auto tokenValue = tokenizer.getNameValue(); tokenValue.has_value())
         {
-            itemType = tokenizer.getStringValue();
+            itemType = *tokenValue;
             tokenizer.nextToken();
         }
 
-        if (tokenizer.getTokenType() != Tokenizer::TokenString)
+        // The name list is a string with zero more names. Multiple names are
+        // delimited by colons.
+        std::string nameList;
+        if (auto tokenValue = tokenizer.getStringValue(); tokenValue.has_value())
+        {
+            nameList = *tokenValue;
+        }
+        else
         {
             sscError(tokenizer, "object name expected");
             return false;
         }
 
-        // The name list is a string with zero more names. Multiple names are
-        // delimited by colons.
-        string nameList(tokenizer.getStringValue());
-
-        if (tokenizer.nextToken() != Tokenizer::TokenString)
+        tokenizer.nextToken();
+        std::string parentName;
+        if (auto tokenValue = tokenizer.getStringValue(); tokenValue.has_value())
+        {
+            parentName = *tokenValue;
+        }
+        else
         {
             sscError(tokenizer, "bad parent object name");
             return false;
         }
-        string parentName(tokenizer.getStringValue());
 
-        Value* objectDataValue = parser.readValue();
-        if (objectDataValue == nullptr)
-        {
-            sscError(tokenizer, "bad object definition");
-            return false;
-        }
-
-        if (objectDataValue->getType() != Value::HashType)
+        const Value objectDataValue = parser.readValue();
+        const Hash* objectData = objectDataValue.getHash();
+        if (objectData == nullptr)
         {
             sscError(tokenizer, "{ expected");
-            delete objectDataValue;
             return false;
         }
-        Hash* objectData = objectDataValue->getHash();
 
         Selection parent = universe.findPath(parentName, nullptr, 0);
         PlanetarySystem* parentSystem = nullptr;
 
-        vector<string> names;
+        std::vector<std::string> names;
         // Iterate through the string for names delimited
         // by ':', and insert them into the name list.
         if (nameList.empty())
@@ -1191,21 +1172,21 @@ bool LoadSolarSystemObjects(istream& in,
         }
         else
         {
-            string::size_type startPos   = 0;
-            while (startPos != string::npos)
+            std::string::size_type startPos   = 0;
+            while (startPos != std::string::npos)
             {
-                string::size_type next    = nameList.find(':', startPos);
-                string::size_type length  = string::npos;
-                if (next != string::npos)
+                std::string::size_type next   = nameList.find(':', startPos);
+                std::string::size_type length = std::string::npos;
+                if (next != std::string::npos)
                 {
-                    length   = next - startPos;
+                    length = next - startPos;
                     ++next;
                 }
                 names.push_back(nameList.substr(startPos, length));
                 startPos   = next;
             }
         }
-        string primaryName = names.front();
+        std::string primaryName = names.front();
 
         BodyType bodyType = UnknownBodyType;
         if (itemType == "Body")
@@ -1285,7 +1266,10 @@ bool LoadSolarSystemObjects(istream& in,
             if (parent.body() != nullptr)
                 parent.body()->addAlternateSurface(primaryName, surface);
             else
+            {
                 sscError(tokenizer, _("bad alternate surface"));
+                delete surface;
+            }
         }
         else if (itemType == "Location")
         {
@@ -1308,7 +1292,6 @@ bool LoadSolarSystemObjects(istream& in,
                 sscError(tokenizer, fmt::sprintf(_("parent body '%s' of '%s' not found.\n"), parentName, primaryName));
             }
         }
-        delete objectDataValue;
     }
 
     // TODO: Return some notification if there's an error parsing the file
@@ -1337,7 +1320,7 @@ Star* SolarSystem::getStar() const
     return star;
 }
 
-Vector3f SolarSystem::getCenter() const
+Eigen::Vector3f SolarSystem::getCenter() const
 {
     // TODO: This is a very simple method at the moment, but it will get
     // more complex when planets around multistar systems are supported

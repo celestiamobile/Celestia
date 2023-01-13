@@ -985,7 +985,7 @@ float Star::getRadius() const
 
     // Use the Stefan-Boltzmann law to estimate the radius of a
     // star from surface temperature and luminosity
-    return SOLAR_RADIUS * (float) sqrt(lum) *
+    return SOLAR_RADIUS<float> * sqrt(lum) *
         square(SOLAR_TEMPERATURE / getTemperature());
 }
 
@@ -1152,7 +1152,7 @@ float Star::getBolometricLuminosity() const
     // visual magnitude of the star.
     float solarBMag = SOLAR_BOLOMETRIC_MAG;
     float bmag = getBolometricMagnitude();
-    return (float) exp((solarBMag - bmag) / LN_MAG);
+    return exp((solarBMag - bmag) / LN_MAG);
 #endif
 }
 

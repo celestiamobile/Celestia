@@ -8,39 +8,28 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#include <algorithm>
-#include <cstdio>
-#include <config.h>
-#include <cassert>
-#include "astro.h"
-#include "deepskyobj.h"
-#include "galaxy.h"
-#include "globular.h"
-#include "nebula.h"
-#include "opencluster.h"
-#include <celengine/selection.h>
+#include <cmath>
+
 #include <celmath/intersect.h>
+#include <celmath/sphere.h>
+#include "deepskyobj.h"
 
-using namespace Eigen;
-using namespace std;
-using namespace celmath;
-
-Vector3d DeepSkyObject::getPosition() const
+Eigen::Vector3d DeepSkyObject::getPosition() const
 {
     return position;
 }
 
-void DeepSkyObject::setPosition(const Vector3d& p)
+void DeepSkyObject::setPosition(const Eigen::Vector3d& p)
 {
     position = p;
 }
 
-Quaternionf DeepSkyObject::getOrientation() const
+Eigen::Quaternionf DeepSkyObject::getOrientation() const
 {
     return orientation;
 }
 
-void DeepSkyObject::setOrientation(const Quaternionf& q)
+void DeepSkyObject::setOrientation(const Eigen::Quaternionf& q)
 {
     orientation = q;
 }
@@ -60,17 +49,17 @@ void DeepSkyObject::setAbsoluteMagnitude(float _absMag)
     absMag = _absMag;
 }
 
-string DeepSkyObject::getDescription() const
+std::string DeepSkyObject::getDescription() const
 {
     return "";
 }
 
-const string& DeepSkyObject::getInfoURL() const
+const std::string& DeepSkyObject::getInfoURL() const
 {
     return infoURL;
 }
 
-void DeepSkyObject::setInfoURL(const string& s)
+void DeepSkyObject::setInfoURL(const std::string& s)
 {
     infoURL = s;
 }
@@ -81,7 +70,10 @@ bool DeepSkyObject::pick(const Eigen::ParametrizedLine<double, 3>& ray,
                          double& cosAngleToBoundCenter) const
 {
     if (isVisible())
-        return testIntersection(ray, Sphered(position, (double) radius), distanceToPicker, cosAngleToBoundCenter);
+        return celmath::testIntersection(ray,
+                                         celmath::Sphered(position, static_cast<double>(radius)),
+                                         distanceToPicker,
+                                         cosAngleToBoundCenter);
     else
         return false;
 }
@@ -103,8 +95,8 @@ void DeepSkyObject::hsv2rgb( float *r, float *g, float *b, float h, float s, flo
     }
 
     h /= 60;                      // sector 0 to 5
-    i = (int) floorf( h );
-    f = h - (float) i;            // factorial part of h
+    i = static_cast<int>(std::floor( h ));
+    f = h - static_cast<float>(i);            // factorial part of h
     p = v * ( 1 - s );
     q = v * ( 1 - s * f );
     t = v * ( 1 - s * ( 1 - f ) );
@@ -144,70 +136,60 @@ void DeepSkyObject::hsv2rgb( float *r, float *g, float *b, float h, float s, flo
     }
 }
 
-bool DeepSkyObject::load(AssociativeArray* params, const fs::path& resPath)
+bool DeepSkyObject::load(const AssociativeArray* params, const fs::path& resPath)
 {
     // Get position
-    Vector3d position(Vector3d::Zero());
-    if (params->getVector("Position", position))
+    if (auto position = params->getVector3<double>("Position"); position.has_value())
     {
-        setPosition(position);
+        setPosition(*position);
     }
     else
     {
-        double distance = 1.0;
-        double RA = 0.0;
-        double dec = 0.0;
-        params->getLength("Distance", distance, KM_PER_LY);
-        params->getAngle("RA", RA, DEG_PER_HRA);
-        params->getAngle("Dec", dec);
+        auto distance = params->getLength<double>("Distance", KM_PER_LY<double>).value_or(1.0);
+        auto RA = params->getAngle<double>("RA", DEG_PER_HRA).value_or(0.0);
+        auto dec = params->getAngle<double>("Dec").value_or(0.0);
 
-        Vector3d p = astro::equatorialToCelestialCart(RA, dec, distance);
+        Eigen::Vector3d p = astro::equatorialToCelestialCart(RA, dec, distance);
         setPosition(p);
     }
 
     // Get orientation
-    Vector3d axis(Vector3d::UnitX());
-    double angle = 0.0;
-    params->getVector("Axis", axis);
-    params->getAngle("Angle", angle);
+    auto axis = params->getVector3<double>("Axis").value_or(Eigen::Vector3d::UnitX());
+    auto angle = params->getAngle<double>("Angle").value_or(0.0);
 
-    setOrientation(Quaternionf(AngleAxisf((float) degToRad(angle), axis.cast<float>().normalized())));
+    setOrientation(Eigen::Quaternionf(Eigen::AngleAxisf(static_cast<float>(celmath::degToRad(angle)),
+                                                        axis.cast<float>().normalized())));
 
-    double radius = 1.0;
-    params->getLength("Radius", radius, KM_PER_LY);
+    setRadius(params->getLength<float>("Radius", KM_PER_LY<double>).value_or(1.0f));
 
-    setRadius((float) radius);
+    if (auto absMagValue = params->getNumber<float>("AbsMag"); absMagValue.has_value())
+        setAbsoluteMagnitude(*absMagValue);
 
-    double absMag = 0.0;
-    if (params->getNumber("AbsMag", absMag))
-        setAbsoluteMagnitude((float) absMag);
-
-    string infoURL; // FIXME: infourl class
-    if (params->getString("InfoURL", infoURL))
+    // FIXME: infourl class
+    if (const std::string* infoURLValue = params->getString("InfoURL"); infoURLValue != nullptr)
     {
-        if (infoURL.find(':') == string::npos)
+        std::string modifiedURL;
+        if (infoURLValue->find(':') == std::string::npos)
         {
             // Relative URL, the base directory is the current one,
             // not the main installation directory
             if (resPath.c_str()[1] == ':')
                 // Absolute Windows path, file:/// is required
-                infoURL = "file:///" + resPath.string() + "/" + infoURL;
+                modifiedURL = "file:///" + resPath.string() + "/" + *infoURLValue;
             else if (!resPath.empty())
-                infoURL = resPath.string() + "/" + infoURL;
+                modifiedURL = resPath.string() + "/" + *infoURLValue;
         }
-        setInfoURL(infoURL);
+        setInfoURL(modifiedURL.empty() ? *infoURLValue : modifiedURL);
     }
 
-    bool visible = true;
-    if (params->getBoolean("Visible", visible))
+    if (auto visibleValue = params->getBoolean("Visible"); visibleValue.has_value())
     {
-        setVisible(visible);
+        setVisible(*visibleValue);
     }
 
-    bool clickable = true;
-    if (params->getBoolean("Clickable", clickable))
+    if (auto clickableValue = params->getBoolean("Clickable"); clickableValue.has_value())
     {
-        setClickable(clickable);
+        setClickable(*clickableValue);
     }
 
     return true;

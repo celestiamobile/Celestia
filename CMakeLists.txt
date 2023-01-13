@@ -58,7 +58,6 @@ option(ENABLE_WIN           "Build Windows native frontend? (Default: on)" ON)
 option(ENABLE_FFMPEG        "Support video capture using FFMPEG (Default: off)" OFF)
 option(ENABLE_MINIAUDIO     "Support audio playback using miniaudio (Default: off)" OFF)
 option(ENABLE_TOOLS         "Build different tools? (Default: off)" OFF)
-option(NATIVE_OSX_APP       "Support native OSX paths read data from (Default: off)" OFF)
 option(FAST_MATH            "Build with unsafe fast-math compiller option (Default: off)" OFF)
 option(ENABLE_TESTS         "Enable unit tests? (Default: off)" OFF)
 option(ENABLE_GLES          "Build for OpenGL ES 2.0 instead of OpenGL 2.1 (Default: off)" OFF)
@@ -100,7 +99,7 @@ set(CMAKE_C_STANDARD 11)
 # Use our cmake files
 list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-if((NOT WIN32) AND (NOT NATIVE_OSX_APP))
+if(NOT WIN32)
   include(GNUInstallDirs)
   include(rpath)
 endif()
@@ -275,23 +274,12 @@ foreach (_variableName ${_variableNames})
 endforeach()
 ]]#
 
-# macOS Bundling
-if(NATIVE_OSX_APP)
-  message(STATUS "Generating Info.plist for macOS Bundle")
-  configure_file(${CMAKE_SOURCE_DIR}/Info.plist.in ${CMAKE_BINARY_DIR}/Info.plist @ONLY)
-endif()
-
-if(NATIVE_OSX_APP)
-  set(CMAKE_INSTALL_PREFIX "${PROJECT_BINARY_DIR}/${PROJECT_NAME}.app/Contents")
-  set(CMAKE_INSTALL_FULL_LOCALEDIR "${CMAKE_INSTALL_PREFIX}/Resources/locale")
-  set(CMAKE_INSTALL_BINDIR "MacOS")
-  set(DATADIR "${CMAKE_INSTALL_PREFIX}/Resources")
-  set(FULL_DATADIR "${CMAKE_INSTALL_PREFIX}/Resources")
-elseif(WIN32)
+if(WIN32)
   set(CMAKE_INSTALL_BINDIR ".")
   set(CMAKE_INSTALL_DATAROOTDIR ".")
   set(CMAKE_INSTALL_DATADIR ".")
   set(CMAKE_INSTALL_FULL_LOCALEDIR "locale")
+  set(CMAKE_INSTALL_LOCALEDIR "${CMAKE_INSTALL_FULL_LOCALEDIR}")
   set(DATADIR "${CMAKE_INSTALL_DATADIR}")
   set(FULL_DATADIR ".")
 else()
@@ -324,14 +312,12 @@ add_definitions(
   -DGIT_COMMIT="${GIT_COMMIT}"
 )
 
-if(NOT NATIVE_OSX_APP)
-  add_definitions(
-    -DLOCALEDIR="${CMAKE_INSTALL_FULL_LOCALEDIR}"
-    -DCONFIG_DATA_DIR="${FULL_DATADIR}"
-    -DHIP_DATA_DIR="${FULL_DATADIR}"
-    -DSPLASH_DIR="${FULL_DATADIR}/splash"
-  )
-endif()
+add_definitions(
+  -DLOCALEDIR="${CMAKE_INSTALL_FULL_LOCALEDIR}"
+  -DCONFIG_DATA_DIR="${FULL_DATADIR}"
+  -DHIP_DATA_DIR="${FULL_DATADIR}"
+  -DSPLASH_DIR="${FULL_DATADIR}/splash"
+)
 
 if(WIN32)
   add_definitions(
@@ -347,9 +333,6 @@ if(WIN32)
 endif()
 
 if(APPLE)
-  if(NATIVE_OSX_APP)
-    add_definitions(-DNATIVE_OSX_APP)
-  endif()
   add_definitions(-DGL_SILENCE_DEPRECATION)
 endif()
 
@@ -382,6 +365,9 @@ include_directories("${CMAKE_SOURCE_DIR}/src" ${CMAKE_BINARY_DIR})
 include(CheckSymbolExists)
 check_symbol_exists(wordexp wordexp.h HAVE_WORDEXP)
 check_include_files(byteswap.h HAVE_BYTESWAP_H)
+
+try_compile(HAVE_SINCOS ${CMAKE_BINARY_DIR} "${CMAKE_SOURCE_DIR}/checks/sincos.cpp")
+try_compile(HAVE_APPLE_SINCOS ${CMAKE_BINARY_DIR} "${CMAKE_SOURCE_DIR}/checks/applesincos.cpp")
 
 find_package(Filesystem REQUIRED COMPONENTS Final Experimental)
 if(CXX_FILESYSTEM_IS_EXPERIMENTAL)
@@ -417,8 +403,8 @@ set(BASE_DATA_SOURCES
 install(FILES ${BASE_DATA_SOURCES} DESTINATION ${DATADIR})
 install(FILES "splash.png" DESTINATION "${DATADIR}/splash")
 
-if(NATIVE_OSX_APP)
-  install(FILES ${CMAKE_BINARY_DIR}/Info.plist DESTINATION .)
+if(NOT WIN32)
+  install(FILES celestia-logo.png DESTINATION "${CMAKE_INSTALL_DATADIR}/pixmaps" RENAME celestia.png)
 endif()
 
 add_subdirectory(src)
