@@ -7,12 +7,17 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#ifndef _CELENGINE_VSOP87_H_
-#define _CELENGINE_VSOP87_H_
+#pragma once
 
-#include <string>
-#include "orbit.h"
+#include <memory>
 
-extern Orbit* CreateVSOP87Orbit(const std::string& name);
+#include "customorbittype.h"
 
-#endif // _CELENGINE_VSOP87_H_
+namespace celestia::ephem
+{
+
+class Orbit;
+
+std::unique_ptr<Orbit> CreateVSOP87Orbit(CustomOrbitType);
+
+}

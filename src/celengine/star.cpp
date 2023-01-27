@@ -437,11 +437,11 @@ StarDetails::CreateStandardStarType(const std::string& specTypeName,
     details->setTemperature(_temperature);
     details->setSpectralType(specTypeName);
 
-    details->setRotationModel(new UniformRotationModel(_rotationPeriod,
-                                                       0.0f,
-                                                       astro::J2000,
-                                                       0.0f,
-                                                       0.0f));
+    details->setRotationModel(new celestia::ephem::UniformRotationModel(_rotationPeriod,
+                                                                        0.0f,
+                                                                        astro::J2000,
+                                                                        0.0f,
+                                                                        0.0f));
 
     return details;
 }
@@ -896,7 +896,7 @@ StarDetails::setGeometry(ResourceHandle rh)
 
 
 void
-StarDetails::setOrbit(Orbit* o)
+StarDetails::setOrbit(celestia::ephem::Orbit* o)
 {
     orbit = o;
     computeOrbitalRadius();
@@ -943,7 +943,7 @@ StarDetails::setVisibility(bool b)
 
 
 void
-StarDetails::setRotationModel(const RotationModel* rm)
+StarDetails::setRotationModel(const celestia::ephem::RotationModel* rm)
 {
     rotationModel = rm;
 }
@@ -1019,7 +1019,7 @@ StarDetails::addOrbitingStar(Star* star)
 UniversalCoord
 Star::getPosition(double t) const
 {
-    const Orbit* orbit = getOrbit();
+    const celestia::ephem::Orbit* orbit = getOrbit();
     if (orbit == nullptr)
     {
         return UniversalCoord::CreateLy(position.cast<double>());
@@ -1062,7 +1062,7 @@ Star::getOrbitBarycenterPosition(double t) const
 Vector3d
 Star::getVelocity(double t) const
 {
-    const Orbit* orbit = getOrbit();
+    const celestia::ephem::Orbit* orbit = getOrbit();
     if (orbit == nullptr)
     {
         // The star doesn't have a defined orbit, so the velocity is just
@@ -1180,7 +1180,7 @@ void Star::computeOrbitalRadius()
 }
 
 void
-Star::setRotationModel(const RotationModel* rm)
+Star::setRotationModel(const celestia::ephem::RotationModel* rm)
 {
     details->setRotationModel(rm);
 }

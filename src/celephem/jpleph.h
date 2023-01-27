@@ -12,47 +12,51 @@
 
 #pragma once
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <iosfwd>
 #include <vector>
 
 #include <Eigen/Core>
 
-enum JPLEphemItem
+namespace celestia::ephem
 {
-    JPLEph_Mercury       =  0,
-    JPLEph_Venus         =  1,
-    JPLEph_EarthMoonBary =  2,
-    JPLEph_Mars          =  3,
-    JPLEph_Jupiter       =  4,
-    JPLEph_Saturn        =  5,
-    JPLEph_Uranus        =  6,
-    JPLEph_Neptune       =  7,
-    JPLEph_Pluto         =  8,
-    JPLEph_Moon          =  9,
-    JPLEph_Sun           = 10,
-    JPLEph_Earth         = 11,
-    JPLEph_SSB           = 12,
+
+enum class JPLEphemItem
+{
+    Mercury       =  0,
+    Venus         =  1,
+    EarthMoonBary =  2,
+    Mars          =  3,
+    Jupiter       =  4,
+    Saturn        =  5,
+    Uranus        =  6,
+    Neptune       =  7,
+    Pluto         =  8,
+    Moon          =  9,
+    Sun           = 10,
+    Earth         = 11,
+    SSB           = 12,
 };
 
 
-#define JPLEph_NItems 12
-
 struct JPLEphCoeffInfo
 {
-    unsigned int offset;
-    unsigned int nCoeffs;
-    unsigned int nGranules;
+    std::uint32_t offset;
+    std::uint32_t nCoeffs;
+    std::uint32_t nGranules;
 };
 
 
 struct JPLEphRecord
 {
     JPLEphRecord() = default;
-    ~JPLEphRecord();
+    ~JPLEphRecord() = default;
 
     double t0{ 0.0 };
     double t1{ 0.0 };
-    double* coeffs{ nullptr };
+    std::vector<double> coeffs{ };
 };
 
 
@@ -62,6 +66,8 @@ private:
     JPLEphemeris() = default;
 
 public:
+    static constexpr std::size_t JPLEph_NItems = 12;
+
     ~JPLEphemeris() = default;
 
     Eigen::Vector3d getPlanetPosition(JPLEphemItem, double t) const;
@@ -75,7 +81,7 @@ public:
     unsigned int getRecordSize() const;
 
 private:
-    JPLEphCoeffInfo coeffInfo[JPLEph_NItems];
+    std::array<JPLEphCoeffInfo, JPLEph_NItems> coeffInfo;
     JPLEphCoeffInfo librationCoeffInfo;
 
     double startDate;
@@ -91,3 +97,5 @@ private:
 
     std::vector<JPLEphRecord> records;
 };
+
+} // end namespace celestia::ephem

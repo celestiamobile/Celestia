@@ -14,7 +14,6 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
-#include <cstddef>
 #include <optional>
 #include <utility>
 
@@ -24,6 +23,7 @@
 #include <celmath/intersect.h>
 #include <celmath/randutils.h>
 #include <celmath/ray.h>
+#include <celrender/vertexobject.h>
 #include <celutil/color.h>
 #include <celutil/gettext.h>
 #include "globular.h"
@@ -36,6 +36,9 @@
 namespace vecgl = celestia::vecgl;
 using celestia::render::VertexObject;
 
+namespace
+{
+
 struct GlobularForm
 {
     struct Blob
@@ -46,12 +49,9 @@ struct GlobularForm
     };
 
     std::vector<Blob> gblobs{ };
-    Eigen::Vector3f scale{ };
+    mutable VertexObject vo{ 0, GL_STATIC_DRAW };
 };
 
-
-namespace
-{
 
 constexpr const int cntrTexWidth  = 512;
 constexpr const int cntrTexHeight = 512;
@@ -86,10 +86,7 @@ void globularTextureEval(float u, float v, float /*w*/, std::uint8_t *pixel)
     // giving sort of a halo for the brighter (i.e.bigger) stars.
 
     static const float Lumi0 = std::exp(-LumiShape);
-    float lumi = std::exp(-LumiShape * std::sqrt(u * u + v * v)) - Lumi0;
-
-    if (lumi <= 0.0f)
-        lumi = 0.0f;
+    float lumi = std::max(0.0f, std::exp(-LumiShape * std::sqrt(u * u + v * v)) - Lumi0);
 
     auto pixVal = static_cast<std::uint8_t>(lumi * 255.99f);
     pixel[0] = 255;
@@ -229,14 +226,13 @@ void initGlobularData(VertexObject& vo,
     vo.setVertexAttribArray(etaLoc,  1, GL_FLOAT, false, sizeof(GlobularVtx), offsetof(GlobularVtx, eta));
 }
 
-GlobularForm buildGlobularForm(float c)
+void buildGlobularForm(GlobularForm& globularForm, float c)
 {
-    GlobularForm::Blob b{};
     std::vector<GlobularForm::Blob> globularPoints;
 
     float rRatio = std::pow(10.0f, c); //  = r_t / r_c
     float prob;
-    float cc =  1.0f + rRatio * rRatio;
+    float cc = 1.0f + rRatio * rRatio;
     unsigned int i = 0, k = 0;
 
     // Value of King_1962 luminosity profile at center:
@@ -299,6 +295,8 @@ GlobularForm buildGlobularForm(float c)
             float sthetu2 = std::sin(theta) * std::sqrt(1.0f - u * u);
 
             // x,y,z points within -0.5..+0.5, as required for consistency:
+            GlobularForm::Blob b;
+
             b.position = 0.5f * Eigen::Vector3f(eta * std::sqrt(1.0f - u * u) * std::cos(theta),
                                                 eta * sthetu2,
                                                 eta * u);
@@ -326,11 +324,7 @@ GlobularForm buildGlobularForm(float c)
     // Check for efficiency of sprite-star generation => close to 100 %!
     //cout << "c =  "<< c <<"  i =  " << i - 1 <<"  k =  " << k - 1 << "  Efficiency:  " << 100.0f * i / (float)k<<"%" << endl;
 
-    GlobularForm globularForm;
     globularForm.gblobs = std::move(globularPoints);
-    globularForm.scale  = Eigen::Vector3f::Ones();
-
-    return globularForm;
 }
 
 class GlobularInfoManager
@@ -342,8 +336,8 @@ class GlobularInfoManager
         centerTex.fill(nullptr);
     }
 
-    const GlobularForm* getForm(unsigned int) const;
-    Texture* getCenterTex(unsigned int);
+    const GlobularForm* getForm(std::size_t) const;
+    Texture* getCenterTex(std::size_t);
     Texture* getGlobularTex();
 
  private:
@@ -354,13 +348,14 @@ class GlobularInfoManager
     Texture* globularTex{ nullptr };
 };
 
-const GlobularForm* GlobularInfoManager::getForm(unsigned int form) const
+const GlobularForm* GlobularInfoManager::getForm(std::size_t form) const
 {
-    assert(form < globularForms.size());
-    return &globularForms[form];
+    return form < globularForms.size()
+        ? &globularForms[form]
+        : nullptr;
 }
 
-Texture* GlobularInfoManager::getCenterTex(unsigned int form)
+Texture* GlobularInfoManager::getCenterTex(std::size_t form)
 {
     if(centerTex[form] == nullptr)
     {
@@ -430,7 +425,7 @@ void GlobularInfoManager::initializeForms()
     for (unsigned int ic  = 0; ic < GlobularBuckets; ++ic)
     {
         float CBin = MinC + (static_cast<float>(ic) + 0.5f) * BinWidth;
-        globularForms[ic] = buildGlobularForm(CBin);
+        buildGlobularForm(globularForms[ic], CBin);
     }
 }
 
@@ -440,15 +435,7 @@ GlobularInfoManager* getGlobularInfoManager()
     return globularInfoManager;
 }
 
-} // end unnamed namespace
-
-
-Globular::Globular()
-{
-    recomputeTidalRadius();
-}
-
-unsigned int Globular::cSlot(float conc) const
+unsigned int cSlot(float conc)
 {
     // map the physical range of c, minC <= c <= maxC,
     // to 8 integers (bin numbers), 0 < cSlot <= 7:
@@ -461,6 +448,14 @@ unsigned int Globular::cSlot(float conc) const
     return static_cast<unsigned int>(std::floor((conc - MinC) / BinWidth));
 }
 
+} // end unnamed namespace
+
+
+Globular::Globular()
+{
+    recomputeTidalRadius();
+}
+
 const char* Globular::getType() const
 {
     return "Globular";
@@ -470,47 +465,12 @@ void Globular::setType(const std::string& /*typeStr*/)
 {
 }
 
-float Globular::getDetail() const
-{
-    return detail;
-}
-
-void Globular::setDetail(float d)
-{
-    detail = d;
-}
-
-float Globular::getCoreRadius() const
-{
-    return r_c;
-}
-
-void Globular::setCoreRadius(const float coreRadius)
-{
-    r_c = coreRadius;
-    recomputeTidalRadius();
-}
-
 float Globular::getHalfMassRadius() const
 {
     // Aproximation to the half-mass radius r_h [ly]
     // (~ 20% accuracy)
 
     return std::tan(celmath::degToRad(r_c / 60.0f)) * static_cast<float>(getPosition().norm()) * std::pow(10.0f, 0.6f * c - 0.4f);
-}
-
-float Globular::getConcentration() const
-{
-    return c;
-}
-
-void Globular::setConcentration(const float conc)
-{
-    c = conc;
-    // For saving time, account for the c dependence via 8 bins only,
-
-    form = getGlobularInfoManager()->getForm(cSlot(conc));
-    recomputeTidalRadius();
 }
 
 std::string Globular::getDescription() const
@@ -530,18 +490,14 @@ bool Globular::pick(const Eigen::ParametrizedLine<double, 3>& ray,
     if (!isVisible())
         return false;
     /*
-     * The selection ellipsoid should be slightly larger to compensate for the fact
+     * The selection sphere should be slightly larger to compensate for the fact
      * that blobs are considered points when globulars are built, but have size
      * when they are drawn.
      */
-    Eigen::Vector3d ellipsoidAxes(getRadius() * (form->scale.x() + RADIUS_CORRECTION),
-                                  getRadius() * (form->scale.y() + RADIUS_CORRECTION),
-                                  getRadius() * (form->scale.z() + RADIUS_CORRECTION));
-
     Eigen::Vector3d p = getPosition();
     return celmath::testIntersection(celmath::transformRay(Eigen::ParametrizedLine<double, 3>(ray.origin() - p, ray.direction()),
                                                            getOrientation().cast<double>().toRotationMatrix()),
-                                     celmath::Ellipsoidd(ellipsoidAxes),
+                                     celmath::Sphered(getRadius() * (1.0f + RADIUS_CORRECTION)),
                                      distanceToPicker,
                                      cosAngleToBoundCenter);
 }
@@ -549,19 +505,20 @@ bool Globular::pick(const Eigen::ParametrizedLine<double, 3>& ray,
 bool Globular::load(const AssociativeArray* params, const fs::path& resPath)
 {
     // Load the basic DSO parameters first
-
-    bool ok = DeepSkyObject::load(params, resPath);
-    if (!ok)
+    if (!DeepSkyObject::load(params, resPath))
         return false;
 
     if (auto detailVal = params->getNumber<float>("Detail"); detailVal.has_value())
-        setDetail(*detailVal);
+        detail = *detailVal;
 
     if (auto coreRadius = params->getAngle<float>("CoreRadius", 1.0 / MINUTES_PER_DEG); coreRadius.has_value())
-        setCoreRadius(*coreRadius);
+        r_c = *coreRadius;
 
     if (auto king = params->getNumber<float>("KingConcentration"); king.has_value())
-        setConcentration(*king);
+        c = *king;
+
+    formIndex = cSlot(c);
+    recomputeTidalRadius();
 
     return true;
 }
@@ -573,6 +530,8 @@ void Globular::render(const Eigen::Vector3f& offset,
                       const Matrices& m,
                       Renderer* renderer)
 {
+    GlobularInfoManager* globularInfoManager = getGlobularInfoManager();
+    const auto* form = globularInfoManager->getForm(formIndex);
     if (form == nullptr)
         return;
 
@@ -612,13 +571,10 @@ void Globular::render(const Eigen::Vector3f& offset,
 
     // Use same 8 c-bins as in globularForms below!
 
-    unsigned int ic = cSlot(c);
-    CBin = MinC + (static_cast<float>(ic) + 0.5f) * BinWidth; // center value of (ic+1)th c-bin
+    CBin = MinC + (static_cast<float>(formIndex) + 0.5f) * BinWidth; // center value of (ic+1)th c-bin
 
     RRatio = std::pow(10.0f, CBin);
     XI = 1.0f / std::sqrt(1.0f + RRatio * RRatio);
-
-    GlobularInfoManager* globularInfoManager = getGlobularInfoManager();
 
 #ifndef GL_ES
     glEnable(GL_POINT_SPRITE);
@@ -631,6 +587,7 @@ void Globular::render(const Eigen::Vector3f& offset,
      * distance from center or resolution increases sufficiently.
      */
 
+    VertexObject& vo = form->vo;
     vo.bind();
     if (!vo.initialized())
     {
@@ -640,7 +597,7 @@ void Globular::render(const Eigen::Vector3f& offset,
     }
 
     tidalProg->use();
-    globularInfoManager->getCenterTex(ic)->bind();
+    globularInfoManager->getCenterTex(formIndex)->bind();
 
     tidalProg->setMVPMatrices(*m.projection, *m.modelview);
 
@@ -665,7 +622,7 @@ void Globular::render(const Eigen::Vector3f& offset,
      * or when distance from globular center decreases.
      */
 
-    GLsizei count = static_cast<GLsizei>(form->gblobs.size() * std::clamp(getDetail(), 0.0f, 1.0f));
+    auto count = static_cast<GLsizei>(static_cast<float>(form->gblobs.size()) * std::clamp(detail, 0.0f, 1.0f));
     float t = std::pow(2.0f, 1.0f + std::log2(minimumFeatureSize / brightness) / std::log2(1.0f/1.25f));
     count = std::min(count, static_cast<GLsizei>(std::clamp(t, 128.0f, static_cast<float>(std::max(count, 128)))));
 
@@ -675,7 +632,7 @@ void Globular::render(const Eigen::Vector3f& offset,
     globProg->setMVPMatrices(*m.projection, *m.modelview);
     // TODO: model view matrix should not be reset here
     globProg->ModelViewMatrix = vecgl::translate(*m.modelview, offset);
-    Eigen::Matrix3f mx = Eigen::Scaling(form->scale) * getOrientation().toRotationMatrix() * Eigen::Scaling(tidalSize);
+    Eigen::Matrix3f mx = getOrientation().toRotationMatrix() * Eigen::Scaling(tidalSize);
     globProg->mat3Param("m")            = mx;
     globProg->vec3Param("offset")       = offset;
     globProg->floatParam("brightness")  = brightness;
@@ -691,9 +648,6 @@ void Globular::render(const Eigen::Vector3f& offset,
     glDisable(GL_POINT_SPRITE);
     glDisable(GL_VERTEX_PROGRAM_POINT_SIZE);
 #endif
-    // These should be called but stars are broken then
-    // TODO: find and fix
-    //glDisable(GL_BLEND);
 }
 
 std::uint64_t Globular::getRenderMask() const

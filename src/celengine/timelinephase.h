@@ -15,11 +15,16 @@
 
 #include <memory>
 #include "frame.h"
-class Orbit;
-class RotationModel;
+
 class FrameTree;
 class Universe;
 class Body;
+
+namespace celestia::ephem
+{
+class Orbit;
+class RotationModel;
+}
 
 
 class TimelinePhase
@@ -47,7 +52,7 @@ public:
         return m_orbitFrame;
     }
 
-    Orbit* orbit() const
+    celestia::ephem::Orbit* orbit() const
     {
         return m_orbit;
     }
@@ -57,7 +62,7 @@ public:
         return m_bodyFrame;
     }
 
-    RotationModel* rotationModel() const
+    celestia::ephem::RotationModel* rotationModel() const
     {
         return m_rotationModel;
     }
@@ -83,9 +88,9 @@ public:
                                                              double startTime,
                                                              double endTime,
                                                              const ReferenceFrame::SharedConstPtr& orbitFrame,
-                                                             Orbit& orbit,
+                                                             celestia::ephem::Orbit& orbit,
                                                              const ReferenceFrame::SharedConstPtr& bodyFrame,
-                                                             RotationModel& rotationModel);
+                                                             celestia::ephem::RotationModel& rotationModel);
 
     ~TimelinePhase() = default;
 
@@ -93,9 +98,9 @@ public:
                   double _startTime,
                   double _endTime,
                   const ReferenceFrame::SharedConstPtr& _orbitFrame,
-                  Orbit* _orbit,
+                  celestia::ephem::Orbit* _orbit,
                   const ReferenceFrame::SharedConstPtr& _bodyFrame,
-                  RotationModel* _rotationModel,
+                  celestia::ephem::RotationModel* _rotationModel,
                   FrameTree* _owner);
 
     TimelinePhase(const TimelinePhase& phase) = delete;
@@ -108,9 +113,9 @@ private:
     double m_endTime;
 
     ReferenceFrame::SharedConstPtr m_orbitFrame;
-    Orbit* m_orbit;
+    celestia::ephem::Orbit* m_orbit;
     ReferenceFrame::SharedConstPtr m_bodyFrame;
-    RotationModel* m_rotationModel;
+    celestia::ephem::RotationModel* m_rotationModel;
 
     FrameTree* m_owner;
 };

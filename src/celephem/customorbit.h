@@ -7,12 +7,16 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#ifndef _CUSTOMORBIT_H_
-#define _CUSTOMORBIT_H_
+#pragma once
 
-#include "orbit.h"
-#include <string>
+#include <memory>
+#include <string_view>
 
-Orbit* GetCustomOrbit(const std::string& name);
+namespace celestia::ephem
+{
 
-#endif // _CUSTOMORBIT_H_
+class Orbit;
+
+std::unique_ptr<Orbit> GetCustomOrbit(std::string_view name);
+
+}

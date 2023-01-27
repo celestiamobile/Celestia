@@ -7,8 +7,7 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#ifndef CELENGINE_TRAJMANAGER_H_
-#define CELENGINE_TRAJMANAGER_H_
+#pragma once
 
 #include <celephem/orbit.h>
 #include <celephem/samporbit.h>
@@ -17,22 +16,22 @@
 #include <celutil/resmanager.h>
 
 
-class TrajectoryInfo : public ResourceInfo<Orbit>
+class TrajectoryInfo : public ResourceInfo<celestia::ephem::Orbit>
 {
  public:
     std::string source;
     fs::path path;
-    TrajectoryInterpolation interpolation;
-    TrajectoryPrecision precision;
+    celestia::ephem::TrajectoryInterpolation interpolation;
+    celestia::ephem::TrajectoryPrecision precision;
 
     TrajectoryInfo(const std::string& _source,
                    const fs::path& _path = "",
-                   TrajectoryInterpolation _interpolation = TrajectoryInterpolationCubic,
-                   TrajectoryPrecision _precision = TrajectoryPrecisionSingle) :
+                   celestia::ephem::TrajectoryInterpolation _interpolation = celestia::ephem::TrajectoryInterpolation::Cubic,
+                   celestia::ephem::TrajectoryPrecision _precision = celestia::ephem::TrajectoryPrecision::Single) :
         source(_source), path(_path), interpolation(_interpolation), precision(_precision) {};
 
     fs::path resolve(const fs::path&) override;
-    Orbit* load(const fs::path&) override;
+    celestia::ephem::Orbit* load(const fs::path&) override;
 };
 
 // Sort trajectory info records. The same trajectory can be loaded multiple times with
@@ -63,7 +62,4 @@ inline bool operator<(const TrajectoryInfo& ti0, const TrajectoryInfo& ti1)
 
 typedef ResourceManager<TrajectoryInfo> TrajectoryManager;
 
-extern TrajectoryManager* GetTrajectoryManager();
-
-#endif // CELENGINE_TRAJMANAGER_H_
-
+TrajectoryManager* GetTrajectoryManager();

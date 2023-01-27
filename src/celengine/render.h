@@ -40,6 +40,12 @@ class FramebufferObject;
 namespace celestia
 {
 class Rect;
+namespace render
+{
+class AtmosphereRenderer;
+class CometRenderer;
+class EclipticLineRenderer;
+}
 }
 
 namespace celmath
@@ -306,6 +312,11 @@ class Renderer
                       const Color &color,
                       const Matrices &m);
 
+    celestia::util::array_view<const Star*> getNearStars() const
+    {
+        return nearStars;
+    }
+
     const Eigen::Matrix4f& getModelViewMatrix() const
     {
         return m_modelMatrix;
@@ -420,8 +431,6 @@ class Renderer
     const Eigen::Quaternionf& getCameraOrientation() const;
     float getNearPlaneDistance() const;
 
-    void clearAnnotations(std::vector<Annotation>&);
-
     void invalidateOrbitCache();
 
     struct OrbitPathListEntry
@@ -456,17 +465,6 @@ class Renderer
     FramebufferObject* getShadowFBO(int) const;
 
  public:
-    // Internal types
-    // TODO: Figure out how to make these private.  Even with a friend
-    //
-    struct Particle
-    {
-        Eigen::Vector3f center;
-        float size;
-        Color color;
-        float pad0, pad1, pad2;
-    };
-
     struct RenderProperties
     {
         Surface* surface{ nullptr };
@@ -484,47 +482,6 @@ class Renderer
     OctreeProcStats m_starProcStats;
     OctreeProcStats m_dsoProcStats;
 #endif
- private:
-    struct SkyVertex
-    {
-        float x, y, z;
-        unsigned char color[4];
-    };
-
-    struct SkyContourPoint
-    {
-        Eigen::Vector3f v;
-        Eigen::Vector3f eyeDir;
-        float centerDist;
-        float eyeDist;
-        float cosSkyCapAltitude;
-    };
-
-    template <class OBJ> struct ObjectLabel
-    {
-        OBJ*        obj{ nullptr };
-        std::string label;
-
-        ObjectLabel(OBJ* _obj, const std::string& _label) :
-            obj  (_obj),
-            label(_label)
-        {};
-
-        ObjectLabel(const ObjectLabel& objLbl) :
-            obj  (objLbl.obj),
-            label(objLbl.label)
-        {};
-
-        ObjectLabel& operator = (const ObjectLabel& objLbl)
-        {
-            obj   = objLbl.obj;
-            label = objLbl.label;
-            return *this;
-        };
-    };
-
-    typedef ObjectLabel<Star>          StarLabel;
-    typedef ObjectLabel<DeepSkyObject> DSOLabel;    // currently not used
 
     struct DepthBufferPartition
     {
@@ -619,6 +576,7 @@ class Renderer
     void renderCometTail(const Body& body,
                          const Eigen::Vector3f& pos,
                          const Observer& observer,
+                         float dustTailLength,
                          float discSizeInPixels,
                          const Matrices&);
 
@@ -637,16 +595,6 @@ class Renderer
                              bool useHalos,
                              bool emissive,
                              const Matrices&);
-
-    void renderEllipsoidAtmosphere(const Atmosphere& atmosphere,
-                                   const Eigen::Vector3f& center,
-                                   const Eigen::Quaternionf& orientation,
-                                   const Eigen::Vector3f& semiAxes,
-                                   const Eigen::Vector3f& sunDirection,
-                                   const LightingState& ls,
-                                   float fade,
-                                   bool lit,
-                                   const Matrices&);
 
     void locationsToAnnotations(const Body& body,
                                 const Eigen::Vector3d& bodyPosition,
@@ -667,8 +615,6 @@ class Renderer
 
     void labelConstellations(const AsterismList& asterisms,
                              const Observer& observer);
-    void renderParticles(const std::vector<Particle>& particles);
-
 
     void addAnnotation(std::vector<Annotation>&,
                        const celestia::MarkerRepresentation*,
@@ -769,7 +715,6 @@ class Renderer
     std::vector<RenderListEntry> renderList;
     std::vector<SecondaryIlluminator> secondaryIlluminators;
     std::vector<DepthBufferPartition> depthPartitions;
-    std::vector<Particle> glareParticles;
     std::vector<Annotation> backgroundAnnotations;
     std::vector<Annotation> foregroundAnnotations;
     std::vector<Annotation> depthSortedAnnotations;
@@ -799,7 +744,7 @@ class Renderer
 
     std::array<int, 4> m_viewport { 0, 0, 0, 0 };
 
-    typedef std::map<const Orbit*, CurvePlot*> OrbitCache;
+    typedef std::map<const celestia::ephem::Orbit*, CurvePlot*> OrbitCache;
     OrbitCache orbitCache;
     uint32_t lastOrbitCacheFlush;
 
@@ -808,18 +753,11 @@ class Renderer
     float minFeatureSize;
     uint64_t locationFilter;
 
-    SkyVertex* skyVertices;
-    uint32_t* skyIndices;
-    SkyContourPoint* skyContour;
-
     const ColorTemperatureTable* colorTemp;
 
     Selection highlightObject;
 
     bool settingsChanged;
-
-    std::unique_ptr<AsterismRenderer> m_asterismRenderer;
-    std::unique_ptr<BoundariesRenderer> m_boundariesRenderer;
 
     // True if we're in between a begin/endObjectAnnotations
     bool objectAnnotationSetOpen;
@@ -839,6 +777,12 @@ class Renderer
 
     // Saturation magnitude used to calculate a point star size
     float satPoint;
+
+    std::unique_ptr<AsterismRenderer> m_asterismRenderer;
+    std::unique_ptr<BoundariesRenderer> m_boundariesRenderer;
+    std::unique_ptr<celestia::render::AtmosphereRenderer> m_atmosphereRenderer;
+    std::unique_ptr<celestia::render::CometRenderer> m_cometRenderer;
+    std::unique_ptr<celestia::render::EclipticLineRenderer> m_eclipticLineRenderer;
 
     // Location markers
  public:

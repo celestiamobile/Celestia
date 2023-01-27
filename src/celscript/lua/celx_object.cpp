@@ -616,7 +616,7 @@ static int object_getinfo(lua_State* l)
         celx.setTable("rotationPeriod", (lua_Number)star->getRotationModel()->getPeriod());
         celx.setTable("bolometricMagnitude", (lua_Number)star->getBolometricMagnitude());
 
-        const Orbit* orbit = star->getOrbit();
+        const celestia::ephem::Orbit* orbit = star->getOrbit();
         if (orbit != nullptr)
             celx.setTable("orbitPeriod", orbit->getPeriod());
 
@@ -681,10 +681,10 @@ static int object_getinfo(lua_State* l)
         // if the object has a single timeline phase. This should hardly ever
         // be a problem, but it still may be best to set the periods to zero
         // for objects with multiple phases.
-        const RotationModel* rm = body->getRotationModel(0.0);
+        const celestia::ephem::RotationModel* rm = body->getRotationModel(0.0);
         celx.setTable("rotationPeriod", (double) rm->getPeriod());
 
-        const Orbit* orbit = body->getOrbit(0.0);
+        const celestia::ephem::Orbit* orbit = body->getOrbit(0.0);
         celx.setTable("orbitPeriod", orbit->getPeriod());
         Atmosphere* atmosphere = body->getAtmosphere();
         if (atmosphere != nullptr)
