@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <iostream>
 #include <memory>
 #include <string_view>
 #include <system_error>
@@ -18,6 +19,7 @@
 #include <celengine/glsupport.h>
 #include <celestia/celestiacore.h>
 #include <celestia/configfile.h>
+#include <celestia/progressnotifier.h>
 #include <celestia/url.h>
 #include <celutil/gettext.h>
 #include <celutil/tzutil.h>
@@ -186,12 +188,24 @@ SDL_Application::display()
     SDL_GL_SwapWindow(m_mainWindow);
 }
 
+class CelestiaCoreProgressWatcher: public ProgressNotifier
+{
+public:
+    CelestiaCoreProgressWatcher() : ProgressNotifier() {};
+
+    void update(const std::string& status)
+    {
+        std::cout << "Loading " << status << std::endl;
+    }
+};
+
 bool
 SDL_Application::initCelestiaCore()
 {
     m_appCore = new CelestiaCore();
     m_appCore->setAlerter(new SDL_Alerter());
-    if (!m_appCore->initSimulation())
+    CelestiaCoreProgressWatcher watcher;
+    if (!m_appCore->initSimulation("celestia.cfg", {}, &watcher))
         return false;
     if (float screenDpi = 96.0f; SDL_GetDisplayDPI(0, &screenDpi, nullptr, nullptr) == 0)
         m_appCore->setScreenDpi(static_cast<int>(screenDpi));
@@ -657,24 +671,12 @@ sdlmain(int /* argc */, char ** /* argv */)
     setlocale(LC_NUMERIC, "C");
 
 #ifdef ENABLE_NLS
-    bindtextdomain("celestia", LOCALEDIR);
+    bindtextdomain("celestia", "locale");
     bind_textdomain_codeset("celestia", "UTF-8");
-    bindtextdomain("celestia-data", LOCALEDIR);
+    bindtextdomain("celestia-data", "locale");
     bind_textdomain_codeset("celestia-data", "UTF-8");
     textdomain("celestia");
 #endif
-
-    const char *dataDir = getenv("CELESTIA_DATA_DIR");
-    if (dataDir == nullptr)
-        dataDir = CONFIG_DATA_DIR;
-
-    std::error_code ec;
-    fs::current_path(dataDir, ec);
-    if (ec)
-    {
-        FatalError("Cannot chdir to {}, probably due to improper installation", dataDir);
-        return 1;
-    }
 
     auto app = SDL_Application::init("Celestia", 640, 480);
     if (app == nullptr)

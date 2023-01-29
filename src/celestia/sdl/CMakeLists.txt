@@ -23,6 +23,8 @@ else()
   target_link_libraries(celestia-sdl PRIVATE ${SDL2_LIBRARIES})
 endif()
 
+set_target_properties(celestia-sdl PROPERTIES LINK_FLAGS "--preload-file ${CMAKE_SOURCE_DIR}/CelestiaResources@/ --bind -sUSE_WEBGL2=1 -sUSE_SDL=2 -sTOTAL_MEMORY=419430400")
+
 install(
   TARGETS celestia-sdl
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}

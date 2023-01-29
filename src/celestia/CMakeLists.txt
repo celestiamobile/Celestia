@@ -95,7 +95,7 @@ list(GET PROJECT_VERSION_LIST 0 PROJECT_VERSION_MAJOR)
 list(GET PROJECT_VERSION_LIST 1 PROJECT_VERSION_MINOR)
 set(CELSO "celestia-${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
-add_library(celestia SHARED ${CELESTIA_SOURCES}
+add_library(celestia STATIC ${CELESTIA_SOURCES}
                             ${SCRIPT_LIBS}
                             ${CELESTIA_CORE_LIBS}
 )

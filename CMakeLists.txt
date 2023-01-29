@@ -260,9 +260,13 @@ find_package(Libepoxy REQUIRED)
 link_libraries(libepoxy::libepoxy)
 include_directories(${LIBEPOXY_INCLUDE_DIR})
 
-find_package(Eigen3 3.3 REQUIRED NO_MODULE) # -DEigen3_DIR=...
-message(STATUS "Found Eigen3 ${EIGEN3_VERSION_STRING}")
-link_libraries(Eigen3::Eigen)
+if(EIGEN3_INCLUDE_DIR)
+  include_directories(${EIGEN3_INCLUDE_DIR})
+else()
+  find_package(Eigen3 3.3 REQUIRED NO_MODULE) # -DEigen3_DIR=...
+  message(STATUS "Found Eigen3 ${EIGEN3_VERSION_STRING}")
+  link_libraries(Eigen3::Eigen)
+endif()
 
 find_package(fmt 6.1.0 CONFIG QUIET)
 if(NOT fmt_FOUND)
