@@ -7,9 +7,10 @@ namespace celestia::gl
 #ifdef GL_ES
 bool OES_vertex_array_object        = false;
 bool OES_texture_border_clamp       = false;
+bool OES_geometry_shader            = false;
 #else
 bool ARB_vertex_array_object        = false;
-bool EXT_framebuffer_object         = false;
+bool ARB_framebuffer_object         = false;
 #endif
 bool ARB_shader_texture_lod         = false;
 bool EXT_texture_compression_s3tc   = false;
@@ -37,14 +38,15 @@ bool init(util::array_view<std::string> ignore) noexcept
 {
 #ifdef GL_ES
     OES_vertex_array_object        = check_extension(ignore, "GL_OES_vertex_array_object");
-    OES_texture_border_clamp       = check_extension(ignore, "GL_OES_texture_border_clamp") || check_extension(ignore, "GL_EXT_texture_border_clamp") ;
+    OES_texture_border_clamp       = check_extension(ignore, "GL_OES_texture_border_clamp") || check_extension(ignore, "GL_EXT_texture_border_clamp");
+    OES_geometry_shader            = check_extension(ignore, "GL_OES_geometry_shader") || check_extension(ignore, "GL_EXT_geometry_shader");
 #else
     ARB_vertex_array_object        = check_extension(ignore, "GL_ARB_vertex_array_object");
-    EXT_framebuffer_object         = check_extension(ignore, "GL_EXT_framebuffer_object");
+    ARB_framebuffer_object         = check_extension(ignore, "GL_ARB_framebuffer_object") || check_extension(ignore, "GL_EXT_framebuffer_object");
 #endif
     ARB_shader_texture_lod         = check_extension(ignore, "GL_ARB_shader_texture_lod");
     EXT_texture_compression_s3tc   = check_extension(ignore, "GL_EXT_texture_compression_s3tc");
-    EXT_texture_filter_anisotropic = check_extension(ignore, "GL_EXT_texture_filter_anisotropic");
+    EXT_texture_filter_anisotropic = check_extension(ignore, "GL_EXT_texture_filter_anisotropic") || check_extension(ignore, "GL_ARB_texture_filter_anisotropic");
     MESA_pack_invert               = check_extension(ignore, "GL_MESA_pack_invert");
 
     GLint pointSizeRange[2];
@@ -69,6 +71,9 @@ bool init(util::array_view<std::string> ignore) noexcept
 
 bool checkVersion(int v) noexcept
 {
-    return epoxy_gl_version() >= v;
+    static int version = 0;
+    if (version == 0)
+        version = epoxy_gl_version(); // this function always queries GL
+    return version >= v;
 }
 } // end namespace celestia::gl
