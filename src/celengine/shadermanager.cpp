@@ -34,8 +34,6 @@ using celestia::util::GetLogger;
 
 namespace gl = celestia::gl;
 
-// GLSL on Mac OS X appears to have a bug that precludes us from using structs
-#define USE_GLSL_STRUCTS
 #define POINT_FADE 1
 
 namespace
