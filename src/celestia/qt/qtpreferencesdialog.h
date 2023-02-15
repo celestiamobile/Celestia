@@ -98,7 +98,7 @@ private slots:
     void on_volcanoesCheck_stateChanged(int state);
     void on_otherLocationsCheck_stateChanged(int state);
     void on_featureSizeSlider_valueChanged(int value);
-    void on_featureSizeEdit_textEdited(const QString& text);
+    void on_featureSizeSpinBox_valueChanged(int value);
 
     void on_renderPathBox_currentIndexChanged(int index);
     void on_antialiasLinesCheck_stateChanged(int state);
@@ -109,6 +109,7 @@ private slots:
     void on_highResolutionButton_clicked();
 
     void on_ambientLightSlider_valueChanged(int value);
+    void on_ambientLightSpinBox_valueChanged(int value);
 
     void on_pointStarsButton_clicked();
     void on_scaledDiscsButton_clicked();
