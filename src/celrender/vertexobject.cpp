@@ -44,6 +44,7 @@ VertexObject::~VertexObject()
 
 void VertexObject::bind() noexcept
 {
+    m_state |= State::Bound;
     if ((m_state & State::Initialize) != 0)
     {
         if (isVAOSupported())
@@ -78,6 +79,9 @@ void VertexObject::bindWritable() noexcept
 
 void VertexObject::unbind() noexcept
 {
+    if ((m_state & State::Bound) == 0)
+        return;
+
     if ((m_state & State::Initialize) != 0)
         enableAttribArrays();
 
@@ -237,6 +241,9 @@ IndexedVertexObject::bind() noexcept
 void
 IndexedVertexObject::unbind() noexcept
 {
+    if ((m_state & State::Bound) == 0)
+        return;
+
     VertexObject::unbind();
     if ((m_state & (State::Initialize | State::Update)) != 0)
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
