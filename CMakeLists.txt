@@ -50,7 +50,6 @@ set(DISPLAY_NAME "Celestia")
 option(ENABLE_CELX          "Enable celx scripting, requires Lua library? (Default: on)" ON)
 option(ENABLE_SPICE         "Use spice library? (Default: off)" OFF)
 option(ENABLE_NLS           "Enable interface translation? (Default: on)" ON)
-option(ENABLE_GLUT          "Build simple Glut frontend? (Default: off)" OFF)
 option(ENABLE_GTK           "Build GTK2 frontend (Unix only)? (Default: off)" OFF)
 option(ENABLE_QT            "Build Qt frontend? (Default: on)" ON)
 option(ENABLE_SDL           "Build SDL frontend? (Default: off)" OFF)
@@ -317,7 +316,6 @@ endif()
 #
 add_definitions(
   -DVERSION="${PROJECT_VERSION}"
-  -DPACKAGE="celestia"
   -DGIT_COMMIT="${GIT_COMMIT}"
 )
 
@@ -325,7 +323,6 @@ add_definitions(
   -DLOCALEDIR="${CMAKE_INSTALL_FULL_LOCALEDIR}"
   -DCONFIG_DATA_DIR="${FULL_DATADIR}"
   -DHIP_DATA_DIR="${FULL_DATADIR}"
-  -DSPLASH_DIR="${FULL_DATADIR}/splash"
 )
 
 if(WIN32)
@@ -348,6 +345,10 @@ endif()
 string(TOLOWER "${CMAKE_BUILD_TYPE}" build_type_lc)
 if("${build_type_lc}" STREQUAL "debug")
   add_definitions(-D_DEBUG -DDEBUG)
+  if(NOT MSVC)
+    add_compile_options("-fsanitize=address" "-fsanitize=undefined" "-fno-omit-frame-pointer")
+    add_link_options("-fsanitize=address" "-fsanitize=undefined" "-fno-omit-frame-pointer")
+  endif()
 else()
   add_definitions(-DNO_DEBUG -DEIGEN_NO_DEBUG)
   if(NOT MSVC)

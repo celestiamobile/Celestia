@@ -77,14 +77,14 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
 
     ColorTableType colors;
     const ColorTemperatureTable* current = renderer->getStarColorTable();
-    if (current == GetStarColorTable(ColorTable_Blackbody_D65))
+    if (current->type() == ColorTableType::Blackbody_D65)
     {
-        colors = ColorTable_Blackbody_D65;
+        colors = ColorTableType::Blackbody_D65;
     }
-    else // if (current == GetStarColorTable(ColorTable_Enhanced))
+    else // if (current->type() == ColorTableType::Enhanced)
     {
         // TODO: Figure out what we should do if we have an unknown color table
-        colors = ColorTable_Enhanced;
+        colors = ColorTableType::Enhanced;
     }
 
     ui.starsCheck->setChecked((renderFlags & Renderer::ShowStars) != 0);
@@ -167,7 +167,6 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
     ui.renderPathBox->addItem(_("OpenGL 2.1"), 0);
 
     ui.antialiasLinesCheck->setChecked(renderFlags & Renderer::ShowSmoothLines);
-    ui.tintedIlluminationCheck->setChecked(renderFlags & Renderer::ShowTintedIllumination);
 
     switch (renderer->getResolution())
     {
@@ -183,8 +182,15 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
             ui.highResolutionButton->setChecked(true);
     }
 
-    float ambient = renderer->getAmbientLightLevel();
-    ui.ambientLightSlider->setValue((int) (ambient * 100.0f));
+    auto ambient = static_cast<int>(renderer->getAmbientLightLevel());
+    ui.ambientLightSlider->setValue(ambient);
+    ui.ambientLightSpinBox->setValue(ambient);
+
+    auto tint = static_cast<int>(renderer->getTintSaturation() * 100.0f);
+    ui.tintSaturationSlider->setValue(tint);
+    ui.tintSaturationSlider->setEnabled(colors == ColorTableType::Blackbody_D65);
+    ui.tintSaturationSpinBox->setValue(tint);
+    ui.tintSaturationSpinBox->setEnabled(colors == ColorTableType::Blackbody_D65);
 
     int starStyle = renderer->getStarStyle();
 
@@ -202,9 +208,9 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
             ui.scaledDiscsButton->setChecked(true);
     }
 
-    ui.starColorBox->addItem(_("Blackbody D65"), ColorTable_Blackbody_D65);
-    ui.starColorBox->addItem(_("Classic colors"), ColorTable_Enhanced);
-    SetComboBoxValue(ui.starColorBox, colors);
+    ui.starColorBox->addItem(_("Blackbody D65"), static_cast<int>(ColorTableType::Blackbody_D65));
+    ui.starColorBox->addItem(_("Classic colors"), static_cast<int>(ColorTableType::Enhanced));
+    SetComboBoxValue(ui.starColorBox, static_cast<int>(colors));
 
     ui.autoMagnitudeCheck->setChecked(renderFlags & Renderer::ShowAutoMag);
 
@@ -710,12 +716,6 @@ void PreferencesDialog::on_antialiasLinesCheck_stateChanged(int state)
 }
 
 
-void PreferencesDialog::on_tintedIlluminationCheck_stateChanged(int state)
-{
-    setRenderFlag(appCore, Renderer::ShowTintedIllumination, state);
-}
-
-
 // Texture resolution
 
 void PreferencesDialog::on_lowResolutionButton_clicked()
@@ -752,23 +752,43 @@ void PreferencesDialog::on_highResolutionButton_clicked()
 
 void PreferencesDialog::on_ambientLightSlider_valueChanged(int value)
 {
-    Renderer* renderer = appCore->getRenderer();
     float ambient = static_cast<float>(value) / 100.0f;
-    renderer->setAmbientLightLevel(ambient);
-    ui.ambientLightSpinBox->blockSignals(true);
+    appCore->getRenderer()->setAmbientLightLevel(ambient);
+    auto savedBlockState = ui.ambientLightSpinBox->blockSignals(true);
     ui.ambientLightSpinBox->setValue(value);
-    ui.ambientLightSpinBox->blockSignals(false);
+    ui.ambientLightSpinBox->blockSignals(savedBlockState);
 }
 
 
 void PreferencesDialog::on_ambientLightSpinBox_valueChanged(int value)
 {
-    Renderer* renderer = appCore->getRenderer();
     float ambient = static_cast<float>(value) / 100.0f;
-    renderer->setAmbientLightLevel(ambient);
-    ui.ambientLightSlider->blockSignals(true);
+    appCore->getRenderer()->setAmbientLightLevel(ambient);
+    auto savedBlockState = ui.ambientLightSlider->blockSignals(true);
     ui.ambientLightSlider->setValue(value);
-    ui.ambientLightSlider->blockSignals(false);
+    ui.ambientLightSlider->blockSignals(savedBlockState);
+}
+
+
+// Tint saturation
+
+void PreferencesDialog::on_tintSaturationSlider_valueChanged(int value)
+{
+    float tintSaturation = static_cast<float>(value) / 100.0f;
+    appCore->getRenderer()->setTintSaturation(tintSaturation);
+    auto savedBlockState = ui.tintSaturationSpinBox->blockSignals(true);
+    ui.tintSaturationSpinBox->setValue(value);
+    ui.tintSaturationSpinBox->blockSignals(savedBlockState);
+}
+
+
+void PreferencesDialog::on_tintSaturationSpinBox_valueChanged(int value)
+{
+    float tintSaturation = static_cast<float>(value) / 100.0f;
+    appCore->getRenderer()->setTintSaturation(tintSaturation);
+    auto savedBlockState = ui.tintSaturationSlider->blockSignals(true);
+    ui.tintSaturationSlider->setValue(value);
+    ui.tintSaturationSlider->blockSignals(savedBlockState);
 }
 
 
@@ -816,8 +836,11 @@ void PreferencesDialog::on_starColorBox_currentIndexChanged(int index)
 {
     Renderer* renderer = appCore->getRenderer();
     QVariant itemData = ui.starColorBox->itemData(index, Qt::UserRole);
-    ColorTableType value = (ColorTableType) itemData.toInt();
+    ColorTableType value = static_cast<ColorTableType>(itemData.toInt());
     renderer->setStarColorTable(GetStarColorTable(value));
+    bool enableTintSaturation = value == ColorTableType::Blackbody_D65;
+    ui.tintSaturationSlider->setEnabled(enableTintSaturation);
+    ui.tintSaturationSpinBox->setEnabled(enableTintSaturation);
 }
 
 

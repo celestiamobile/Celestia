@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <iosfwd>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <Eigen/Core>
@@ -42,9 +43,9 @@ class DSODatabase
     inline std::uint32_t size() const;
 
     DeepSkyObject* find(const AstroCatalog::IndexNumber catalogNumber) const;
-    DeepSkyObject* find(const std::string&, bool i18n) const;
+    DeepSkyObject* find(std::string_view, bool i18n) const;
 
-    std::vector<std::string> getCompletion(const std::string&, bool i18n) const;
+    void getCompletion(std::vector<std::string>&, std::string_view, bool i18n) const;
 
     void findVisibleDSOs(DSOHandler& dsoHandler,
                          const Eigen::Vector3d& obsPosition,
@@ -70,7 +71,7 @@ class DSODatabase
 
     static DSODatabase* read(std::istream&);
 
-    double getAverageAbsoluteMagnitude() const;
+    float getAverageAbsoluteMagnitude() const;
 
 private:
     void buildIndexes();
@@ -85,7 +86,7 @@ private:
     DSOOctree*       octreeRoot{ nullptr };
     AstroCatalog::IndexNumber nextAutoCatalogNumber{ 0xfffffffe };
 
-    double           avgAbsMag{ 0.0 };
+    float            avgAbsMag{ 0.0f };
 };
 
 

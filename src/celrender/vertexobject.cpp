@@ -27,10 +27,41 @@ namespace
 
 namespace celestia::render
 {
+VertexObject::VertexObject() = default;
+
 VertexObject::VertexObject(GLsizeiptr bufferSize, GLenum streamType) :
     m_bufferSize(bufferSize),
     m_streamType(streamType)
 {
+}
+
+VertexObject::VertexObject(VertexObject &&other) noexcept :
+    m_attribParams(std::move(other.m_attribParams)),
+    m_vboId(other.m_vboId),
+    m_vaoId(other.m_vaoId),
+    m_bufferSize(other.m_bufferSize),
+    m_streamType(other.m_streamType)
+{
+    other.m_vboId      = 0;
+    other.m_vaoId      = 0;
+    other.m_bufferSize = 0;
+    other.m_streamType = 0;
+}
+
+VertexObject& VertexObject::operator=(VertexObject &&other) noexcept
+{
+    m_attribParams = std::move(other.m_attribParams);
+    m_vboId        = other.m_vboId;
+    m_vaoId        = other.m_vaoId;
+    m_bufferSize   = other.m_bufferSize;
+    m_streamType   = other.m_streamType;
+
+    other.m_vboId      = 0;
+    other.m_vaoId      = 0;
+    other.m_bufferSize = 0;
+    other.m_streamType = 0;
+
+    return *this;
 }
 
 VertexObject::~VertexObject()
@@ -255,8 +286,9 @@ IndexedVertexObject::draw(GLenum primitive, GLsizei count, GLint first) const no
     if ((m_state & State::Initialize) != 0)
         enableAttribArrays();
 
+    auto offset = first * (m_indexType == GL_UNSIGNED_INT ? sizeof(GLuint) : sizeof(GLushort));
     glDrawElements(primitive, count, m_indexType,
-                   reinterpret_cast<const void*>(static_cast<std::intptr_t>(first)));
+                   reinterpret_cast<const void*>(static_cast<std::intptr_t>(offset))); //NOSONAR
 }
 
 void

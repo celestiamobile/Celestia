@@ -24,7 +24,8 @@ template<typename T>
 class array_view
 {
  public:
-    using element_type = typename std::remove_cv<T>::type;
+    using element_type = std::remove_cv_t<T>;
+    using size_type = std::size_t;
 
     /**
      * Create an empty array view.
@@ -35,6 +36,14 @@ class array_view
     {};
 
     ~array_view() noexcept = default;
+
+    /**
+     * Wrap a pointer and length
+     */
+    constexpr array_view(const T* ptr, size_type size) noexcept :
+        m_ptr(ptr),
+        m_size(size)
+    {};
 
     /**
      * Wrap a C-style array.
@@ -88,7 +97,7 @@ class array_view
     /**
      * Return the number of elements.
      */
-    constexpr size_t size() const noexcept
+    constexpr size_type size() const noexcept
     {
         return m_size;
     };
@@ -106,7 +115,7 @@ class array_view
      *
      * Calling front on an empty container is undefined.
      */
-    constexpr T front() const noexcept
+    constexpr const T& front() const noexcept
     {
         return *m_ptr;
     }
@@ -116,7 +125,7 @@ class array_view
      *
      * Calling back on an empty container is undefined.
      */
-    constexpr T back() const noexcept
+    constexpr const T& back() const noexcept
     {
         return m_ptr[m_size - 1];
     }
@@ -131,7 +140,7 @@ class array_view
      * @param pos - position of the element to return
      * @return the requested element
      */
-    constexpr element_type operator[](std::size_t pos) const noexcept
+    constexpr const T& operator[](std::size_t pos) const noexcept
     {
         return m_ptr[pos];
     }
@@ -170,7 +179,7 @@ class array_view
 
  private:
     const element_type* m_ptr;
-    size_t m_size;
+    size_type m_size;
 };
 
 } // end namespace celestia::util

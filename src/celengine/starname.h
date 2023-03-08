@@ -10,11 +10,13 @@
 //
 //
 
-#ifndef _STARNAME_H_
-#define _STARNAME_H_
+#pragma once
+
+#include <cstdint>
+#include <iosfwd>
+#include <string_view>
 
 #include <celengine/name.h>
-#include <celengine/star.h>
 
 
 class StarNameDatabase: public NameDatabase
@@ -22,10 +24,21 @@ class StarNameDatabase: public NameDatabase
  public:
     StarNameDatabase() {};
 
-
-    uint32_t findCatalogNumberByName(const std::string&, bool i18n) const;
+    std::uint32_t findCatalogNumberByName(std::string_view, bool i18n) const;
 
     static StarNameDatabase* readNames(std::istream&);
-};
 
-#endif // _STARNAME_H_
+ private:
+    std::uint32_t findFlamsteedOrVariable(std::string_view, std::string_view, bool) const;
+    std::uint32_t findBayer(std::string_view, std::string_view, bool) const;
+    std::uint32_t findBayerNoNumber(std::string_view,
+                                    std::string_view,
+                                    std::string_view,
+                                    bool) const;
+    std::uint32_t findBayerWithNumber(std::string_view,
+                                      unsigned int,
+                                      std::string_view,
+                                      std::string_view,
+                                      bool) const;
+    std::uint32_t findWithComponentSuffix(std::string_view, bool) const;
+};

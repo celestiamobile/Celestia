@@ -1754,7 +1754,7 @@ void ShowWWWInfo(const Selection& sel)
             {
                 string name = sel.body()->getName();
                 for (unsigned int i = 0; i < name.size(); i++)
-                    name[i] = tolower(name[i]);
+                    name[i] = std::tolower(static_cast<unsigned char>(name[i]));
 
                 url = string("http://www.nineplanets.org/") + name + ".html";
             }
@@ -2306,8 +2306,8 @@ static void syncMenusWithRendererState()
                   style == Renderer::ScaledDiscStars ? MF_CHECKED : MF_UNCHECKED);
 
     const ColorTemperatureTable* color = appCore->getRenderer()->getStarColorTable();
-    CheckMenuItem(menuBar, ID_STARCOLOR_DISABLED, color == GetStarColorTable(ColorTable_Enhanced) ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(menuBar, ID_STARCOLOR_ENABLED,  color == GetStarColorTable(ColorTable_Blackbody_D65) ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem(menuBar, ID_STARCOLOR_DISABLED, color->type() == ColorTableType::Enhanced ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem(menuBar, ID_STARCOLOR_ENABLED,  color->type() == ColorTableType::Blackbody_D65 ? MF_CHECKED : MF_UNCHECKED);
 
     CheckMenuItem(menuBar, ID_RENDER_TEXTURERES_LOW,
                   textureRes == 0 ? MF_CHECKED : MF_UNCHECKED);
@@ -2652,10 +2652,10 @@ static bool GetCurrentPreferences(AppPreferences& prefs)
     prefs.altSurfaceName = appCore->getSimulation()->getActiveObserver()->getDisplayedSurface();
     prefs.starStyle = appCore->getRenderer()->getStarStyle();
     const ColorTemperatureTable* current = appCore->getRenderer()->getStarColorTable();
-    if (current == GetStarColorTable(ColorTable_Enhanced))
-        prefs.starsColor = ColorTable_Enhanced;
-    if (current == GetStarColorTable(ColorTable_Blackbody_D65))
-        prefs.starsColor = ColorTable_Blackbody_D65;
+    if (current->type() == ColorTableType::Enhanced)
+        prefs.starsColor = static_cast<int>(ColorTableType::Enhanced);
+    if (current->type() == ColorTableType::Blackbody_D65)
+        prefs.starsColor = static_cast<int>(ColorTableType::Blackbody_D65);
     prefs.textureResolution = appCore->getRenderer()->getResolution();
 
     return true;
@@ -3210,15 +3210,26 @@ int APIENTRY WinMain(HINSTANCE hInstance,
     }
 
     CreateLogger(verbosity);
+
+    if (!skipSplashScreen)
+    {
+        // by default look in the current (installation) directory
+        fs::path splashFile("splash\\splash.png");
+        if (!startDirectory.empty())
+        {
+            fs::path newSplashFile = fs::path(startDirectory) / splashFile;
+            if (fs::exists(newSplashFile))
+                splashFile = std::move(newSplashFile);
+        }
+        s_splash = new SplashWindow(splashFile.string().c_str());
+        s_splash->setMessage(_("Loading data files..."));
+        s_splash->showSplash();
+    }
+
     // If a start directory was given on the command line, switch to it
     // now.
-    if (startDirectory != "")
+    if (!startDirectory.empty())
         SetCurrentDirectory(startDirectory.c_str());
-
-    s_splash = new SplashWindow(SPLASH_DIR "\\" "splash.png");
-    s_splash->setMessage(_("Loading data files..."));
-    if (!skipSplashScreen)
-        s_splash->showSplash();
 
     OleInitialize(NULL);
     dropTarget = new CelestiaDropTarget();
@@ -3252,7 +3263,7 @@ int APIENTRY WinMain(HINSTANCE hInstance,
     prefs.dateFormat = 0;
     prefs.hudDetail = 2; // def 1
     prefs.fullScreenMode = -1;
-    prefs.starsColor = ColorTable_Blackbody_D65;
+    prefs.starsColor = static_cast<int>(ColorTableType::Blackbody_D65);
     prefs.lastVersion = 0x00000000;
     prefs.textureResolution = 1;
     LoadPreferencesFromRegistry(CelestiaRegKey, prefs);
@@ -3494,10 +3505,10 @@ int APIENTRY WinMain(HINSTANCE hInstance,
         appCore->getRenderer()->setStarStyle(prefs.starStyle);
         appCore->setHudDetail(prefs.hudDetail);
 
-        if (prefs.starsColor == 0)
-            appCore->getRenderer()->setStarColorTable(GetStarColorTable(ColorTable_Enhanced));
-        if (prefs.starsColor == 1)
-            appCore->getRenderer()->setStarColorTable(GetStarColorTable(ColorTable_Blackbody_D65));
+        if (prefs.starsColor == static_cast<int>(ColorTableType::Enhanced))
+            appCore->getRenderer()->setStarColorTable(GetStarColorTable(ColorTableType::Enhanced));
+        if (prefs.starsColor == static_cast<int>(ColorTableType::Blackbody_D65))
+            appCore->getRenderer()->setStarColorTable(GetStarColorTable(ColorTableType::Blackbody_D65));
 
         if (prefs.showLocalTime == 1)
             ShowLocalTime(appCore);
@@ -4164,12 +4175,12 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd,
             break;
 
         case ID_STARCOLOR_DISABLED:
-            appCore->getRenderer()->setStarColorTable(GetStarColorTable(ColorTable_Enhanced));
+            appCore->getRenderer()->setStarColorTable(GetStarColorTable(ColorTableType::Enhanced));
             syncMenusWithRendererState();
             break;
 
         case ID_STARCOLOR_ENABLED:
-            appCore->getRenderer()->setStarColorTable(GetStarColorTable(ColorTable_Blackbody_D65));
+            appCore->getRenderer()->setStarColorTable(GetStarColorTable(ColorTableType::Blackbody_D65));
             syncMenusWithRendererState();
             break;
 

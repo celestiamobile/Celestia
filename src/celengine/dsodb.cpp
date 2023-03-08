@@ -56,7 +56,7 @@ DeepSkyObject* DSODatabase::find(const AstroCatalog::IndexNumber catalogNumber) 
 }
 
 
-DeepSkyObject* DSODatabase::find(const std::string& name, bool i18n) const
+DeepSkyObject* DSODatabase::find(std::string_view name, bool i18n) const
 {
     if (name.empty())
         return nullptr;
@@ -72,15 +72,11 @@ DeepSkyObject* DSODatabase::find(const std::string& name, bool i18n) const
 }
 
 
-std::vector<std::string> DSODatabase::getCompletion(const std::string& name, bool i18n) const
+void DSODatabase::getCompletion(std::vector<std::string>& completion, std::string_view name, bool i18n) const
 {
-    std::vector<std::string> completion;
-
     // only named DSOs are supported by completion.
     if (!name.empty() && namesDB != nullptr)
-        return namesDB->getCompletion(name, i18n);
-    else
-        return completion;
+        namesDB->getCompletion(completion, name, i18n);
 }
 
 
@@ -376,7 +372,7 @@ void DSODatabase::calcAvgAbsMag()
     uint32_t nDSOeff = size();
     for (int i = 0; i < nDSOs; ++i)
     {
-        double DSOmag = DSOs[i]->getAbsoluteMagnitude();
+        float DSOmag = DSOs[i]->getAbsoluteMagnitude();
 
         // take only DSO's with realistic AbsMag entry
         // (> DSO_DEFAULT_ABS_MAGNITUDE) into account
@@ -384,10 +380,8 @@ void DSODatabase::calcAvgAbsMag()
             avgAbsMag += DSOmag;
         else if (nDSOeff > 1)
             nDSOeff--;
-        //cout << nDSOs<<"  "<<DSOmag<<"  "<<nDSOeff<<endl;
     }
-    avgAbsMag /= (double) nDSOeff;
-    //cout<<avgAbsMag<<endl;
+    avgAbsMag /= static_cast<float>(nDSOeff);
 }
 
 
@@ -408,7 +402,7 @@ void DSODatabase::buildIndexes()
 }
 
 
-double DSODatabase::getAverageAbsoluteMagnitude() const
+float DSODatabase::getAverageAbsoluteMagnitude() const
 {
     return avgAbsMag;
 }

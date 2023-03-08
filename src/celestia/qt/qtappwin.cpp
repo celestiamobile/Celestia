@@ -272,11 +272,12 @@ void CelestiaAppWindow::init(const CelestiaCommandLineOptions& options)
     // Enable antialiasing if requested in the config file.
     // TODO: Make this settable via the GUI
     QSurfaceFormat glformat = QSurfaceFormat::defaultFormat();
+    glformat.setAlphaBufferSize(0);
     if (m_appCore->getConfig()->aaSamples > 1)
     {
         glformat.setSamples(m_appCore->getConfig()->aaSamples);
-        QSurfaceFormat::setDefaultFormat(glformat);
     }
+    QSurfaceFormat::setDefaultFormat(glformat);
 
     glWidget = new CelestiaGlWidget(nullptr, "Celestia", m_appCore);
 
@@ -521,16 +522,15 @@ void CelestiaAppWindow::writeSettings()
     settings.setValue("OrbitMask", renderer->getOrbitMask());
     settings.setValue("LabelMode", renderer->getLabelMode());
     settings.setValue("AmbientLightLevel", renderer->getAmbientLightLevel());
+    settings.setValue("TintSaturation", renderer->getTintSaturation());
     settings.setValue("StarStyle", renderer->getStarStyle());
     settings.setValue("TextureResolution", renderer->getResolution());
     ColorTableType colorsst;
-    const ColorTemperatureTable* current = renderer->getStarColorTable();
-
-    if (current == GetStarColorTable(ColorTable_Blackbody_D65))
-        colorsst = ColorTable_Blackbody_D65;
-    else // if (current == GetStarColorTable(ColorTable_Enhanced))
-        colorsst = ColorTable_Enhanced;
-    settings.setValue("StarsColor", colorsst);
+    if (renderer->getStarColorTable()->type() == ColorTableType::Blackbody_D65)
+        colorsst = ColorTableType::Blackbody_D65;
+    else // if (renderer->getStarColorTable()->type() == ColorTableType::Enhanced)
+        colorsst = ColorTableType::Enhanced;
+    settings.setValue("StarsColor", static_cast<int>(colorsst));
 
     Simulation* simulation = m_appCore->getSimulation();
 
@@ -620,7 +620,9 @@ void CelestiaAppWindow::slotGrabImage()
     QString saveAsName = QFileDialog::getSaveFileName(this,
                                                       _("Save Image"),
                                                       dir,
-                                                      _("Images (*.png *.jpg)"));
+                                                      _("Images (*.png *.jpg)"),
+                                                      nullptr,
+                                                      QFileDialog::DontUseNativeDialog);
 
     if (!saveAsName.isEmpty())
     {
@@ -646,7 +648,9 @@ void CelestiaAppWindow::slotCaptureVideo()
     QString saveAsName = QFileDialog::getSaveFileName(this,
                                                       _("Capture Video"),
                                                       dir,
-                                                      _("Matroska Video (*.mkv)"));
+                                                      _("Matroska Video (*.mkv)"),
+                                                      nullptr,
+                                                      QFileDialog::DontUseNativeDialog);
 
     if (!saveAsName.isEmpty())
     {
@@ -883,7 +887,9 @@ void CelestiaAppWindow::slotOpenScriptDialog()
     QString scriptFileName = QFileDialog::getOpenFileName(this,
                                                           _("Open Script"),
                                                           dir,
-                                                          _("Celestia Scripts (*.celx *.cel)"));
+                                                          _("Celestia Scripts (*.celx *.cel)"),
+                                                          nullptr,
+                                                          QFileDialog::DontUseNativeDialog);
 
     if (!scriptFileName.isEmpty())
     {
@@ -1092,7 +1098,7 @@ void CelestiaAppWindow::slotShowAbout()
 {
     const char* aboutText = gettext_noop(
         "<html>"
-        "<h1>Celestia 1.7</h1>"
+        "<h1>Celestia " VERSION "</h1>"
         "<p>Development snapshot, commit <b>%1</b>.</p>"
 
         "<p>Built for %2 bit CPU<br>"

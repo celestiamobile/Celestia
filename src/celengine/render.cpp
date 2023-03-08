@@ -253,7 +253,6 @@ Renderer::Renderer() :
     labelMode(LocationLabels), //def. NoLabels
     renderFlags(DefaultRenderFlags),
     orbitMask(Body::Planet | Body::Moon | Body::Stellar),
-    ambientLightLevel(0.1f),
     brightnessBias(0.0f),
     saturationMagNight(1.0f),
     saturationMag(1.0f),
@@ -276,7 +275,7 @@ Renderer::Renderer() :
 {
     pointStarVertexBuffer = new PointStarVertexBuffer(*this, 2048);
     glareVertexBuffer = new PointStarVertexBuffer(*this, 2048);
-    colorTemp = GetStarColorTable(ColorTable_Blackbody_D65);
+    colorTemp = GetStarColorTable(ColorTableType::Blackbody_D65);
 
     for (int i = 0; i < (int) FontCount; i++)
     {
@@ -764,6 +763,19 @@ float Renderer::getAmbientLightLevel() const
 void Renderer::setAmbientLightLevel(float level)
 {
     ambientLightLevel = level;
+    markSettingsChanged();
+}
+
+
+float Renderer::getTintSaturation() const
+{
+    return tintSaturation;
+}
+
+
+void Renderer::setTintSaturation(float level)
+{
+    tintSaturation = level;
     markSettingsChanged();
 }
 
@@ -1275,6 +1287,29 @@ void Renderer::autoMag(float& faintestMag)
 }
 
 
+static Color legacyTintColor(float temp)
+{
+    // If the star is sufficiently cool, change the light color
+    // from white.  Though our sun appears yellow, we still make
+    // it and all hotter stars emit white light, as this is the
+    // 'natural' light to which our eyes are accustomed.  We also
+    // assign a slight bluish tint to light from O and B type stars,
+    // though these will almost never have planets for their light
+    // to shine upon.
+    if (temp > 30000.0f)
+        return Color(0.8f, 0.8f, 1.0f);
+    else if (temp > 10000.0f)
+        return Color(0.9f, 0.9f, 1.0f);
+    else if (temp > 5400.0f)
+        return Color(1.0f, 1.0f, 1.0f);
+    else if (temp > 3900.0f)
+        return Color(1.0f, 0.9f, 0.8f);
+    else if (temp > 2000.0f)
+        return Color(1.0f, 0.7f, 0.7f);
+    return Color(1.0f, 0.4f, 0.4f);
+}
+
+
 // Set up the light sources for rendering a solar system.  The positions of
 // all nearby stars are converted from universal to viewer-centered
 // coordinates.
@@ -1283,8 +1318,15 @@ setupLightSources(const vector<const Star*>& nearStars,
                   const UniversalCoord& observerPos,
                   double t,
                   vector<LightSource>& lightSources,
-                  uint64_t renderFlags)
+                  float tintSaturation,
+                  bool useBlackbodyColors)
 {
+    // Fade out the illumination from cool objects. Objects at the Draper
+    // point (798 K) should be visibly glowing, so set the minimum temperature
+    // for illumination to be slightly below this.
+    constexpr float DARK_POINT = 780.0f;
+    constexpr float FADE_POINT = 1000.0f;
+
     lightSources.clear();
 
     for (const auto star : nearStars)
@@ -1297,32 +1339,29 @@ setupLightSources(const vector<const Star*>& nearStars,
             ls.luminosity = star->getLuminosity();
             ls.radius = star->getRadius();
 
-            if ((renderFlags & Renderer::ShowTintedIllumination) != 0)
+            float temp = star->getTemperature();
+            if (temp <= DARK_POINT)
+                continue;
+
+            if (useBlackbodyColors)
             {
-                // If the star is sufficiently cool, change the light color
-                // from white.  Though our sun appears yellow, we still make
-                // it and all hotter stars emit white light, as this is the
-                // 'natural' light to which our eyes are accustomed.  We also
-                // assign a slight bluish tint to light from O and B type stars,
-                // though these will almost never have planets for their light
-                // to shine upon.
-                float temp = star->getTemperature();
-                if (temp > 30000.0f)
-                    ls.color = Color(0.8f, 0.8f, 1.0f);
-                else if (temp > 10000.0f)
-                    ls.color = Color(0.9f, 0.9f, 1.0f);
-                else if (temp > 5400.0f)
-                    ls.color = Color(1.0f, 1.0f, 1.0f);
-                else if (temp > 3900.0f)
-                    ls.color = Color(1.0f, 0.9f, 0.8f);
-                else if (temp > 2000.0f)
-                    ls.color = Color(1.0f, 0.7f, 0.7f);
-                else
-                    ls.color = Color(1.0f, 0.4f, 0.4f);
+                float fadeFactor = temp < FADE_POINT
+                    ? (temp - DARK_POINT) / (FADE_POINT - DARK_POINT)
+                    : 1.0f;
+
+                // Artificially decrease the luminosity below the fade point
+                // so that other light sources in the system may provide more
+                // illumination.
+                ls.luminosity *= fadeFactor;
+
+                // Use a variant of the blackbody colors with the whitepoint
+                // set to Sol being white, to ensure consistency of the Solar
+                // System textures.
+                ls.color = GetTintColorTable()->lookupTintColor(temp, tintSaturation, fadeFactor);
             }
             else
             {
-                ls.color = Color(1.0f, 1.0f, 1.0f);
+                ls.color = legacyTintColor(temp);
             }
 
             lightSources.push_back(ls);
@@ -3877,7 +3916,7 @@ void Renderer::renderDeepSkyObjects(const Universe& universe,
 
     dsoRenderer.renderer         = this;
     dsoRenderer.dsoDB            = dsoDB;
-    dsoRenderer.orientationMatrix= observer.getOrientationf().conjugate().toRotationMatrix();
+    dsoRenderer.orientationMatrixT = observer.getOrientationf().toRotationMatrix();
     dsoRenderer.observer         = &observer;
     dsoRenderer.obsPos           = obsPos;
     dsoRenderer.fov              = fov;
@@ -3887,8 +3926,6 @@ void Renderer::renderDeepSkyObjects(const Universe& universe,
     dsoRenderer.faintestMag      = faintestMag;
     dsoRenderer.renderFlags      = renderFlags;
     dsoRenderer.labelMode        = labelMode;
-    dsoRenderer.wWidth           = windowWidth;
-    dsoRenderer.wHeight          = windowHeight;
 
     dsoRenderer.frustum = Frustum(degToRad(fov),
                                   getAspectRatio(),
@@ -4631,7 +4668,7 @@ static void draw_rectangle_solid(const Renderer &renderer,
 {
     ShaderProperties shadprop;
     shadprop.lightModel = ShaderProperties::UnlitModel;
-    if (r.nColors > 0)
+    if (r.hasColors)
         shadprop.texUsage |= ShaderProperties::VertexColors;
     if (r.tex != nullptr)
         shadprop.texUsage |= ShaderProperties::DiffuseTexture;
@@ -4642,29 +4679,48 @@ static void draw_rectangle_solid(const Renderer &renderer,
     if (prog == nullptr)
         return;
 
-    constexpr array<short, 8> texels = {0, 1,  1, 1,  1, 0,  0, 0};
-    array<float, 8> vertices = { r.x, r.y,  r.x+r.w, r.y, r.x+r.w, r.y+r.h, r.x, r.y+r.h };
+    struct RectVtx
+    {
+        float x, y, u, v; // NOSONAR
+        uint8_t color[4]; // NOSONAR
+    };
+
+    array<RectVtx, 4> vertices = {
+        r.x,       r.y,       0.0f, 1.0f, {},
+        r.x + r.w, r.y,       1.0f, 1.0f, {},
+        r.x + r.w, r.y + r.h, 1.0f, 0.0f, {},
+        r.x,       r.y + r.h, 0.0f, 0.0f, {},
+    };
+
+    if (r.hasColors)
+    {
+        for (int i = 0; i < 4; i++)
+            r.colors[i].get(vertices[i].color);
+    }
+
+    static GLuint vbo = 0u;
+    if (vbo == 0u)
+        glGenBuffers(1, &vbo);
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(RectVtx), vertices.data(), GL_STREAM_DRAW);
 
     glEnableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
     glVertexAttribPointer(CelestiaGLProgram::VertexCoordAttributeIndex,
-                          2, GL_FLOAT, GL_FALSE, 0, vertices.data());
+                          2, GL_FLOAT, GL_FALSE, sizeof(RectVtx), reinterpret_cast<void*>(offsetof(RectVtx, x))); //NOSONAR
 
     if (r.tex != nullptr)
     {
         glEnableVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex);
         glVertexAttribPointer(CelestiaGLProgram::TextureCoord0AttributeIndex,
-                              2, GL_SHORT, GL_FALSE, 0, texels.data());
+                              2, GL_FLOAT, GL_FALSE, sizeof(RectVtx), reinterpret_cast<void*>(offsetof(RectVtx, u))); //NOSONAR
         r.tex->bind();
     }
-    if (r.nColors == 4)
+    if (r.hasColors)
     {
         glEnableVertexAttribArray(CelestiaGLProgram::ColorAttributeIndex);
         glVertexAttribPointer(CelestiaGLProgram::ColorAttributeIndex,
-                             4, GL_UNSIGNED_BYTE, GL_TRUE, 0, r.colors.data());
-    }
-    else if (r.nColors == 1)
-    {
-        glVertexAttrib(CelestiaGLProgram::ColorAttributeIndex, r.colors[0]);
+                             4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(RectVtx), reinterpret_cast<void*>(offsetof(RectVtx, color))); //NOSONAR
     }
 
     prog->use();
@@ -4675,8 +4731,9 @@ static void draw_rectangle_solid(const Renderer &renderer,
     glDisableVertexAttribArray(CelestiaGLProgram::ColorAttributeIndex);
     if (r.tex != nullptr)
         glDisableVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex);
-    if (r.nColors == 4)
+    if (r.hasColors)
         glDisableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 void Renderer::drawRectangle(const celestia::Rect &r, int fishEyeOverrideMode, const Eigen::Matrix4f& p, const Eigen::Matrix4f& m)
@@ -4726,6 +4783,24 @@ bool Renderer::getInfo(map<string, string>& info) const
         info["Language"] = "GLSL";
         info["LanguageVersion"] = s;
     }
+
+    GLint redBits = 0;
+    GLint greenBits = 0;
+    GLint blueBits = 0;
+    GLint alphaBits = 0;
+    GLint depthBits = 0;
+    glGetIntegerv(GL_RED_BITS, &redBits);
+    glGetIntegerv(GL_GREEN_BITS, &greenBits);
+    glGetIntegerv(GL_BLUE_BITS, &blueBits);
+    glGetIntegerv(GL_ALPHA_BITS, &alphaBits);
+    glGetIntegerv(GL_DEPTH_BITS, &depthBits);
+
+    if (alphaBits == 0)
+        info["ColorComponent"] = fmt::format("RGB{}{}{}", redBits, greenBits, blueBits);
+    else
+        info["ColorComponent"] = fmt::format("RGBA{}{}{}{}", redBits, greenBits, blueBits, alphaBits);
+
+    info["DepthComponent"] = to_string(depthBits);
 
     GLint maxTextureSize = 0;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
@@ -5051,7 +5126,12 @@ Renderer::buildNearSystemsLists(const Universe &universe,
     // Set up direct light sources (i.e. just stars at the moment)
     // Skip if only star orbits to be shown
     if ((renderFlags & ShowSolarSystemObjects) != 0)
-        setupLightSources(nearStars, observerPos, now, lightSourceList, renderFlags);
+        setupLightSources(nearStars,
+                          observerPos,
+                          now,
+                          lightSourceList,
+                          tintSaturation,
+                          colorTemp->type() == ColorTableType::Blackbody_D65);
 
     // Traverse the frame trees of each nearby solar system and
     // build the list of objects to be rendered.
@@ -5371,7 +5451,7 @@ Renderer::setPipelineState(const Renderer::PipelineState &ps) noexcept
     }
     if (ps.blending && (ps.blendFunc.src != m_pipelineState.blendFunc.src || ps.blendFunc.dst != m_pipelineState.blendFunc.dst))
     {
-        glBlendFunc(ps.blendFunc.src, ps.blendFunc.dst);
+        glBlendFuncSeparate(ps.blendFunc.src, ps.blendFunc.dst, GL_ZERO, GL_ONE);
         m_pipelineState.blendFunc = ps.blendFunc;
     }
     if (ps.depthTest != m_pipelineState.depthTest)

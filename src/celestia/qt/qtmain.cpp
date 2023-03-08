@@ -71,14 +71,21 @@ int main(int argc, char *argv[])
 
     QCoreApplication::setOrganizationName("Celestia Development Team");
     QCoreApplication::setApplicationName("Celestia QT");
-    QCoreApplication::setApplicationVersion("1.7.0");
+    QCoreApplication::setApplicationVersion(VERSION);
 
     CelestiaCommandLineOptions options = ParseCommandLine(app);
 
     std::optional<QSplashScreen> splash{std::nullopt};
     if (!options.skipSplashScreen)
     {
-        QDir splashDir(SPLASH_DIR);
+        QDir splashDir(CONFIG_DATA_DIR "/splash");
+        if (!options.startDirectory.isEmpty())
+        {
+            QDir newSplashDir = QString("%1/splash").arg(options.startDirectory);
+            if (newSplashDir.exists("splash.png"))
+                splashDir = std::move(newSplashDir);
+        }
+
         QPixmap pixmap(splashDir.filePath("splash.png"));
         splash.emplace(pixmap);
         splash->setMask(pixmap.mask());

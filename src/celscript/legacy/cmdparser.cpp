@@ -28,6 +28,7 @@ using namespace celmath;
 using namespace celestia;
 using namespace celestia::scripts;
 using celestia::util::GetLogger;
+using celestia::util::DecodeFromBase64;
 
 
 static uint64_t parseRenderFlags(const string&, const FlagMap64&);
@@ -287,9 +288,9 @@ Command* CommandParser::parseCommand()
             const std::string* x = paramList->getString("x");
             const std::string* y = paramList->getString("y");
             const std::string* z = paramList->getString("z");
-            double xpos = x == nullptr ? 0.0 : static_cast<double>(BigFix::fromBase64(*x));
-            double ypos = y == nullptr ? 0.0 : static_cast<double>(BigFix::fromBase64(*y));
-            double zpos = z == nullptr ? 0.0 : static_cast<double>(BigFix::fromBase64(*z));
+            double xpos = x == nullptr ? 0.0 : static_cast<double>(DecodeFromBase64(*x));
+            double ypos = y == nullptr ? 0.0 : static_cast<double>(DecodeFromBase64(*y));
+            double zpos = z == nullptr ? 0.0 : static_cast<double>(DecodeFromBase64(*z));
             auto ow = paramList->getNumber<double>("ow").value_or(0.0);
             auto ox = paramList->getNumber<double>("ox").value_or(0.0);
             auto oy = paramList->getNumber<double>("oy").value_or(0.0);
@@ -497,9 +498,9 @@ Command* CommandParser::parseCommand()
                 error("Missing x, y, z or base, offset parameters to setposition");
                 return nullptr;
             }
-            cmd = new CommandSetPosition(UniversalCoord(BigFix::fromBase64(*x),
-                                                        BigFix::fromBase64(*y),
-                                                        BigFix::fromBase64(*z)));
+            cmd = new CommandSetPosition(UniversalCoord(DecodeFromBase64(*x),
+                                                        DecodeFromBase64(*y),
+                                                        DecodeFromBase64(*z)));
         }
     }
     else if (commandName == "setorientation")
@@ -993,7 +994,7 @@ int parseOrbitFlags(const string &s, const FlagMap &BodyTypeMap)
         if (auto tokenValue = tokenizer.getNameValue(); tokenValue.has_value())
         {
             std::string name(*tokenValue);
-            name[0] = toupper(name[0]);
+            name[0] = std::toupper(static_cast<unsigned char>(name[0]));
 
             if (BodyTypeMap.count(name) == 0)
                 GetLogger()->warn("Unknown orbit flag: {}\n", name);

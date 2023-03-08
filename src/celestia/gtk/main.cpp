@@ -317,9 +317,11 @@ int main(int argc, char* argv[])
     setlocale(LC_ALL, "");
 
     #ifndef WIN32
-    bindtextdomain(PACKAGE, LOCALEDIR);
-    bind_textdomain_codeset(PACKAGE, "UTF-8");
-    textdomain(PACKAGE);
+    bindtextdomain("celestia", LOCALEDIR);
+    bind_textdomain_codeset("celestia", "UTF-8");
+    bindtextdomain("celestia-data", LOCALEDIR);
+    bind_textdomain_codeset("celestia-data", "UTF-8");
+    textdomain("celestia");
     #endif /* WIN32 */
 
     /* Initialize the structure that holds the application's vitals. */
@@ -360,12 +362,6 @@ int main(int argc, char* argv[])
     if (argc > 1)
         app->startURL = argv[argc - 1];
 
-    if (installDir == NULL)
-        installDir = (gchar*)CONFIG_DATA_DIR;
-
-    if (chdir(installDir) == -1)
-        cerr << "Cannot chdir to '" << installDir << "', probably due to improper installation.\n";
-
     #ifdef GNOME
     /* GNOME Initialization */
     GnomeProgram *program;
@@ -377,8 +373,14 @@ int main(int argc, char* argv[])
     #endif
 
     /* Turn on the splash screen */
-    SplashData* ss = splashStart(app, !noSplash);
+    SplashData* ss = splashStart(app, !noSplash, installDir, CONFIG_DATA_DIR);
     splashSetText(ss, "Initializing...");
+
+    if (installDir == NULL)
+        installDir = (gchar*)CONFIG_DATA_DIR;
+
+    if (chdir(installDir) == -1)
+        cerr << "Cannot chdir to '" << installDir << "', probably due to improper installation.\n";
 
     app->core = new CelestiaCore();
 

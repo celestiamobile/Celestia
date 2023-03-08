@@ -170,8 +170,9 @@ bool Celx_istype(lua_State* l, int index, int id)
     }
 
     const char* classname = lua_tostring(l, -1);
+    bool result = classname != nullptr && strcmp(classname, CelxLua::ClassNames[id]) == 0;
     lua_pop(l, 1);
-    return classname != nullptr && strcmp(classname, CelxLua::ClassNames[id]) == 0;
+    return result;
 }
 
 // Verify that an object at location index on the stack is of the
@@ -424,7 +425,8 @@ bool LuaState::charEntered(const char* c_p)
     if (ioMode == IOMode::Asking && getTime() > timeout)
     {
         int stackTop = lua_gettop(costate);
-        if (c_p[0] == 'y')
+        // TRANSLATORS: Y is first letter of Yes
+        if (compareIgnoringCase(c_p, "Y") == 0 || compareIgnoringCase(c_p, _("Y")) == 0)
         {
             openLuaLibrary(costate, LUA_LOADLIBNAME, luaopen_package);
             openLuaLibrary(costate, LUA_IOLIBNAME, luaopen_io);
