@@ -39,7 +39,7 @@ namespace celestia::render
  *            3. vo.setBufferData()
  *            4. vo.draw()
  */
-class VertexObject
+class VertexObject //NOSONAR
 {
  public:
     VertexObject(const VertexObject&) = delete;
@@ -143,7 +143,6 @@ class VertexObject
      */
     void setVertexAttribArray(GLint location, GLint count, GLenum type, bool normalized = false, GLsizei stride = 0, GLsizeiptr offset = 0);
 
-
     /**
      *  Disable vertex attribute.
      *
@@ -172,23 +171,8 @@ class VertexObject
         return (m_state & State::Initialize) == 0;
     }
 
-    //! Return if the buffer is bound or not.
-    inline bool bound() const noexcept
-    {
-        return (m_state & State::Bound) != 0;
-    }
-
     //! Return the buffer's current size.
-    GLsizeiptr getBufferSize() const noexcept          { return m_bufferSize; }
-
-    //! Update the buffer's current size.
-    void setBufferSize(GLsizeiptr bufferSize) noexcept { m_bufferSize = bufferSize; }
-
-    //! Return the buffer's current update policy.
-    GLenum getStreamType() const noexcept              { return m_streamType; }
-
-    //! Update the buffer's current update policy.
-    void setStreamType(GLenum streamType) noexcept     { m_streamType = streamType; }
+    GLsizeiptr getBufferSize() const noexcept { return m_bufferSize; }
 
  protected:
     enum State : std::uint16_t
@@ -207,6 +191,8 @@ class VertexObject
     void disableAttribArrays() const noexcept;
 
 private:
+    void cleanup() const noexcept;
+
     std::vector<PtrParams> m_attribParams;
 
     GLuint     m_vboId              { 0 };
@@ -216,19 +202,23 @@ private:
     GLenum     m_streamType         { 0 };
 };
 
-class IndexedVertexObject : public VertexObject
+class IndexedVertexObject : private VertexObject //NOSONAR
 {
 public:
     IndexedVertexObject(const IndexedVertexObject&) = delete;
-    IndexedVertexObject(IndexedVertexObject&&) = delete;
-    IndexedVertexObject& operator=(const IndexedVertexObject&) = default;
-    IndexedVertexObject& operator=(IndexedVertexObject&&) = default;
+    IndexedVertexObject(IndexedVertexObject&&) noexcept;
+    IndexedVertexObject& operator=(const IndexedVertexObject&) = delete;
+    IndexedVertexObject& operator=(IndexedVertexObject&&) noexcept;
 
     IndexedVertexObject() = default;
     explicit IndexedVertexObject(GLenum indexType);
     IndexedVertexObject(GLsizeiptr bufferSize, GLenum streamType, GLenum indexType, GLsizeiptr indexSize);
     IndexedVertexObject(GLsizeiptr bufferSize, GLenum streamType, GLenum indexType, GLsizeiptr indexSize, GLenum indexStreamType);
     ~IndexedVertexObject();
+
+    using VertexObject::initialized;
+    using VertexObject::setBufferData;
+    using VertexObject::setVertexAttribArray;
 
     /**
      * @brief Bind the buffer to use.
@@ -279,25 +269,9 @@ public:
      */
     void setIndexBufferData(const void* data, GLintptr offset, GLsizeiptr size) const noexcept;
 
-    //! Return the indexbuffer's current size.
-    GLsizeiptr getIndexBufferSize() const noexcept         { return m_indexSize; }
-
-    //! Update the index buffer's current size.
-    void setIndexBufferSize(GLsizeiptr indexSize) noexcept { m_indexSize = indexSize; }
-
-    //! Return the index buffer's current update policy.
-    GLenum getIndexStreamType() const noexcept             { return m_indexStreamType; }
-
-    //! Update the index buffer's current update policy.
-    void setIndexStreamType(GLenum streamType) noexcept    { m_indexStreamType = streamType; }
-
-    //! Return the index buffer's current type.
-    GLenum getIndexType() const noexcept                   { return m_indexType; }
-
-    //! Update the index buffer's type.
-    void setIndexType(GLenum indexType) noexcept           { m_indexType = indexType; }
-
 private:
+    void cleanup() const noexcept;
+
     GLuint     m_vioId              { 0 };
     GLenum     m_indexType          { 0 };
     GLenum     m_indexStreamType    { 0 };

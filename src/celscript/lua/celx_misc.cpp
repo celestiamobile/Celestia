@@ -8,14 +8,21 @@
 // of the License, or (at your option) any later version.
 
 #include "celx_misc.h"
+
+#include <memory>
+#include <string_view>
+
 #include "celx_internal.h"
 #include <celscript/legacy/cmdparser.h>
+#include <celscript/legacy/execenv.h>
 #include <celscript/legacy/execution.h>
+#include <celengine/textlayout.h>
 #include <celestia/celestiacore.h>
 #include <celttf/truetypefont.h>
 #include "glcompat.h"
 
 using namespace std;
+using namespace celestia::engine;
 using namespace celestia::scripts;
 
 LuaState *getLuaStateObject(lua_State*);
@@ -28,10 +35,10 @@ class CelScriptWrapper : public ExecutionEnvironment
         core(appCore)
     {
         CommandParser parser(scriptfile, appCore.scriptMaps());
-        cmdSequence = parser.parse();
-        if (cmdSequence != nullptr)
+        CommandSequence cmdSequence = parser.parse();
+        if (!cmdSequence.empty())
         {
-            script = new Execution(*cmdSequence, *this);
+            script = std::make_unique<Execution>(std::move(cmdSequence), *this);
         }
         else
         {
@@ -43,13 +50,7 @@ class CelScriptWrapper : public ExecutionEnvironment
         }
     }
 
-    virtual ~CelScriptWrapper()
-    {
-        delete script;
-        delete cmdSequence;
-    }
-
-    string getErrorMessage() const
+    const std::string& getErrorMessage() const
     {
         return errorMessage;
     }
@@ -68,31 +69,30 @@ class CelScriptWrapper : public ExecutionEnvironment
         return script->tick(dt);
     }
 
-    Simulation* getSimulation() const
+    Simulation* getSimulation() const override
     {
         return core.getSimulation();
     }
 
-    Renderer* getRenderer() const
+    Renderer* getRenderer() const override
     {
         return core.getRenderer();
     }
 
-    CelestiaCore* getCelestiaCore() const
+    CelestiaCore* getCelestiaCore() const override
     {
         return &core;
     }
 
-    void showText(string s, int horig, int vorig, int hoff, int voff,
-                  double duration)
+    void showText(std::string_view s, int horig, int vorig, int hoff, int voff,
+                  double duration) override
     {
-        core.showText(std::move(s), horig, vorig, hoff, voff, duration);
+        core.showText(s, horig, vorig, hoff, voff, duration);
     }
 
  private:
-    Execution* script{ nullptr };
+    std::unique_ptr<Execution> script{ nullptr };
     CelestiaCore& core;
-    CommandSequence* cmdSequence{ nullptr };
     double tickTime { 0.0 };
     string errorMessage;
 };
@@ -200,10 +200,12 @@ static int font_render(lua_State* l)
     Eigen::Matrix4f p, m;
     glGetFloatv(GL_PROJECTION_MATRIX, p.data());
     glGetFloatv(GL_MODELVIEW_MATRIX, m.data());
-    font->setMVPMatrices(p, m);
-    auto [x, _] = font->render(s);
-    font->flush();
-    return celx.push(x);
+    TextLayout layout;
+    layout.setFont(font);
+    layout.begin(p, m);
+    layout.render(s);
+    layout.end();
+    return celx.push(layout.getCurrentPosition().first);
 }
 
 static int font_getwidth(lua_State* l)
@@ -213,7 +215,7 @@ static int font_getwidth(lua_State* l)
     celx.checkArgs(2, 2, "One argument expected for font:getwidth");
     const char* s = celx.safeGetString(2, AllErrors, "Argument to font:getwidth must be a string");
     auto font = *celx.getThis<std::shared_ptr<TextureFont>>();
-    return celx.push(font->getWidth(s));
+    return celx.push(TextLayout::getTextWidth(s, font.get()));
 }
 
 static int font_getheight(lua_State* l)
@@ -258,7 +260,7 @@ static int font_gettextwidth(lua_State* l)
     auto font = *celx.getThis<std::shared_ptr<TextureFont>>();
     const char* s = Celx_SafeGetString(l, 2, AllErrors, "First argument to font:gettextwidth must be a string");
 
-    lua_pushnumber(l, font->getWidth(s));
+    lua_pushnumber(l, TextLayout::getTextWidth(s, font.get()));
 
     return 1;
 }
@@ -401,5 +403,3 @@ void CreateTextureMetaTable(lua_State* l)
 
     celx.pop(1); // remove metatable from stack
 }
-
-
