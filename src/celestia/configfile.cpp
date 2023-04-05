@@ -8,7 +8,6 @@
 // of the License, or (at your option) any later version.
 
 #include <config.h>
-#include <iostream>
 #include <fstream>
 #include <cassert>
 #include <celutil/logger.h>
@@ -107,6 +106,8 @@ CelestiaConfig* ReadCelestiaConfig(const fs::path& filename, CelestiaConfig *con
         config->measurementSystem = *measurementSystem;
     if (const std::string* temperatureScale = configParams->getString("TemperatureScale"); temperatureScale != nullptr)
         config->temperatureScale = *temperatureScale;
+    if (const std::string* layoutDirection = configParams->getString("LayoutDirection"); layoutDirection != nullptr)
+        config->layoutDirection = *layoutDirection;
 
     auto maxDist = configParams->getNumber<float>("SolarSystemMaxDistance").value_or(1.0f);
     config->SolarSystemMaxDistance = std::clamp(maxDist, 1.0f, 10.0f);

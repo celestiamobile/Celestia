@@ -11,9 +11,10 @@
 #include <celengine/dsodb.h>
 #include <celengine/deepskyobj.h>
 #include <celmath/geomutil.h>
+#include <celmath/vecgl.h>
 #include "glsupport.h"
 #include "render.h"
-#include "vecgl.h"
+
 #include "dsorenderer.h"
 
 using namespace Eigen;
@@ -83,7 +84,7 @@ void DSORenderer::process(DeepSkyObject* const &dso,
         if (brightness < 0)
             brightness = 0;
 
-        Matrix4f mv = vecgl::translate(renderer->getModelViewMatrix(), relPos);
+        Matrix4f mv = celmath::translate(renderer->getModelViewMatrix(), relPos);
         Matrix4f pr;
 
         if (dsoRadius < 1000.0)
@@ -177,8 +178,8 @@ void DSORenderer::process(DeepSkyObject* const &dso,
                                               dsoDB->getDSOName(dso, true),
                                               labelColor,
                                               relPos,
-                                              Renderer::AlignLeft,
-                                              Renderer::VerticalAlignCenter,
+                                              Renderer::LabelHorizontalAlignment::Start,
+                                              Renderer::LabelVerticalAlignment::Center,
                                               symbolSize);
         }
     }     // labels enabled

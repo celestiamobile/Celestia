@@ -9,8 +9,14 @@
 
 #include <vector>
 
+#ifdef USE_ICU
+#include <celutil/flag.h>
+#include <celutil/unicode.h>
+#else
+#include <celutil/utf8.h>
+#endif
+
 #include "textlayout.h"
-#include "celutil/utf8.h"
 
 namespace celestia::engine
 {
@@ -68,6 +74,16 @@ void TextLayout::setScreenDpi(int value)
     }
 }
 
+void TextLayout::setLayoutDirectionFollowTextAlignment(bool value)
+{
+    if (layoutDirectionFollowTextAlignment != value)
+    {
+        if (began)
+            flushInternal(false);
+        layoutDirectionFollowTextAlignment = value;
+    }
+}
+
 void TextLayout::moveAbsolute(float newPositionX, float newPositionY, bool updateAlignment)
 {
     if (positionX != newPositionX || positionY != newPositionY)
@@ -115,24 +131,44 @@ void TextLayout::render(std::string_view text)
         return;
 
     std::vector<std::wstring> lines;
-    if (!processString(text, lines))
+    if (!processString(text, lines) || lines.empty())
         return;
 
-    bool firstLine = true;
-    for (const auto& line : lines)
+    for (size_t i = 0; i < lines.size(); i += 1)
     {
-        if (firstLine)
+        auto lineToRender = lines[i];
+        if (i == 0)
         {
-            firstLine = false;
+            // Combine the current line with the first line
+            if (layoutDirectionFollowTextAlignment && horizontalAlignment == HorizontalAlignment::Right)
+            {
+                lineToRender += currentLine;
+            }
+            else
+            {
+                lineToRender = currentLine + lineToRender;
+            }
+            if (lines.size() == 1)
+            {
+                // This line is still continuing, clear line and do not render yet
+                currentLine = lineToRender;
+                lineToRender = L"";
+            }
         }
         else
         {
             // Reset to line start, and go to the next line
             positionX = alignmentEdgeX;
             positionY -= static_cast<float>(font->getHeight());
+            if (i == lines.size() - 1)
+            {
+                // Last line (and size != 1), clear line do not render
+                currentLine = lines[i];
+                lineToRender = L"";
+            }
         }
-        if (!line.empty())
-            renderLine(line);
+        if (!lineToRender.empty())
+            renderLine(lineToRender);
     }
 }
 
@@ -196,7 +232,14 @@ void TextLayout::renderLine(std::wstring_view line)
         break;
     }
     auto [newX, newY] = font->render(line, x, positionY);
-    positionX = newX;
+    if (layoutDirectionFollowTextAlignment && horizontalAlignment == HorizontalAlignment::Right)
+    {
+        positionX = x;
+    }
+    else
+    {
+        positionX = newX;
+    }
     positionY = newY;
 }
 
@@ -217,6 +260,33 @@ void TextLayout::flushInternal(bool flushFont)
 
 bool TextLayout::processString(std::string_view input, std::vector<std::wstring> &output)
 {
+#ifdef USE_ICU
+    using namespace icu;
+    using namespace celestia::util;
+
+    auto ustr{ UnicodeString::fromUTF8(StringPiece(input.data(), static_cast<int32_t>(input.length()))) };
+    int32_t lineStart = 0;
+    const ConversionOption options = ConversionOption::ArabicShaping | ConversionOption::BidiReordering;
+    for (int32_t i = 0; i < ustr.length(); i += 1)
+    {
+        if (ustr.charAt(i) == u'\n')
+        {
+            std::wstring line;
+            if (!UnicodeStringToWString(ustr.tempSubStringBetween(lineStart, i), line, options))
+                return false;
+            output.push_back(line);
+            lineStart = i + 1;
+        }
+    }
+
+    if (lineStart <= ustr.length())
+    {
+        std::wstring line;
+        if (!UnicodeStringToWString(ustr.tempSubStringBetween(lineStart, ustr.length()), line, options))
+            return false;
+        output.push_back(line);
+    }
+#else
     // Loop through all characters
     auto len                = input.length();
     bool validChar          = true;
@@ -246,6 +316,7 @@ bool TextLayout::processString(std::string_view input, std::vector<std::wstring>
 
     if (!currentLine.empty() || endsWithLineBreak)
         output.push_back(currentLine);
+#endif
     return true;
 }
 

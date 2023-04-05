@@ -19,9 +19,9 @@
 #include <celcompat/numbers.h>
 #include <celmath/geomutil.h>
 #include <celmath/mathlib.h>
+#include <celmath/vecgl.h>
 #include <celutil/utf8.h>
 #include "render.h"
-#include "vecgl.h"
 #include "skygrid.h"
 
 using namespace Eigen;
@@ -181,17 +181,17 @@ static void updateAngleRange(double a, double b, double* maxDiff, double* minAng
 
 
 // Get the horizontal alignment for the coordinate label along the specified frustum plane
-static Renderer::LabelAlignment
+static Renderer::LabelHorizontalAlignment
 getCoordLabelHAlign(int planeIndex)
 {
     switch (planeIndex)
     {
     case 2:
-        return Renderer::AlignLeft;
+        return Renderer::LabelHorizontalAlignment::Start;
     case 3:
-        return Renderer::AlignRight;
+        return Renderer::LabelHorizontalAlignment::End;
     default:
-        return Renderer::AlignCenter;
+        return Renderer::LabelHorizontalAlignment::Center;
     }
 }
 
@@ -200,7 +200,7 @@ getCoordLabelHAlign(int planeIndex)
 static Renderer::LabelVerticalAlignment
 getCoordLabelVAlign(int planeIndex)
 {
-    return planeIndex == 1 ? Renderer::VerticalAlignTop : Renderer::VerticalAlignBottom;
+    return planeIndex == 1 ? Renderer::LabelVerticalAlignment::Top : Renderer::LabelVerticalAlignment::Bottom;
 }
 
 
@@ -487,8 +487,8 @@ SkyGrid::render(Renderer& renderer,
     // Radius of sphere is arbitrary, with the constraint that it shouldn't
     // intersect the near or far plane of the view frustum.
     Matrix4f m = renderer.getModelViewMatrix() *
-                 vecgl::rotate((xrot90 * m_orientation.conjugate() * xrot90.conjugate()).cast<float>()) *
-                 vecgl::scale(1000.0f);
+                 celmath::rotate((xrot90 * m_orientation.conjugate() * xrot90.conjugate()).cast<float>()) *
+                 celmath::scale(1000.0f);
     Matrices matrices = {&renderer.getProjectionMatrix(), &m};
 
     double arcStep = (maxTheta - minTheta) / (double) ARC_SUBDIVISIONS;
@@ -546,7 +546,7 @@ SkyGrid::render(Renderer& renderer,
                 Matrix3f m = observer.getOrientationf().toRotationMatrix();
                 p0 = orientationf.conjugate() * p0;
                 p1 = orientationf.conjugate() * p1;
-                Renderer::LabelAlignment hAlign = getCoordLabelHAlign(k);
+                Renderer::LabelHorizontalAlignment hAlign = getCoordLabelHAlign(k);
                 Renderer::LabelVerticalAlignment vAlign = getCoordLabelVAlign(k);
 
                 if ((m * p0).z() < 0.0)
@@ -621,7 +621,7 @@ SkyGrid::render(Renderer& renderer,
                 Matrix3f m = observer.getOrientationf().toRotationMatrix();
                 p0 = orientationf.conjugate() * p0;
                 p1 = orientationf.conjugate() * p1;
-                Renderer::LabelAlignment hAlign = getCoordLabelHAlign(k);
+                Renderer::LabelHorizontalAlignment hAlign = getCoordLabelHAlign(k);
                 Renderer::LabelVerticalAlignment vAlign = getCoordLabelVAlign(k);
 
                 if ((m * p0).z() < 0.0 && axis0.dot(isect0) >= cosMaxMeridianAngle)

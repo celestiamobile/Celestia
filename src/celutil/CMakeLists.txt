@@ -7,12 +7,14 @@ set(CELUTIL_SOURCES
   color.h
   filetype.cpp
   filetype.h
+  flag.h
   formatnum.cpp
   formatnum.h
   fsutils.cpp
   fsutils.h
   greek.cpp
   greek.h
+  intrusiveptr.h
   logger.cpp
   logger.h
   r128.h
@@ -34,6 +36,13 @@ set(CELUTIL_SOURCES
   utf8.h
   watcher.h
 )
+
+if (USE_ICU)
+  list(APPEND CELUTIL_SOURCES
+    unicode.cpp
+    unicode.h
+  )
+endif()
 
 if (WIN32)
   list(APPEND CELUTIL_SOURCES

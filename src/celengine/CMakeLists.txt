@@ -1,8 +1,6 @@
 set(CELENGINE_SOURCES
   asterism.cpp
   asterism.h
-  asterismrenderer.cpp
-  asterismrenderer.h
   astro.cpp
   astro.h
   astroobj.h
@@ -14,8 +12,6 @@ set(CELENGINE_SOURCES
   body.h
   boundaries.cpp
   boundaries.h
-  boundariesrenderer.cpp
-  boundariesrenderer.h
   category.cpp
   category.h
   console.cpp
@@ -151,7 +147,6 @@ set(CELENGINE_SOURCES
   universe.h
   value.cpp
   value.h
-  vecgl.h
   viewporteffect.h
   viewporteffect.cpp
   virtualtex.cpp

@@ -8,22 +8,32 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#include <iostream>
+#include "atmosphererenderer.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+
+#include <celcompat/numbers.h>
 #include <celengine/atmosphere.h>
+#include <celengine/glsupport.h>
 #include <celengine/lightenv.h>
 #include <celengine/lodspheremesh.h>
 #include <celengine/render.h>
 #include <celengine/renderinfo.h>
 #include <celengine/shadermanager.h>
-#include <celengine/vecgl.h>
+#include <celmath/mathlib.h>
+#include <celmath/vecgl.h>
 #include <celutil/color.h>
 #include <celutil/indexlist.h>
-#include "atmosphererenderer.h"
+#include "vertexobject.h"
 
 using celestia::util::BuildIndexList;
 using celestia::util::IndexListCapacity;
 using ushort = unsigned short;
 
+namespace celestia::render
+{
 namespace
 {
 constexpr int MaxSkyRings = 32;
@@ -32,10 +42,8 @@ constexpr int MinSkySlices = 30;
 
 constexpr int MaxVertices = MaxSkySlices * (MaxSkyRings + 1);
 constexpr int MaxIndices = IndexListCapacity(MaxSkySlices,  MaxSkyRings + 1);
-}
+} // end unnamed namespace
 
-namespace celestia::render
-{
 AtmosphereRenderer::AtmosphereRenderer(Renderer &renderer) :
     m_renderer(renderer)
 {
@@ -159,7 +167,7 @@ AtmosphereRenderer::computeLegacy(
     {
         uAxis = Eigen::Vector3f::UnitX().cross(normal);
     }
-    else if (abs(eyeVec.y()) < abs(normal.z()))
+    else if (std::abs(eyeVec.y()) < std::abs(normal.z()))
     {
         uAxis = Eigen::Vector3f::UnitY().cross(normal);
     }
@@ -233,7 +241,7 @@ AtmosphereRenderer::computeLegacy(
             if (i <= nHorizonRings)
                 v = m_skyContour[j].v * r;
             else
-                v = vecgl::mix(m_skyContour[j].v, zenith, u) * r;
+                v = celmath::mix(m_skyContour[j].v, zenith, u) * r;
             Eigen::Vector3f p = center + v;
 
             Eigen::Vector3f viewDir = p.normalized();
@@ -259,13 +267,13 @@ AtmosphereRenderer::computeLegacy(
                     brightness = (cosSunAngle + 0.2f) * 2.0f;
             }
 
-            memcpy(&vtx.position[0], p.data(), vtx.position.size() * sizeof(vtx.position[0]));
+            std::memcpy(&vtx.position[0], p.data(), vtx.position.size() * sizeof(vtx.position[0]));
 
             float atten = 1.0f - hh;
-            Eigen::Vector3f color = vecgl::mix(botColor, topColor, hh);
+            Eigen::Vector3f color = celmath::mix(botColor, topColor, hh);
             brightness *= minOpacity + (1.0f - minOpacity) * fade * atten;
             if (coloration != 0.0f)
-                color = vecgl::mix(color, sunsetColor, coloration);
+                color = celmath::mix(color, sunsetColor, coloration);
 
             Color(brightness * color.x(),
                   brightness * color.y(),
@@ -390,7 +398,7 @@ AtmosphereRenderer::render(
         prog->setEclipseShadowParameters(ls, radius, planetOrientation);
 #endif
 
-    prog->setMVPMatrices(*m.projection, (*m.modelview) * vecgl::scale(atmScale));
+    prog->setMVPMatrices(*m.projection, (*m.modelview) * celmath::scale(atmScale));
 
     glFrontFace(GL_CW);
 

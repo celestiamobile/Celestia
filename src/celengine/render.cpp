@@ -24,7 +24,6 @@
 #include "dsorenderer.h"
 #include "asterism.h"
 #include "astro.h"
-#include "vecgl.h"
 #include "glshader.h"
 #include "shadermanager.h"
 #include "spheremesh.h"
@@ -47,8 +46,6 @@
 #include "pointstarvertexbuffer.h"
 #include "pointstarrenderer.h"
 #include "orbitsampler.h"
-#include "asterismrenderer.h"
-#include "boundariesrenderer.h"
 #include "rendcontext.h"
 #include "textlayout.h"
 #include <celengine/observer.h>
@@ -56,11 +53,15 @@
 #include <celmath/distance.h>
 #include <celmath/intersect.h>
 #include <celmath/geomutil.h>
+#include <celmath/vecgl.h>
+#include <celrender/asterismrenderer.h>
 #include <celrender/atmosphererenderer.h>
+#include <celrender/boundariesrenderer.h>
 #include <celrender/cometrenderer.h>
 #include <celrender/eclipticlinerenderer.h>
 #include <celrender/linerenderer.h>
 #include <celrender/vertexobject.h>
+#include <celutil/arrayvector.h>
 #include <celutil/logger.h>
 #include <celutil/utf8.h>
 #include <celutil/timer.h>
@@ -85,11 +86,13 @@ using namespace celestia;
 using namespace celmath;
 using namespace celestia::engine;
 using celestia::util::GetLogger;
+using celestia::render::AsterismRenderer;
+using celestia::render::AtmosphereRenderer;
+using celestia::render::BoundariesRenderer;
 using celestia::render::CometRenderer;
+using celestia::render::EclipticLineRenderer;
 using celestia::render::LineRenderer;
 using celestia::render::VertexObject;
-using celestia::render::AtmosphereRenderer;
-using celestia::render::EclipticLineRenderer;
 
 #define FOV           45.0f
 #define NEAR_DIST      0.5f
@@ -646,6 +649,15 @@ unsigned int Renderer::getResolution() const
     return textureResolution;
 }
 
+void Renderer::setRTL(bool value)
+{
+    rtl = value;
+}
+
+bool Renderer::isRTL() const
+{
+    return rtl;
+}
 
 void Renderer::setResolution(unsigned int resolution)
 {
@@ -821,13 +833,49 @@ void Renderer::setDistanceLimit(float distanceLimit_)
     markSettingsChanged();
 }
 
+void Renderer::getLabelAlignmentInfo(const Annotation &annotation, const TextureFont *font, TextLayout::HorizontalAlignment &halign, float &hOffset, float &vOffset) const
+{
+    switch (annotation.halign)
+    {
+    case LabelHorizontalAlignment::Center:
+        halign = TextLayout::HorizontalAlignment::Center;
+        hOffset = 0.0f;
+        break;
+    case LabelHorizontalAlignment::End:
+        halign = rtl ? TextLayout::HorizontalAlignment::Left : TextLayout::HorizontalAlignment::Right;
+        hOffset = -2.0f;
+        break;
+    case LabelHorizontalAlignment::Start:
+        halign = rtl ? TextLayout::HorizontalAlignment::Right : TextLayout::HorizontalAlignment::Left;
+        if (annotation.markerRep != nullptr)
+            hOffset = 2.0f + std::trunc(annotation.markerRep->size() / 2.0f);
+        else
+            hOffset = 2.0f;
+        break;
+    }
+    if (rtl)
+        hOffset = -hOffset;
+
+    switch (annotation.valign)
+    {
+    case LabelVerticalAlignment::Center:
+        vOffset = -static_cast<float>(font->getHeight()) / 2.0f;
+        break;
+    case LabelVerticalAlignment::Top:
+        vOffset = -static_cast<float>(font->getHeight());
+        break;
+    case LabelVerticalAlignment::Bottom:
+        vOffset = 0.0f;
+        break;
+    }
+}
 
 void Renderer::addAnnotation(vector<Annotation>& annotations,
                              const celestia::MarkerRepresentation* markerRep,
                              const string& labelText,
                              Color color,
                              const Vector3f& pos,
-                             LabelAlignment halign,
+                             LabelHorizontalAlignment halign,
                              LabelVerticalAlignment valign,
                              float size,
                              bool special)
@@ -867,7 +915,7 @@ void Renderer::addForegroundAnnotation(const celestia::MarkerRepresentation* mar
                                        const string& labelText,
                                        Color color,
                                        const Vector3f& pos,
-                                       LabelAlignment halign,
+                                       LabelHorizontalAlignment halign,
                                        LabelVerticalAlignment valign,
                                        float size)
 {
@@ -879,7 +927,7 @@ void Renderer::addBackgroundAnnotation(const celestia::MarkerRepresentation* mar
                                        const string& labelText,
                                        Color color,
                                        const Vector3f& pos,
-                                       LabelAlignment halign,
+                                       LabelHorizontalAlignment halign,
                                        LabelVerticalAlignment valign,
                                        float size)
 {
@@ -891,7 +939,7 @@ void Renderer::addSortedAnnotation(const celestia::MarkerRepresentation* markerR
                                    const string& labelText,
                                    Color color,
                                    const Vector3f& pos,
-                                   LabelAlignment halign,
+                                   LabelHorizontalAlignment halign,
                                    LabelVerticalAlignment valign,
                                    float size)
 {
@@ -953,12 +1001,14 @@ void Renderer::endObjectAnnotations()
 void Renderer::addObjectAnnotation(const celestia::MarkerRepresentation* markerRep,
                                    const string& labelText,
                                    Color color,
-                                   const Vector3f& pos)
+                                   const Vector3f& pos,
+                                   LabelHorizontalAlignment halign,
+                                   LabelVerticalAlignment valign)
 {
     assert(objectAnnotationSetOpen);
     if (objectAnnotationSetOpen)
     {
-        addAnnotation(objectAnnotations, markerRep, labelText, color, pos, AlignCenter, VerticalAlignCenter);
+        addAnnotation(objectAnnotations, markerRep, labelText, color, pos, halign, valign);
     }
 }
 
@@ -1586,7 +1636,7 @@ void Renderer::draw(const Observer& observer,
     Vector3f observerPosLY = -observer.getPosition().offsetFromLy(Vector3f::Zero());
 
     Matrix4f projection = getProjectionMatrix();
-    Matrix4f modelView = getModelViewMatrix() * vecgl::translate(observerPosLY);
+    Matrix4f modelView = getModelViewMatrix() * celmath::translate(observerPosLY);
 
     Matrices asterismMVP = { &projection, &modelView };
 
@@ -1837,8 +1887,7 @@ static void renderSphereUnlit(const RenderInfo& ri,
                               const Matrices &m,
                               Renderer *r)
 {
-    Texture* textures[MAX_SPHERE_MESH_TEXTURES];
-    int nTextures = 0;
+    celestia::util::ArrayVector<Texture*, LODSphereMesh::MAX_SPHERE_MESH_TEXTURES> textures;
 
     ShaderProperties shadprop;
 
@@ -1846,17 +1895,17 @@ static void renderSphereUnlit(const RenderInfo& ri,
     if (ri.baseTex != nullptr)
     {
         shadprop.texUsage = ShaderProperties::DiffuseTexture;
-        textures[nTextures++] = ri.baseTex;
+        textures.try_push_back(ri.baseTex);
     }
     if (ri.nightTex != nullptr)
     {
         shadprop.texUsage |= ShaderProperties::NightTexture;
-        textures[nTextures++] = ri.nightTex;
+        textures.try_push_back(ri.nightTex);
     }
     if (ri.overlayTex != nullptr)
     {
         shadprop.texUsage |= ShaderProperties::OverlayTexture;
-        textures[nTextures++] = ri.overlayTex;
+        textures.try_push_back(ri.overlayTex);
     }
 
     // Get a shader for the current rendering configuration
@@ -1875,7 +1924,8 @@ static void renderSphereUnlit(const RenderInfo& ri,
     ps.depthTest = true;
     r->setPipelineState(ps);
 
-    g_lodSphere->render(frustum, ri.pixWidth, textures, nTextures);
+    g_lodSphere->render(frustum, ri.pixWidth,
+                        textures.data(), static_cast<int>(textures.size()));
 }
 
 
@@ -2007,7 +2057,9 @@ Renderer::locationsToAnnotations(const Body& body,
                     addObjectAnnotation(locationMarker,
                                         location->getName(true),
                                         labelColor,
-                                        labelPos.cast<float>());
+                                        labelPos.cast<float>(),
+                                        LabelHorizontalAlignment::Start,
+                                        LabelVerticalAlignment::Bottom);
                 }
             }
         }
@@ -2509,7 +2561,7 @@ void Renderer::renderObject(const Vector3f& pos,
             }
             else
             {
-                Eigen::Matrix4f modelView = vecgl::rotate(getCameraOrientation());
+                Eigen::Matrix4f modelView = celmath::rotate(getCameraOrientation());
                 Matrices mvp = { m.projection, &modelView };
                 m_atmosphereRenderer->renderLegacy(
                     *atmosphere,
@@ -2528,7 +2580,7 @@ void Renderer::renderObject(const Vector3f& pos,
         if (cloudTex != nullptr)
         {
             float cloudScale = 1.0f + atmosphere->cloudHeight / radius;
-            Matrix4f cmv = vecgl::scale(planetMV, cloudScale);
+            Matrix4f cmv = celmath::scale(planetMV, cloudScale);
             Matrices mvp = { m.projection, &cmv };
 
             // If we're beneath the cloud level, render the interior of
@@ -4101,7 +4153,7 @@ void Renderer::labelConstellations(const AsterismList& asterisms,
                                             ast.getName((labelMode & I18nConstellationLabels) != 0),
                                             Color(labelColor, opacity),
                                             rpos,
-                                            AlignCenter, VerticalAlignCenter);
+                                            LabelHorizontalAlignment::Center, LabelVerticalAlignment::Center);
                 }
             }
         }
@@ -4120,7 +4172,7 @@ Renderer::renderAnnotationMarker(const Annotation &a,
 
     glVertexAttrib(CelestiaGLProgram::ColorAttributeIndex, a.color);
 
-    Matrix4f mv = vecgl::translate(*m.modelview, (float)(int)a.position.x(), (float)(int)a.position.y(), depth);
+    Matrix4f mv = celmath::translate(*m.modelview, (float)(int)a.position.x(), (float)(int)a.position.y(), depth);
     Matrices mm = { m.projection, &mv };
 
     if (markerRep.symbol() == celestia::MarkerRepresentation::Crosshair)
@@ -4130,10 +4182,12 @@ Renderer::renderAnnotationMarker(const Annotation &a,
 
     if (!markerRep.label().empty())
     {
-        layout.setHorizontalAlignment(TextLayout::HorizontalAlignment::Left);
+        layout.setHorizontalAlignment(rtl ? TextLayout::HorizontalAlignment::Left : TextLayout::HorizontalAlignment::Right);
         layout.begin(*m.projection, mv);
         float labelOffset = markerRep.size() / 2.0f;
         float x = labelOffset + PixelOffset;
+        if (rtl)
+            x = -x;
         float y = -labelOffset - static_cast<float>(layout.getLineHeight()) + PixelOffset;
         layout.moveAbsolute(x, y);
         layout.render(markerRep.label());
@@ -4151,10 +4205,10 @@ Renderer::renderAnnotationLabel(const Annotation &a,
 {
     glVertexAttrib(CelestiaGLProgram::ColorAttributeIndex, a.color);
 
-    Matrix4f mv = vecgl::translate(*m.modelview,
-                                   (int)a.position.x() + hOffset + PixelOffset,
-                                   (int)a.position.y() + vOffset + PixelOffset,
-                                   depth);
+    Matrix4f mv = celmath::translate(*m.modelview,
+                                     (int)a.position.x() + hOffset + PixelOffset,
+                                     (int)a.position.y() + vOffset + PixelOffset,
+                                     depth);
 
     layout.begin(*m.projection, mv);
     layout.moveAbsolute(0.0f, 0.0f);
@@ -4189,39 +4243,8 @@ void Renderer::renderAnnotations(const vector<Annotation>& annotations,
             float hOffset = 0.0f;
             float vOffset = 0.0f;
 
-            switch (annotations[i].halign)
-            {
-            case AlignCenter:
-                alignment = TextLayout::HorizontalAlignment::Center;
-                hOffset = 0.0f;
-                break;
+            getLabelAlignmentInfo(annotations[i], font.get(), alignment, hOffset, vOffset);
 
-            case AlignRight:
-                alignment = TextLayout::HorizontalAlignment::Right;
-                hOffset = -2.0f;
-                break;
-
-            case AlignLeft:
-                alignment = TextLayout::HorizontalAlignment::Left;
-                if (annotations[i].markerRep != nullptr)
-                    hOffset = 2.0f + annotations[i].markerRep->size() / 2.0f;
-                else
-                    hOffset = 2.0f;
-                break;
-            }
-
-            switch (annotations[i].valign)
-            {
-            case VerticalAlignCenter:
-                vOffset = -static_cast<float>(font->getHeight()) / 2.0f;
-                break;
-            case VerticalAlignTop:
-                vOffset = -static_cast<float>(font->getHeight());
-                break;
-            case VerticalAlignBottom:
-                vOffset = 0.0f;
-                break;
-            }
             layout.setHorizontalAlignment(alignment);
             renderAnnotationLabel(annotations[i], layout, hOffset, vOffset, 0.0f, m);
         }
@@ -4313,10 +4336,6 @@ Renderer::renderAnnotations(vector<Annotation>::iterator startIter,
         float z = fisheye ? (1.0f - (iter->position.z() - nearDist) / d0 * 2.0f) : (d1 + d2 / -iter->position.z());
         float ndc_z = std::clamp(z, -1.0f, 1.0f);
 
-        // Offsets to left align label
-        float labelHOffset = 0.0f;
-        float labelVOffset = 0.0f;
-
         if (iter->markerRep != nullptr)
         {
             renderAnnotationMarker(*iter, layout, ndc_z, m);
@@ -4324,10 +4343,13 @@ Renderer::renderAnnotations(vector<Annotation>::iterator startIter,
 
         if (!iter->labelText.empty())
         {
-            if (iter->markerRep != nullptr)
-                labelHOffset += std::trunc(iter->markerRep->size() / 2.0f) + 3.0f;
+            TextLayout::HorizontalAlignment alignment = TextLayout::HorizontalAlignment::Left;
+            float labelHOffset = 0.0f;
+            float labelVOffset = 0.0f;
 
-            layout.setHorizontalAlignment(TextLayout::HorizontalAlignment::Left);
+            getLabelAlignmentInfo(*iter, font.get(), alignment, labelHOffset, labelVOffset);
+
+            layout.setHorizontalAlignment(alignment);
             renderAnnotationLabel(*iter, layout, labelHOffset, labelVOffset, ndc_z, m);
         }
     }
@@ -4384,7 +4406,7 @@ void Renderer::markersToAnnotations(const celestia::MarkerList& markers,
             addAnnotation(*a, &(marker.representation()), "",
                           marker.representation().color(),
                           offset.cast<float>(),
-                          AlignLeft, VerticalAlignTop, symbolSize);
+                          LabelHorizontalAlignment::Start, LabelVerticalAlignment::Top, symbolSize);
         }
     }
 }
@@ -5048,13 +5070,13 @@ Renderer::selectionToAnnotation(const Selection &sel,
     {
         addSortedAnnotation(&cursorRep, "", SelectionCursorColor,
                             offset.cast<float>(),
-                            AlignLeft, VerticalAlignTop, symbolSize);
+                            LabelHorizontalAlignment::Start, LabelVerticalAlignment::Top, symbolSize);
     }
     else
     {
         addBackgroundAnnotation(&cursorRep, "", SelectionCursorColor,
                                 offset.cast<float>(),
-                                AlignLeft, VerticalAlignTop, symbolSize);
+                                LabelHorizontalAlignment::Start, LabelVerticalAlignment::Top, symbolSize);
     }
 
     Color occludedCursorColor(SelectionCursorColor.red(),
@@ -5063,7 +5085,7 @@ Renderer::selectionToAnnotation(const Selection &sel,
                               0.4f);
     addForegroundAnnotation(&cursorRep, "", occludedCursorColor,
                             offset.cast<float>(),
-                            AlignLeft, VerticalAlignTop, symbolSize);
+                            LabelHorizontalAlignment::Start, LabelVerticalAlignment::Top, symbolSize);
     return true;
 }
 
