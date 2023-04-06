@@ -8,9 +8,6 @@
 // of the License, or (at your option) any later version.
 
 #include <vector>
-#include <unicode/ubidi.h>
-#include <unicode/ushape.h>
-#include <unicode/ustring.h>
 
 #include "flag.h"
 #include "unicode.h"

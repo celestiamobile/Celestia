@@ -10,7 +10,7 @@
 #pragma once
 
 #include <string>
-#include <unicode/umachine.h>
+#include <icu.h>
 
 namespace celestia::util
 {
