@@ -2533,41 +2533,6 @@ static int celestia_setaudionopause(lua_State* l)
     return 0;
 }
 
-static int celestia_loadfragment(lua_State* l)
-{
-    Celx_CheckArgs(l, 3, 4, "Function celestia:from_ssc requires two or three arguments");
-    CelestiaCore* appCore = this_celestia(l);
-    const char* type = Celx_SafeGetString(l, 2, AllErrors, "First argument to celestia:loadfragment must be a string");
-    const char* frag = Celx_SafeGetString(l, 3, AllErrors, "Second argument to celestia:loadfragment must be a string");
-    if (type == nullptr || frag == nullptr)
-    {
-        lua_pushboolean(l, false);
-        return 1;
-    }
-    const char* dir = Celx_SafeGetString(l, 3, WrongType, "Third argument to celestia:loadfragment must be a string");
-    if (dir == nullptr)
-        dir = "";
-
-    bool ret = false;
-    Universe *u = appCore->getSimulation()->getUniverse();
-    istringstream in(frag);
-    if (compareIgnoringCase(type, "ssc") == 0)
-    {
-        ret = LoadSolarSystemObjects(in, *u, dir);
-    }
-    else if (compareIgnoringCase(type, "stc") == 0)
-    {
-        ret = u->getStarCatalog()->load(in, dir);
-    }
-    else if (compareIgnoringCase(type, "dsc") == 0)
-    {
-        ret = u->getDSOCatalog()->load(in, dir);
-    }
-
-    lua_pushboolean(l, ret);
-    return 1;
-}
-
 static int celestia_version(lua_State* l)
 {
     lua_pushstring(l, VERSION);
@@ -2699,8 +2664,6 @@ void CreateCelestiaMetaTable(lua_State* l)
     Celx_RegisterMethod(l, "setaudioloop", celestia_setaudioloop);
     Celx_RegisterMethod(l, "setaudionopause", celestia_setaudionopause);
 
-    Celx_RegisterMethod(l, "loadfragment", celestia_loadfragment);
-
     Celx_RegisterMethod(l, "version", celestia_version);
 
     lua_pop(l, 1);
@@ -2723,8 +2686,11 @@ static int celestia_getparamstring(lua_State* l)
     CelestiaCore* appCore = this_celestia(l);
     const char* s = Celx_SafeGetString(l, 2, AllErrors, "Argument to celestia:getparamstring must be a string");
     CelestiaConfig* config = appCore->getConfig();
-    const std::string* paramString = config->configParams->getString(s);
-    lua_pushstring(l, paramString == nullptr ? "" : paramString->c_str());
+    if (auto params = config->configParams.getHash(); params != nullptr)
+    {
+        const std::string* paramString = params->getString(s);
+        lua_pushstring(l, paramString == nullptr ? "" : paramString->c_str());
+    }
     return 1;
 }
 
