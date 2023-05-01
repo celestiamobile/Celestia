@@ -17,6 +17,7 @@
 #include <celutil/gettext.h>
 #include <celutil/logger.h>
 #include <celutil/tokenizer.h>
+#include "category.h"
 #include "galaxy.h"
 #include "globular.h"
 #include "parser.h"
@@ -82,7 +83,7 @@ void DSODatabase::getCompletion(std::vector<std::string>& completion, std::strin
 
 std::string DSODatabase::getDSOName(const DeepSkyObject* const & dso, bool i18n) const
 {
-    AstroCatalog::IndexNumber catalogNumber    = dso->getIndex();
+    AstroCatalog::IndexNumber catalogNumber = dso->getIndex();
 
     if (namesDB != nullptr)
     {
@@ -107,9 +108,8 @@ std::string DSODatabase::getDSONameList(const DeepSkyObject* const & dso, const 
 {
     std::string dsoNames;
 
-    auto catalogNumber   = dso->getIndex();
-
-    DSONameDatabase::NumberIndex::const_iterator iter = namesDB->getFirstNameIter(catalogNumber);
+    auto catalogNumber = dso->getIndex();
+    auto iter = namesDB->getFirstNameIter(catalogNumber);
 
     unsigned int count = 0;
     while (iter != namesDB->getFinalNameIter() && iter->first == catalogNumber && count < maxNames)
@@ -245,7 +245,7 @@ bool DSODatabase::load(std::istream& in, const fs::path& resourcePath)
 
         if (obj != nullptr && obj->load(objParams, resourcePath))
         {
-            obj->loadCategories(objParams, DataDisposition::Add, resourcePath.string());
+            UserCategory::loadCategories(obj, *objParams, DataDisposition::Add, resourcePath.string());
 
             // Ensure that the DSO array is large enough
             if (nDSOs == capacity)

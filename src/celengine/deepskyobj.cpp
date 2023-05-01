@@ -8,11 +8,14 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
+#include "deepskyobj.h"
+
 #include <cmath>
 
 #include <celmath/intersect.h>
 #include <celmath/sphere.h>
-#include "deepskyobj.h"
+#include "astro.h"
+#include "hash.h"
 
 Eigen::Vector3d DeepSkyObject::getPosition() const
 {
@@ -193,10 +196,4 @@ bool DeepSkyObject::load(const AssociativeArray* params, const fs::path& resPath
     }
 
     return true;
-}
-
-Selection DeepSkyObject::toSelection()
-{
-//    std::cout << "DeepSkyObject::toSelection()\n";
-    return Selection(this);
 }

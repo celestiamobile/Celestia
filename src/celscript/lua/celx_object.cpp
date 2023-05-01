@@ -485,25 +485,27 @@ static int object_type(lua_State* l)
     celx.checkArgs(1, 1, "No arguments expected to function object:type");
 
     Selection* sel = this_object(l);
-    const char* tname = "unknown";
+    const char* tname;
     switch (sel->getType())
     {
-    case Selection::Type_Body:
+    case SelectionType::Body:
         tname = bodyTypeName(sel->body()->getClassification());
         break;
-    case Selection::Type_Star:
+    case SelectionType::Star:
         tname = "star";
         break;
-    case Selection::Type_DeepSky:
+    case SelectionType::DeepSky:
         tname = sel->deepsky()->getObjTypeName();
         break;
-    case Selection::Type_Location:
+    case SelectionType::Location:
         tname = "location";
         break;
-    case Selection::Type_Nil:
+    case SelectionType::None:
         tname = "null";
         break;
     default:
+        assert(0);
+        tname = "unknown";
         break;
     }
 
@@ -520,18 +522,18 @@ static int object_name(lua_State* l)
     Selection* sel = this_object(l);
     switch (sel->getType())
     {
-        case Selection::Type_Body:
+        case SelectionType::Body:
             lua_pushstring(l, sel->body()->getName().c_str());
             break;
-        case Selection::Type_DeepSky:
+        case SelectionType::DeepSky:
             lua_pushstring(l, celx.appCore(AllErrors)->getSimulation()->getUniverse()
                            ->getDSOCatalog()->getDSOName(sel->deepsky()).c_str());
             break;
-        case Selection::Type_Star:
+        case SelectionType::Star:
             lua_pushstring(l, celx.appCore(AllErrors)->getSimulation()->getUniverse()
                            ->getStarCatalog()->getStarName(*(sel->star())).c_str());
             break;
-        case Selection::Type_Location:
+        case SelectionType::Location:
             lua_pushstring(l, sel->location()->getName().c_str());
             break;
         default:
@@ -550,18 +552,18 @@ static int object_localname(lua_State* l)
     Selection* sel = this_object(l);
     switch (sel->getType())
     {
-        case Selection::Type_Body:
+        case SelectionType::Body:
             lua_pushstring(l, sel->body()->getName(true).c_str());
             break;
-        case Selection::Type_DeepSky:
+        case SelectionType::DeepSky:
             lua_pushstring(l, celx.appCore(AllErrors)->getSimulation()->getUniverse()
                            ->getDSOCatalog()->getDSOName(sel->deepsky(), true).c_str());
             break;
-        case Selection::Type_Star:
+        case SelectionType::Star:
             lua_pushstring(l, celx.appCore(AllErrors)->getSimulation()->getUniverse()
                            ->getStarCatalog()->getStarName(*(sel->star()), true).c_str());
             break;
-        case Selection::Type_Location:
+        case SelectionType::Location:
             lua_pushstring(l, sel->location()->getName(true).c_str());
             break;
         default:
@@ -1504,8 +1506,8 @@ static int object_getcategories(lua_State *l)
 
     Selection *s = celx.getThis<Selection>();
     checkEmpty(celx, s);
-    AstroObject::CategorySet *set = s->object()->getCategories();
-    return celx.pushIterable<UserCategory*>(set);
+    const auto* set = UserCategory::getCategories(*s);
+    return celx.pushIterable<UserCategoryId>(set);
 }
 
 static int object_addtocategory(lua_State *l)
@@ -1517,17 +1519,16 @@ static int object_addtocategory(lua_State *l)
     bool ret;
     if (celx.isUserData(2))
     {
-        UserCategory *c = *celx.getUserData<UserCategory*>(2);
-        if (c == nullptr)
-            return celx.push(false);
-        ret = s->object()->addToCategory(c);
+        auto c = *celx.getUserData<UserCategoryId>(2);
+        ret = UserCategory::addObject(*s, c);
     }
     else
     {
         const char *n = celx.safeGetString(2, AllErrors, "Argument to object:addtocategory() must be string or userdata");
         if (n == nullptr)
             return celx.push(false);
-        ret = s->object()->addToCategory(n);
+        auto c = UserCategory::find(n);
+        ret = UserCategory::addObject(*s, c);
     }
     return celx.push(ret);
 }
@@ -1541,17 +1542,16 @@ static int object_removefromcategory(lua_State *l)
     bool ret;
     if (celx.isUserData(2))
     {
-        UserCategory *c = *celx.getUserData<UserCategory*>(2);
-        if (c == nullptr)
-            return celx.push(false);
-        ret = s->object()->removeFromCategory(c);
+        UserCategoryId c = *celx.getUserData<UserCategoryId>(2);
+        ret = UserCategory::removeObject(*s, c);
     }
     else
     {
         const char *n = celx.safeGetString(2, AllErrors, "Argument to object:addtocategory() must be string or userdata");
         if (n == nullptr)
             return celx.push(false);
-        ret = s->object()->removeFromCategory(n);
+        auto c = UserCategory::find(n);
+        ret = UserCategory::removeObject(*s, c);
     }
     return celx.push(ret);
 }

@@ -7,42 +7,45 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#ifndef _CELENGINE_SELECTION_H_
-#define _CELENGINE_SELECTION_H_
+#pragma once
 
+#include <cstddef>
+#include <functional>
 #include <string>
 #include <celengine/univcoord.h>
 #include <Eigen/Core>
 
-class AstroObject;
 class Star;
 class Body;
 class Location;
 class DeepSkyObject;
 
+enum class SelectionType
+{
+    None,
+    Star,
+    Body,
+    DeepSky,
+    Location,
+};
+
+
 class Selection
 {
  public:
-    enum Type
-    {
-        Type_Nil,
-        Type_Star,
-        Type_Body,
-        Type_DeepSky,
-        Type_Location,
-        Type_Generic
-    };
-
     Selection() = default;
-    Selection(AstroObject *o) : type(Type_Generic), obj(o) { checkNull(); };
-    Selection(Star* star) : type(Type_Star), obj(star) { checkNull(); };
-    Selection(Body* body) : type(Type_Body), obj(body) { checkNull(); };
-    Selection(DeepSkyObject* deepsky) : type(Type_DeepSky), obj(deepsky) {checkNull(); };
-    Selection(Location* location) : type(Type_Location), obj(location) { checkNull(); };
-    Selection(const Selection& sel) : type(sel.type), obj(sel.obj) {};
+    Selection(Star* star) : type(SelectionType::Star), obj(star) { checkNull(); };
+    Selection(Body* body) : type(SelectionType::Body), obj(body) { checkNull(); };
+    Selection(DeepSkyObject* deepsky) : type(SelectionType::DeepSky), obj(deepsky) {checkNull(); };
+    Selection(Location* location) : type(SelectionType::Location), obj(location) { checkNull(); };
     ~Selection() = default;
 
-    bool empty() const { return type == Type_Nil; }
+    Selection(const Selection&) = default;
+    Selection& operator=(const Selection&) = default;
+    Selection(Selection&&) noexcept = default;
+    Selection& operator=(Selection&&) noexcept = default;
+
+    bool empty() const { return type == SelectionType::None; }
     double radius() const;
     UniversalCoord getPosition(double t) const;
     Eigen::Vector3d getVelocity(double t) const;
@@ -53,39 +56,35 @@ class Selection
 
     Star* star() const
     {
-        return type == Type_Star ? static_cast<Star*>(obj) : nullptr;
+        return type == SelectionType::Star ? static_cast<Star*>(obj) : nullptr;
     }
 
     Body* body() const
     {
-        return type == Type_Body ? static_cast<Body*>(obj) : nullptr;
+        return type == SelectionType::Body ? static_cast<Body*>(obj) : nullptr;
     }
 
     DeepSkyObject* deepsky() const
     {
-        return type == Type_DeepSky ? static_cast<DeepSkyObject*>(obj) : nullptr;
+        return type == SelectionType::DeepSky ? static_cast<DeepSkyObject*>(obj) : nullptr;
     }
 
     Location* location() const
     {
-        return type == Type_Location ? static_cast<Location*>(obj) : nullptr;
+        return type == SelectionType::Location ? static_cast<Location*>(obj) : nullptr;
     }
 
-    AstroObject *object() const
-    {
-        return type != Type_Nil ? static_cast<AstroObject*>(obj) : nullptr;
-    }
-
-    Type getType() const { return type; }
+    SelectionType getType() const { return type; }
 
  private:
-    Type type { Type_Nil };
+    SelectionType type { SelectionType::None };
     void* obj { nullptr };
 
-    void checkNull() { if (obj == nullptr) type = Type_Nil; }
+    void checkNull() { if (obj == nullptr) type = SelectionType::None; }
 
     friend bool operator==(const Selection& s0, const Selection& s1);
     friend bool operator!=(const Selection& s0, const Selection& s1);
+    friend struct std::hash<Selection>;
 };
 
 
@@ -99,9 +98,14 @@ inline bool operator!=(const Selection& s0, const Selection& s1)
     return s0.type != s1.type || s0.obj != s1.obj;
 }
 
-/*inline bool operator<(const Selection& s0, const Selection& s1)
+namespace std
 {
-    return s0.type < s1.type || s0.obj < s1.obj;
-}*/
-
-#endif // _CELENGINE_SELECTION_H_
+template<>
+struct hash<Selection>
+{
+    std::size_t operator()(const Selection& sel) const noexcept
+    {
+        return hash<const void*>()(sel.obj);
+    }
+};
+}

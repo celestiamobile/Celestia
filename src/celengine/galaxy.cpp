@@ -38,6 +38,8 @@
 namespace gl = celestia::gl;
 namespace util = celestia::util;
 
+using namespace std::literals::string_view_literals;
+
 namespace
 {
 
@@ -537,7 +539,7 @@ void Galaxy::setType(const std::string& typeStr)
         type = iter->type;
 }
 
-void Galaxy::setForm(const std::string& customTmpName)
+void Galaxy::setForm(const fs::path& customTmpName, const fs::path& resDir)
 {
     if (customTmpName.empty())
     {
@@ -545,7 +547,10 @@ void Galaxy::setForm(const std::string& customTmpName)
     }
     else
     {
-        form = getGalacticFormManager()->getCustomForm(fs::path("models") / customTmpName);
+        if (fs::path fullName = resDir / customTmpName; fs::exists(fullName))
+            form = getGalacticFormManager()->getCustomForm(fullName);
+        else
+            form = getGalacticFormManager()->getCustomForm(fs::path("models") / customTmpName);
     }
 }
 
@@ -598,14 +603,13 @@ bool Galaxy::load(const AssociativeArray* params, const fs::path& resPath)
         setType(*typeName);
     }
 
-
-    if (const std::string* customTmpName = params->getString("CustomTemplate"); customTmpName == nullptr)
+    if (auto customTmpName = params->getPath("CustomTemplate"sv); customTmpName.has_value())
     {
-        setForm("");
+        setForm(customTmpName.value(), resPath);
     }
     else
     {
-        setForm(*customTmpName);
+        setForm({});
     }
 
     return DeepSkyObject::load(params, resPath);
