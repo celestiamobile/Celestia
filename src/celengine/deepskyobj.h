@@ -31,6 +31,14 @@ class Galaxy;
 class Globular;
 class OpenCluster;
 
+enum class DeepSkyObjectType
+{
+    Galaxy,
+    Globular,
+    Nebula,
+    OpenCluster,
+};
+
 class DeepSkyObject
 {
 public:
@@ -39,8 +47,6 @@ public:
 
     Eigen::Vector3d getPosition() const;
     void setPosition(const Eigen::Vector3d&);
-
-    static void hsv2rgb( float*, float*, float*, float, float, float);
 
     virtual const char* getType() const = 0;
     virtual void setType(const std::string&) = 0;
@@ -74,19 +80,12 @@ public:
     bool isClickable() const { return clickable; }
     void setClickable(bool _clickable) { clickable = _clickable; }
 
-
-    virtual const char* getObjTypeName() const = 0;
+    virtual DeepSkyObjectType getObjType() const = 0;
 
     virtual bool pick(const Eigen::ParametrizedLine<double, 3>& ray,
                       double& distanceToPicker,
                       double& cosAngleToBoundCenter) const = 0;
     virtual bool load(const AssociativeArray*, const fs::path& resPath);
-    virtual void render(const Eigen::Vector3f& offset,
-                        const Eigen::Quaternionf& viewerOrientation,
-                        float brightness,
-                        float pixelSize,
-                        const Matrices& m,
-                        Renderer*) = 0;
 
     virtual uint64_t getRenderMask() const { return 0; }
     virtual unsigned int getLabelMask() const { return 0; }

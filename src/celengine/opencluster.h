@@ -28,17 +28,11 @@ class OpenCluster : public DeepSkyObject
               double& distanceToPicker,
               double& cosAngleToBoundCenter) const override;
     bool load(const AssociativeArray*, const fs::path&) override;
-    void render(const Eigen::Vector3f& offset,
-                const Eigen::Quaternionf& viewerOrientation,
-                float brightness,
-                float pixelSize,
-                const Matrices& m,
-                Renderer* r = nullptr) override;
 
     uint64_t getRenderMask() const override;
     unsigned int getLabelMask() const override;
 
-    const char* getObjTypeName() const override;
+    DeepSkyObjectType getObjType() const override;
 
  public:
     enum ClusterType

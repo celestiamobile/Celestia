@@ -39,9 +39,9 @@ string OpenCluster::getDescription() const
 
 
 
-const char* OpenCluster::getObjTypeName() const
+DeepSkyObjectType OpenCluster::getObjType() const
 {
-    return "opencluster";
+    return DeepSkyObjectType::OpenCluster;
 }
 
 
@@ -59,20 +59,6 @@ bool OpenCluster::load(const AssociativeArray* params, const fs::path& resPath)
     // No parameters specific to open cluster, though a list of member stars
     // could be useful.
     return DeepSkyObject::load(params, resPath);
-}
-
-
-void OpenCluster::render(const Vector3f& /*unused*/,
-                         const Quaternionf& /*unused*/,
-                         float /*unused*/,
-                         float /*unused*/,
-                         const Matrices& /*m*/,
-                         Renderer* /*unused*/)
-{
-    // Nothing to do right now; open clusters are only visible as their
-    // constituent stars and a label when labels are turned on.  A good idea
-    // would be to add an 'sky chart' mode, in which clusters are rendered as
-    // circles.
 }
 
 

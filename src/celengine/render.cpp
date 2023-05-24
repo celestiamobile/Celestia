@@ -61,6 +61,10 @@
 #include <celrender/eclipticlinerenderer.h>
 #include <celrender/largestarrenderer.h>
 #include <celrender/linerenderer.h>
+#include <celrender/galaxyrenderer.h>
+#include <celrender/globularrenderer.h>
+#include <celrender/nebularenderer.h>
+#include <celrender/openclusterrenderer.h>
 #include <celrender/gl/buffer.h>
 #include <celrender/gl/vertexobject.h>
 #include <celutil/arrayvector.h>
@@ -87,14 +91,8 @@ using namespace std;
 using namespace celestia;
 using namespace celmath;
 using namespace celestia::engine;
+using namespace celestia::render;
 using celestia::util::GetLogger;
-using celestia::render::AsterismRenderer;
-using celestia::render::AtmosphereRenderer;
-using celestia::render::BoundariesRenderer;
-using celestia::render::CometRenderer;
-using celestia::render::EclipticLineRenderer;
-using celestia::render::LargeStarRenderer;
-using celestia::render::LineRenderer;
 
 #define FOV           45.0f
 #define NEAR_DIST      0.5f
@@ -279,8 +277,13 @@ Renderer::Renderer() :
     m_atmosphereRenderer(std::make_unique<AtmosphereRenderer>(*this)),
     m_cometRenderer(std::make_unique<CometRenderer>(*this)),
     m_eclipticLineRenderer(std::make_unique<EclipticLineRenderer>(*this)),
+    m_galaxyRenderer(std::make_unique<GalaxyRenderer>(*this)),
+    m_globularRenderer(std::make_unique<GlobularRenderer>(*this)),
     m_largeStarRenderer(std::make_unique<LargeStarRenderer>(*this)),
-    m_hollowMarkerRenderer(std::make_unique<LineRenderer>(*this, 1.0f, LineRenderer::PrimType::Lines, LineRenderer::StorageType::Static))
+    m_hollowMarkerRenderer(std::make_unique<LineRenderer>(*this, 1.0f, LineRenderer::PrimType::Lines, LineRenderer::StorageType::Static)),
+    m_nebulaRenderer(std::make_unique<NebulaRenderer>(*this)),
+    m_openClusterRenderer(std::make_unique<OpenClusterRenderer>(*this))
+
 {
     pointStarVertexBuffer = new PointStarVertexBuffer(*this, 2048);
     glareVertexBuffer = new PointStarVertexBuffer(*this, 2048);
@@ -589,9 +592,9 @@ void Renderer::resize(int width, int height)
 
 float Renderer::calcPixelSize(float fovY, float windowHeight)
 {
-    if (getProjectionMode() == ProjectionMode::FisheyeMode)
-        return 2.0f / windowHeight;
-    return 2 * (float) tan(degToRad(fovY / 2.0)) / (float) windowHeight;
+    return (getProjectionMode() == ProjectionMode::FisheyeMode)
+        ? 2.0f / windowHeight
+        : 2.0f * tan(degToRad(fovY * 0.5f)) / windowHeight;
 }
 
 void Renderer::setFieldOfView(float _fov)
@@ -1544,11 +1547,7 @@ void Renderer::draw(const Observer& observer,
 
     // Set up the projection and modelview matrices.
     // We'll usethem for positioning star and planet labels.
-    float aspectRatio = getAspectRatio();
-    if (getProjectionMode() == Renderer::ProjectionMode::FisheyeMode)
-        m_projMatrix = Ortho(-aspectRatio, aspectRatio, -1.0f, 1.0f, NEAR_DIST, FAR_DIST);
-    else
-        m_projMatrix = Perspective(fov, aspectRatio, NEAR_DIST, FAR_DIST);
+    buildProjectionMatrix(m_projMatrix, NEAR_DIST, FAR_DIST);
     m_modelMatrix = Affine3f(getCameraOrientation()).matrix();
     m_MVPMatrix = m_projMatrix * m_modelMatrix;
 
@@ -3916,6 +3915,18 @@ void Renderer::renderDeepSkyObjects(const Universe& universe,
 {
     DSORenderer dsoRenderer;
 
+    m_galaxyRenderer->update(observer.getOrientationf(), pixelSize, fov);
+    dsoRenderer.galaxyRenderer = m_galaxyRenderer.get();
+
+    m_globularRenderer->update(observer.getOrientationf(), pixelSize, fov);
+    dsoRenderer.globularRenderer = m_globularRenderer.get();
+
+    m_nebulaRenderer->update(observer.getOrientationf(), pixelSize, fov);
+    dsoRenderer.nebulaRenderer = m_nebulaRenderer.get();
+
+    m_openClusterRenderer->update(observer.getOrientationf(), pixelSize, fov);
+    dsoRenderer.openClusterRenderer = m_openClusterRenderer.get();
+
     Vector3d obsPos     = observer.getPosition().toLy();
 
     DSODatabase* dsoDB  = universe.getDSOCatalog();
@@ -3965,6 +3976,11 @@ void Renderer::renderDeepSkyObjects(const Universe& universe,
 #else
                             nullptr);
 #endif
+
+    m_galaxyRenderer->render();
+    m_globularRenderer->render();
+    m_nebulaRenderer->render();
+    m_openClusterRenderer->render();
 
     // clog << "DSOs processed: " << dsoRenderer.dsosProcessed << endl;
 }
@@ -4049,7 +4065,7 @@ void Renderer::renderSkyGrids(const Observer& observer)
     }
 
     if ((renderFlags & ShowEcliptic) != 0)
-        renderEclipticLine();
+        m_eclipticLineRenderer->render();
 }
 
 void Renderer::labelConstellations(const AsterismList& asterisms,
@@ -5309,18 +5325,14 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
 
         // Set up a perspective projection using the current interval's near and
         // far clip planes.
-        float aspectRatio = getAspectRatio();
         Matrix4f proj;
-        if (getProjectionMode() == Renderer::ProjectionMode::FisheyeMode)
-            proj = Ortho(-aspectRatio, aspectRatio, -1.0f, 1.0f, nearPlaneDistance, farPlaneDistance);
-        else
-            proj = Perspective(fov, aspectRatio, nearPlaneDistance, farPlaneDistance);
+        buildProjectionMatrix(proj, nearPlaneDistance, farPlaneDistance);
         Matrices m = { &proj, &m_modelMatrix };
 
         setCurrentProjectionMatrix(proj);
 
         Frustum intervalFrustum(degToRad(fov),
-                                aspectRatio,
+                                getAspectRatio(),
                                 nearPlaneDistance,
                                 farPlaneDistance);
 
@@ -5446,8 +5458,10 @@ Renderer::setPipelineState(const Renderer::PipelineState &ps) noexcept
     }
 }
 
-void Renderer::renderEclipticLine()
+void Renderer::buildProjectionMatrix(Eigen::Matrix4f &mat, float nearZ, float farZ) const
 {
-    if ((renderFlags & ShowEcliptic) != 0)
-        m_eclipticLineRenderer->render();
+    float aspectRatio = getAspectRatio();
+    mat = (getProjectionMode() == Renderer::ProjectionMode::FisheyeMode)
+        ? celmath::Ortho(-aspectRatio, aspectRatio, -1.0f, 1.0f, nearZ, farZ)
+        : celmath::Perspective(fov, aspectRatio, nearZ, farZ);
 }
