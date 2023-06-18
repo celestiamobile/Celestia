@@ -272,19 +272,19 @@ class CelestiaGLProgram
 
     CelestiaGLProgramShadow shadows[MaxShaderLights][MaxShaderEclipseShadows];
 
-    FloatShaderParameter floatParam(const std::string&);
-    IntegerShaderParameter intParam(const std::string&);
-    IntegerShaderParameter samplerParam(const std::string&);
-    Vec3ShaderParameter vec3Param(const std::string&);
-    Vec4ShaderParameter vec4Param(const std::string&);
-    Mat3ShaderParameter mat3Param(const std::string&);
-    Mat4ShaderParameter mat4Param(const std::string&);
+    FloatShaderParameter floatParam(const char*);
+    IntegerShaderParameter intParam(const char*);
+    IntegerShaderParameter samplerParam(const char*);
+    Vec3ShaderParameter vec3Param(const char*);
+    Vec4ShaderParameter vec4Param(const char*);
+    Mat3ShaderParameter mat3Param(const char*);
+    Mat4ShaderParameter mat4Param(const char*);
 
     Mat4ShaderParameter ModelViewMatrix;
     Mat4ShaderParameter ProjectionMatrix;
     Mat4ShaderParameter MVPMatrix;
 
-    int attribIndex(const std::string&) const;
+    int attribIndex(const char*) const;
 
  private:
     void initCommonParameters();
@@ -310,18 +310,18 @@ class ShaderManager
     ~ShaderManager();
 
     CelestiaGLProgram* getShader(const ShaderProperties&);
-    CelestiaGLProgram* getShader(const std::string&);
-    CelestiaGLProgram* getShader(const std::string&, const std::string&, const std::string&);
-    CelestiaGLProgram* getShaderGL3(const std::string&, const GeomShaderParams* = nullptr);
-    CelestiaGLProgram* getShaderGL3(const std::string&, const std::string&, const std::string&, const std::string&);
+    CelestiaGLProgram* getShader(std::string_view);
+    CelestiaGLProgram* getShader(std::string_view, std::string_view, std::string_view);
+    CelestiaGLProgram* getShaderGL3(std::string_view, const GeomShaderParams* = nullptr);
+    CelestiaGLProgram* getShaderGL3(std::string_view, std::string_view, std::string_view, std::string_view);
 
     void setFisheyeEnabled(bool enabled);
 
  private:
     CelestiaGLProgram* buildProgram(const ShaderProperties&);
-    CelestiaGLProgram* buildProgram(const std::string&, const std::string&);
-    CelestiaGLProgram* buildProgramGL3(const std::string&, const std::string&);
-    CelestiaGLProgram* buildProgramGL3(const std::string&, const std::string&, const std::string&, const GeomShaderParams* = nullptr);
+    CelestiaGLProgram* buildProgram(std::string_view, std::string_view);
+    CelestiaGLProgram* buildProgramGL3(std::string_view, std::string_view);
+    CelestiaGLProgram* buildProgramGL3(std::string_view, std::string_view, std::string_view, const GeomShaderParams* = nullptr);
 
     GLVertexShader* buildVertexShader(const ShaderProperties&);
     GLFragmentShader* buildFragmentShader(const ShaderProperties&);
@@ -339,7 +339,7 @@ class ShaderManager
     GLFragmentShader* buildParticleFragmentShader(const ShaderProperties&);
 
     std::map<ShaderProperties, CelestiaGLProgram*> dynamicShaders;
-    std::map<std::string, CelestiaGLProgram*> staticShaders;
+    std::map<std::string_view, CelestiaGLProgram*> staticShaders;
 
     bool fisheyeEnabled { false };
 };
