@@ -492,6 +492,9 @@ void CelestiaAppWindow::readSettings()
 
     settings.endGroup();
 
+    if (settings.value("LimitOfKnowledge", false).toBool())
+        m_appCore->getSimulation()->getActiveObserver()->setDisplayedSurface("limit of knowledge");
+
     setFPS(settings.value("fps", 0).toInt());
 
     // Render settings read in qtglwidget
@@ -539,6 +542,9 @@ void CelestiaAppWindow::writeSettings()
     settings.setValue("StarsColor", static_cast<int>(colorsst));
 
     Simulation* simulation = m_appCore->getSimulation();
+
+    bool limitOfknowledge = simulation->getActiveObserver()->getDisplayedSurface() == "limit of knowledge";
+    settings.setValue("LimitOfKnowledge", limitOfknowledge);
 
     settings.beginGroup("Preferences");
     settings.setValue("VisualMagnitude", simulation->getFaintestVisible());
@@ -1124,10 +1130,10 @@ void CelestiaAppWindow::slotShowAbout()
         "by the Free Software Foundation; either version 2 of the License, "
         "or (at your option) any later version.</p>"
 
-        "<p>Main site: <a href=\"https://celestia.space/\">"
-        "https://celestia.space/</a><br>"
-        "Forum: <a href=\"https://celestia.space/forum/\">"
-        "https://celestia.space/forum/</a><br>"
+        "<p>Main site: <a href=\"https://celestiaproject.space/\">"
+        "https://celestiaproject.space/</a><br>"
+        "Forum: <a href=\"https://celestiaproject.space/forum/\">"
+        "https://celestiaproject.space/forum/</a><br>"
         "GitHub project: <a href=\"https://github.com/CelestiaProject/Celestia\">"
         "https://github.com/CelestiaProject/Celestia</a></p>"
         "</html>"

@@ -186,16 +186,15 @@ void Universe::markObject(const Selection& sel,
                           celestia::MarkerSizing sizing)
 {
     auto iter = std::find_if(markers->begin(), markers->end(),
-                             [&sel](celestia::Marker& m) { return m.object() == sel; });
+                             [&sel](const auto& m) { return m.object() == sel; });
     if (iter != markers->end())
     {
         // Handle the case when the object is already marked.  If the
         // priority is higher or equal to the existing marker, replace it.
         // Otherwise, do nothing.
-        if (priority >= iter->priority())
-            markers->erase(iter);
-        else
+        if (priority < iter->priority())
             return;
+        markers->erase(iter);
     }
 
     celestia::Marker marker(sel);
@@ -210,7 +209,7 @@ void Universe::markObject(const Selection& sel,
 void Universe::unmarkObject(const Selection& sel, int priority)
 {
     auto iter = std::find_if(markers->begin(), markers->end(),
-                             [&sel](celestia::Marker& m) { return m.object() == sel; });
+                             [&sel](const auto& m) { return m.object() == sel; });
     if (iter != markers->end() && priority >= iter->priority())
         markers->erase(iter);
 }
@@ -225,7 +224,7 @@ void Universe::unmarkAll()
 bool Universe::isMarked(const Selection& sel, int priority) const
 {
     auto iter = std::find_if(markers->begin(), markers->end(),
-                             [&sel](celestia::Marker& m) { return m.object() == sel; });
+                             [&sel](const auto& m) { return m.object() == sel; });
     if (iter != markers->end())
         return iter->priority() >= priority;
 
@@ -238,7 +237,7 @@ class ClosestStarFinder : public StarHandler
 public:
     ClosestStarFinder(float _maxDistance, const Universe* _universe);
     ~ClosestStarFinder() = default;
-    void process(const Star& star, float distance, float appMag);
+    void process(const Star& star, float distance, float appMag) override;
 
 public:
     float maxDistance;
@@ -530,7 +529,7 @@ public:
     StarPicker(const Vector3f&, const Vector3f&, double, float);
     ~StarPicker() = default;
 
-    void process(const Star& /*star*/, float /*unused*/, float /*unused*/);
+    void process(const Star& /*star*/, float /*unused*/, float /*unused*/) override;
 
 public:
     const Star* pickedStar;
@@ -601,7 +600,7 @@ public:
                     float _maxDistance,
                     float angle);
     ~CloseStarPicker() = default;
-    void process(const Star& star, float lowPrecDistance, float appMag);
+    void process(const Star& star, float lowPrecDistance, float appMag) override;
 
 public:
     UniversalCoord pickOrigin;
@@ -720,7 +719,7 @@ public:
     DSOPicker(const Vector3d& pickOrigin, const Vector3d& pickDir, uint64_t renderFlags, float angle);
     ~DSOPicker() = default;
 
-    void process(DeepSkyObject* const &, double, float);
+    void process(DeepSkyObject* const &, double, float) override;
 
 public:
     Vector3d pickOrigin;

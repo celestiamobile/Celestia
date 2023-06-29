@@ -944,8 +944,9 @@ vector<string>* Body::getAlternateSurfaceNames() const
     vector<string>* names = new vector<string>();
     if (altSurfaces)
     {
-        for (const auto& s : *altSurfaces)
-            names->push_back(s.first);
+        std::transform(altSurfaces->begin(), altSurfaces->end(),
+                       std::back_inserter(*names),
+                       [](const auto& s) { return s.first; });
     }
 
     return names;
@@ -1004,7 +1005,7 @@ void Body::computeLocations()
     if (geometry == InvalidResource)
         return;
     Geometry* g = GetGeometryManager()->find(geometry);
-    if (!g)
+    if (g == nullptr)
         return;
 
     // TODO: Implement separate radius and bounding radius so that this hack is
@@ -1037,7 +1038,7 @@ void Body::computeLocations()
 void
 Body::addReferenceMark(ReferenceMark* refMark)
 {
-    if (!referenceMarks)
+    if (referenceMarks == nullptr)
         referenceMarks = new list<ReferenceMark*>();
     referenceMarks->push_back(refMark);
     recomputeCullingRadius();
@@ -1049,7 +1050,7 @@ Body::addReferenceMark(ReferenceMark* refMark)
 void
 Body::removeReferenceMark(const string& tag)
 {
-    if (referenceMarks)
+    if (referenceMarks != nullptr)
     {
         ReferenceMark* refMark = findReferenceMark(tag);
         if (refMark)
@@ -1069,13 +1070,15 @@ Body::removeReferenceMark(const string& tag)
 ReferenceMark*
 Body::findReferenceMark(const string& tag) const
 {
-    if (referenceMarks)
+    if (referenceMarks == nullptr)
+        return nullptr;
+
+    if (auto iter = std::find_if(referenceMarks->begin(),
+                                 referenceMarks->end(),
+                                 [&tag](const auto* rm) { return rm->getTag() == tag; });
+        iter != referenceMarks->end())
     {
-        for (const auto rm : *referenceMarks)
-        {
-            if (rm->getTag() == tag)
-                return rm;
-        }
+            return *iter;
     }
 
     return nullptr;

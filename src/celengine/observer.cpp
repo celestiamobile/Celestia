@@ -82,6 +82,8 @@ Observer::Observer(const Observer& o) :
     trackObject(o.trackObject),
     trackingOrientation(o.trackingOrientation),
     fov(o.fov),
+    zoom(o.zoom),
+    alternateZoom(o.alternateZoom),
     reverseFlag(o.reverseFlag),
     locationFilter(o.locationFilter),
     displayedSurface(o.displayedSurface)
@@ -107,6 +109,8 @@ Observer& Observer::operator=(const Observer& o)
     trackObject = o.trackObject;
     trackingOrientation = o.trackingOrientation;
     fov = o.fov;
+    zoom = o.zoom;
+    alternateZoom = o.alternateZoom;
     reverseFlag = o.reverseFlag;
     locationFilter = o.locationFilter;
     displayedSurface = o.displayedSurface;
@@ -258,18 +262,15 @@ void Observer::update(double dt, double timeScale)
     realTime += dt;
     simTime += (dt / 86400.0) * timeScale;
 
-    if (simTime >= maximumSimTime)
-        simTime = maximumSimTime;
-    if (simTime <= minimumSimTime)
-        simTime = minimumSimTime;
+    simTime = std::clamp(simTime, minimumSimTime, maximumSimTime);
 
     if (observerMode == Travelling)
     {
         // Compute the fraction of the trip that has elapsed; handle zero
         // durations correctly by skipping directly to the destination.
-        float t = 1.0;
+        double t = 1.0;
         if (journey.duration > 0)
-            t = static_cast<float>(std::clamp((realTime - journey.startTime) / journey.duration, 0.0, 1.0));
+            t = std::clamp((realTime - journey.startTime) / journey.duration, 0.0, 1.0);
 
         Vector3d jv = journey.to.offsetFromKm(journey.from);
         UniversalCoord p;
@@ -281,16 +282,16 @@ void Observer::update(double dt, double timeScale)
         // that the entire first half of the trip will be spent accelerating
         // and there will be no coasting at constant velocity.
         {
-            double u = t < 0.5 ? t * 2 : (1 - t) * 2;
+            double u = t < 0.5 ? t * 2.0 : (1.0 - t) * 2.0;
             double x;
             if (u < journey.accelTime)
             {
-                x = exp(journey.expFactor * u) - 1.0;
+                x = std::expm1(journey.expFactor * u); // expm1 == exp - 1
             }
             else
             {
                 x = exp(journey.expFactor * journey.accelTime) *
-                    (journey.expFactor * (u - journey.accelTime) + 1) - 1;
+                    (journey.expFactor * (u - journey.accelTime) + 1.0) - 1.0;
             }
 
             if (journey.traj == Linear)
@@ -1348,6 +1349,25 @@ void Observer::setFOV(float _fov)
     fov = _fov;
 }
 
+float Observer::getZoom() const
+{
+    return zoom;
+}
+
+void Observer::setZoom(float _zoom)
+{
+    zoom = _zoom;
+}
+
+float Observer::getAlternateZoom() const
+{
+    return alternateZoom;
+}
+
+void Observer::setAlternateZoom(float _alternateZoom)
+{
+    alternateZoom = _alternateZoom;
+}
 
 Vector3f Observer::getPickRay(float x, float y) const
 {
