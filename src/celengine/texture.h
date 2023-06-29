@@ -1,5 +1,6 @@
 // texture.h
 //
+// Copyright (C) 2003-present, Celestia Development Team
 // Copyright (C) 2001-2003, Chris Laurel
 //
 // This program is free software; you can redistribute it and/or
@@ -39,8 +40,8 @@ struct TextureTile
 class TexelFunctionObject
 {
  public:
-    TexelFunctionObject() {};
-    virtual ~TexelFunctionObject() {};
+    TexelFunctionObject() = default;
+    virtual ~TexelFunctionObject() = default;
     virtual void operator()(float u, float v, float w,
                             std::uint8_t* pixel) = 0;
 };
@@ -99,8 +100,16 @@ class Texture
     };
 
     // Format option flags
-    enum {
+    enum
+    {
         DXT5NormalMap = 1
+    };
+
+    enum Colorspace
+    {
+        DefaultColorspace = 0,
+        LinearColorspace  = 1,
+        sRGBColorspace    = 2
     };
 
  protected:
@@ -189,7 +198,8 @@ CreateProceduralCubeMap(int size, celestia::PixelFormat format,
 std::unique_ptr<Texture>
 LoadTextureFromFile(const fs::path& filename,
                     Texture::AddressMode addressMode = Texture::EdgeClamp,
-                    Texture::MipMapMode mipMode = Texture::DefaultMipMaps);
+                    Texture::MipMapMode mipMode = Texture::DefaultMipMaps,
+                    Texture::Colorspace colorspace = Texture::DefaultColorspace);
 
 std::unique_ptr<Texture>
 LoadHeightMapFromFile(const fs::path& filename,
