@@ -114,13 +114,13 @@ Renderer::renderSelectionPointer(const Observer& observer,
     if (prog == nullptr)
         return;
 
-    Eigen::Matrix3f cameraMatrix = getCameraOrientation().conjugate().toRotationMatrix();
+    Eigen::Matrix3f cameraMatrix = getCameraOrientationf().conjugate().toRotationMatrix();
     Eigen::Vector3f u = cameraMatrix.col(0);
     Eigen::Vector3f v = cameraMatrix.col(1);
     double distance = position.norm();
     position *= cursorDistance / distance;
 
-    float vfov = observer.getFOV();
+    float vfov = celmath::degToRad(fov);
     float h = std::tan(vfov / 2.0f);
     float w = h * getAspectRatio();
     float diag = std::hypot(h, w);

@@ -339,8 +339,8 @@ SkyGrid::render(Renderer& renderer,
     // to Celestia's system.
     Quaterniond xrot90 = XRotation(-celestia::numbers::pi / 2.0);
 
-    double vfov = observer.getFOV();
-    double viewAspectRatio = (double) windowWidth / (double) windowHeight;
+    auto vfov = static_cast<double>(renderer.getProjectionMode()->getFOV(observer.getZoom()));
+    double viewAspectRatio = static_cast<double>(windowWidth) / static_cast<double>(windowHeight);
 
     // Calculate the cosine of half the maximum field of view. We'll use this for
     // fast testing of marker visibility. The stored field of view is the
@@ -368,7 +368,7 @@ SkyGrid::render(Renderer& renderer,
     Vector3d c2(-w,  h, -1.0);
     Vector3d c3( w,  h, -1.0);
 
-    Quaterniond cameraOrientation = observer.getOrientation();
+    Quaterniond cameraOrientation = renderer.getCameraOrientation();
     Matrix3d r = (cameraOrientation * xrot90 * m_orientation.conjugate() * xrot90.conjugate()).toRotationMatrix().transpose();
 
     // Transform the frustum corners by the camera and grid
@@ -543,7 +543,7 @@ SkyGrid::render(Renderer& renderer,
                 glEnd();
 #endif
 
-                Matrix3f m = observer.getOrientationf().toRotationMatrix();
+                Matrix3f m = cameraOrientation.cast<float>().toRotationMatrix();
                 p0 = orientationf.conjugate() * p0;
                 p1 = orientationf.conjugate() * p1;
                 Renderer::LabelHorizontalAlignment hAlign = getCoordLabelHAlign(k);
@@ -618,7 +618,7 @@ SkyGrid::render(Renderer& renderer,
                 glEnd();
 #endif
 
-                Matrix3f m = observer.getOrientationf().toRotationMatrix();
+                Matrix3f m = cameraOrientation.cast<float>().toRotationMatrix();
                 p0 = orientationf.conjugate() * p0;
                 p1 = orientationf.conjugate() * p1;
                 Renderer::LabelHorizontalAlignment hAlign = getCoordLabelHAlign(k);

@@ -85,47 +85,14 @@ if(USE_GLSL_STRUCTS)
   add_definitions(-DUSE_GLSL_STRUCTS)
 endif()
 
+# Use our cmake files
+list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 if(USE_ICU)
   add_definitions(-DUSE_ICU)
   if(WIN32 AND USE_WIN_ICU)
-    # https://learn.microsoft.com/en-us/windows/win32/intl/international-components-for-unicode--icu-
-    try_compile(
-      HAVE_WIN_ICU_1903
-      ${CMAKE_BINARY_DIR}
-      "${CMAKE_SOURCE_DIR}/checks/winicunew.cpp"
-      LINK_LIBRARIES icu
-    )
-    if(HAVE_WIN_ICU_1903)
-      add_definitions(-DHAVE_WIN_ICU_COMBINED_HEADER)
-      link_libraries("icu")
-      message(STATUS "Found ICU with combined header and combined lib")
-    else()
-      try_compile(
-        HAVE_WIN_ICU_1709
-        ${CMAKE_BINARY_DIR}
-        "${CMAKE_SOURCE_DIR}/checks/winicunew.cpp"
-        LINK_LIBRARIES icuuc icuin
-      )
-      if(HAVE_WIN_ICU_1709)
-        add_definitions(-DHAVE_WIN_ICU_COMBINED_HEADER)
-        link_libraries("icuuc" "icuin")
-        message(STATUS "Found ICU with combined header and separate libs")
-      else()
-        try_compile(
-          HAVE_WIN_ICU_1703
-          ${CMAKE_BINARY_DIR}
-          "${CMAKE_SOURCE_DIR}/checks/winicuold.cpp"
-          LINK_LIBRARIES icuuc icuin
-        )
-        if(HAVE_WIN_ICU_1703)
-          add_definitions(-DHAVE_WIN_ICU_SEPARATE_HEADERS)
-          link_libraries("icuuc" "icuin")
-          message(STATUS "Found ICU with separate headers and separate libs")
-        else()
-          message(FATAL_ERROR "Unable to find Windows SDK's ICU implementation")
-        endif()
-      endif()
-    endif()
+    include(winicu)
+    EnableWinICU()
   else()
     find_package(ICU REQUIRED COMPONENTS uc)
     include_directories(${ICU_INCLUDE_DIRS})
@@ -157,9 +124,6 @@ if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
 endif()
 set(CMAKE_C_STANDARD 11)
-
-# Use our cmake files
-list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 if(NOT WIN32)
   include(GNUInstallDirs)
@@ -206,6 +170,15 @@ if(MINGW)
   # MinGW has a bug which causes too many false-positive warnings
   # for 'operator!='
   add_compile_options(-Wno-attributes)
+endif()
+
+# G++ 10 introduced static analyzer
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  string(REPLACE "." ";" GXX_VERSION_LIST ${CMAKE_CXX_COMPILER_VERSION})
+  list(GET GXX_VERSION_LIST 0 MAJOR)
+  if(MAJOR GREATER 9)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Weffc++>)
+  endif()
 endif()
 
 EnableFastMath(${FAST_MATH})
