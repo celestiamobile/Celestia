@@ -37,6 +37,7 @@ public:
     float getNormalizedDeviceZ(float nearZ, float farZ, float z) const override;
 
     Eigen::Vector3f getPickRay(float x, float y, float zoom) const override;
+    Eigen::Vector2f getRayIntersection(Eigen::Vector3f pickRay, float zoom) const override;
 
     void configureShaderManager(ShaderManager *) const override;
     bool project(const Eigen::Vector3f& pos, const Eigen::Matrix4f existingModelViewMatrix, const Eigen::Matrix4f existingProjectionMatrix, const Eigen::Matrix4f existingMVPMatrix, const int viewport[4], Eigen::Vector3f& result) const override;
