@@ -53,6 +53,7 @@ public:
     virtual float getNormalizedDeviceZ(float nearZ, float farZ, float z) const = 0;
 
     virtual Eigen::Vector3f getPickRay(float x, float y, float zoom) const = 0;
+    virtual Eigen::Vector2f getRayIntersection(Eigen::Vector3f pickRay, float zoom) const = 0;
     virtual void configureShaderManager(ShaderManager *) const = 0;
     virtual bool project(const Eigen::Vector3f& pos,
                          const Eigen::Matrix4f& existingModelViewMatrix,
