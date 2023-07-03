@@ -161,6 +161,8 @@ public:
     OverlayManager& overlayManager() noexcept { return m_overlayManager; }
     const OverlayManager& overlayManager() const noexcept { return m_overlayManager; }
 
+    std::string messageText() const noexcept { return m_messageText; }
+
     HudSettings& hudSettings() noexcept { return m_hudSettings; }
     const HudSettings& hudSettings() const noexcept { return m_hudSettings; }
 
