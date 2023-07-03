@@ -213,9 +213,17 @@ public:
     void mouseButtonUp(float, float, int);
     void mouseMove(float, float, int);
     void mouseMove(float, float);
+    Eigen::Vector3f pickView(const Eigen::Vector3f);
+    std::string messageText() const;
+    void enableHudMessages(bool enabled);
+    void enableHudOverlayImage(bool enabled);
     void joystickAxis(JoyAxis axis, float amount);
     void joystickButton(int button, bool down);
     void pinchUpdate(float focusX, float focusY, float scale, bool zoomFOV);
+    void pinchUpdate(const Eigen::Vector3f&, float scale);
+    void touchDown(const Eigen::Vector3f&);
+    void touchMove(const Eigen::Vector3f&, const Eigen::Vector3f&, const Eigen::Vector3f&);
+    void touchUp(const Eigen::Vector3f&);
     void resize(GLsizei w, GLsizei h);
     void draw();
     void draw(celestia::View*);
@@ -463,6 +471,7 @@ private:
 
     float oldFOV;
     float mouseMotion{ 0.0f };
+    float touchMotion{ 0.0f };
     double dollyMotion{ 0.0 };
     double dollyTime{ 0.0 };
     double zoomMotion{ 0.0 };

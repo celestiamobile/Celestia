@@ -93,6 +93,13 @@ Eigen::Vector3f PerspectiveProjectionMode::getPickRay(float x, float y, float zo
     return pickDirection.normalized();
 }
 
+Eigen::Vector2f PerspectiveProjectionMode::getRayIntersection(Eigen::Vector3f pickRay, float zoom) const
+{
+    float s = 2.0f * std::tan(getFOV(zoom) / 2.0f);
+    float coeff = -1.0 / pickRay.z() / s;
+    return Eigen::Vector2f(pickRay.x() * coeff, pickRay.y() * coeff);
+}
+
 void PerspectiveProjectionMode::configureShaderManager(ShaderManager *shaderManager) const
 {
     shaderManager->setFisheyeEnabled(false);

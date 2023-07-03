@@ -113,6 +113,7 @@ std::locale CelestiaCore::loc = std::locale();
 
 namespace
 {
+static constexpr float dragAngleThreshold = celestia::math::degToRad(1.0f);
 
 bool ReadLeapSecondsFile(const std::filesystem::path& path, std::vector<astro::LeapSecondRecord> &leapSeconds)
 {
@@ -714,6 +715,37 @@ void CelestiaCore::mouseMove(float dx, float dy, int modifiers)
     }
 }
 
+std::string CelestiaCore::messageText() const
+{
+    return hud->messageText();
+}
+
+void CelestiaCore::enableHudMessages(bool enabled)
+{
+    hud->hudSettings().showMessage = false;
+}
+
+void CelestiaCore::enableHudOverlayImage(bool enabled)
+{
+    hud->hudSettings().showOverlayImage = enabled;
+}
+
+
+Eigen::Vector3f CelestiaCore::pickView(const Eigen::Vector3f ray)
+{
+    float windowWidth = static_cast<float>(metrics.width);
+    float windowHeight = static_cast<float>(metrics.height);
+    float aspectRatio = windowWidth / windowHeight;
+
+    auto projectionMode = renderer->getProjectionMode();
+    projectionMode->setSize(windowWidth, windowHeight);
+    auto coordinate = projectionMode->getRayIntersection(ray, 1.0f);
+    float x = (coordinate.x() / aspectRatio + 1.0f) * 0.5f * windowWidth;
+    float y = (1.0f - coordinate.y()) * 0.5f * windowHeight;
+    viewManager->pickView(sim.get(), metrics, x, y);
+    return getPickRay(x, y, viewManager->activeView());
+}
+
 
 void CelestiaCore::joystickAxis(JoyAxis axis, float amount)
 {
@@ -752,6 +784,41 @@ void CelestiaCore::joystickButton(int button, bool down)
         joyButtonsPressed[button] = down;
 }
 
+void CelestiaCore::touchDown(const Eigen::Vector3f& focus)
+{
+    if (viewManager->views().size() > 1)
+        pickView(focus);
+
+    touchMotion = 0.0f;
+}
+
+void CelestiaCore::touchMove(const Eigen::Vector3f& focus, const Eigen::Vector3f& from, const Eigen::Vector3f& to)
+{
+    sim->getActiveObserver()->rotate(Eigen::Quaternionf::FromTwoVectors(from, to));
+
+    float angularChange = std::acos(to.dot(from));
+    touchMotion += angularChange;
+}
+
+void CelestiaCore::touchUp(const Eigen::Vector3f& focus)
+{
+    if (touchMotion < dragAngleThreshold)
+    {
+        auto pickRay = focus;
+        if (viewManager->views().size() > 1)
+            pickRay = pickView(focus);
+
+        float obsPickTolerance = sim->getActiveObserver()->getFOV() / static_cast<float>(metrics.height) * pickTolerance;
+        Selection oldSel = sim->getSelection();
+        Selection newSel = sim->pickObject(pickRay, renderer->getRenderFlags(), obsPickTolerance);
+        addToHistory();
+        sim->setSelection(newSel);
+        if (!oldSel.empty() && oldSel == newSel)
+            sim->centerSelection();
+    }
+
+    touchMotion = 0.0f;
+}
 
 void CelestiaCore::pinchUpdate(float focusX, float focusY, float scale, bool zoomFOV)
 {
@@ -770,6 +837,16 @@ void CelestiaCore::pinchUpdate(float focusX, float focusY, float scale, bool zoo
         auto focusRay = focusZoomingEnabled ? std::make_optional(getPickRay(focusX, focusY, view)) : std::nullopt;
         sim->scaleOrbitDistance(scale, focusRay);
     }
+}
+
+
+void CelestiaCore::pinchUpdate(const Eigen::Vector3f& focus, float scale)
+{
+    auto pickRay = focus;
+    if (viewManager->views().size() > 1)
+        pickRay = pickView(focus);
+
+    sim->scaleOrbitDistance(scale, focus);
 }
 
 

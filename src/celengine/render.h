@@ -147,6 +147,8 @@ class Renderer
 
     void setFaintestAM45deg(float);
     float getFaintestAM45deg() const;
+    void setMixedImmersion(bool);
+    bool getMixedImmersion() const;
     void setRTL(bool);
     bool isRTL() const;
 
@@ -599,6 +601,7 @@ class Renderer
  private:
     std::unique_ptr<ShaderManager> shaderManager{ std::make_unique<ShaderManager>() };
 
+    bool mixedImmersion{ false };
     int windowWidth{ 0 };
     int windowHeight{ 0 };
     float fov{ celestia::engine::standardFOV };

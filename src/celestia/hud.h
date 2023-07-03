@@ -154,6 +154,7 @@ public:
                        bool editMode);
 
     void showText(const TextPrintPosition&, std::string_view, double duration, double currentTime);
+    std::string messageText() const noexcept { return m_messageText; }
     void setImage(std::unique_ptr<OverlayImage>&&, double);
 
     HudSettings& hudSettings() noexcept { return m_hudSettings; }

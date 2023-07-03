@@ -536,6 +536,16 @@ float Renderer::getFaintestAM45deg() const
     return faintestAutoMag45deg;
 }
 
+void Renderer::setMixedImmersion(bool _mixedImmersion)
+{
+    mixedImmersion = _mixedImmersion;
+}
+
+bool Renderer::getMixedImmersion() const
+{
+    return mixedImmersion;
+}
+
 TextureResolution Renderer::getResolution() const
 {
     if (!m_textureManager)
@@ -1498,7 +1508,7 @@ void Renderer::render(const Observer& observer,
 
     ambientColor = Color(ambientLightLevel, ambientLightLevel, ambientLightLevel);
 
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClearColor(0.0f, 0.0f, 0.0f, mixedImmersion ? 0.0f : 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     // Render sky grids first--these will always be in the background
