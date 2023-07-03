@@ -134,6 +134,8 @@ class Renderer
 
     void setFaintestAM45deg(float);
     float getFaintestAM45deg() const;
+    void setMixedImmersion(bool);
+    bool getMixedImmersion() const;
     void setRTL(bool);
     bool isRTL() const;
 
@@ -584,6 +586,7 @@ class Renderer
  private:
     ShaderManager* shaderManager{ nullptr };
 
+    bool mixedImmersion{ false };
     int windowWidth;
     int windowHeight;
     float fov;
