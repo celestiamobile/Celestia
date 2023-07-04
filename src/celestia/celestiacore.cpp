@@ -103,6 +103,9 @@ static const double OneLbPerFt3InKgPerM3 = OneLbInKg / pow(OneFtInKm * 1000.0, 3
 
 namespace
 {
+
+static constexpr float dragAngleThreshold = celmath::degToRad(1.0f);
+
 float KelvinToCelsius(float kelvin)
 {
     return kelvin - 273.15f;
@@ -834,6 +837,20 @@ void CelestiaCore::pickView(float x, float y)
     }
 }
 
+void CelestiaCore::pickView(const Eigen::Vector3f ray)
+{
+    float windowWidth = static_cast<float>(width);
+    float windowHeight = static_cast<float>(height);
+    float aspectRatio = windowWidth / windowHeight;
+
+    auto projectionMode = renderer->getProjectionMode();
+    projectionMode->setSize(windowWidth, windowHeight);
+    auto coordinate = projectionMode->getRayIntersection(ray, 1.0f);
+    float x = (coordinate.x() / aspectRatio * 2.0f + 1.0f) * windowWidth;
+    float y = (1.0f - coordinate.y() * 2.0f) * windowWidth;
+    pickView(x, y);
+}
+
 void CelestiaCore::joystickAxis(int axis, float amount)
 {
     setViewChanged();
@@ -862,6 +879,43 @@ void CelestiaCore::joystickButton(int button, bool down)
         joyButtonsPressed[button] = down;
 }
 
+void CelestiaCore::touchDown3D(const Eigen::Vector3f& ray)
+{
+    setViewChanged();
+
+    if (views.size() > 1)
+        pickView(ray);
+
+    touchRay = ray;
+}
+
+void CelestiaCore::touchMove3D(const Eigen::Vector3f& ray)
+{
+    sim->getActiveObserver()->rotate(Eigen::Quaternionf::FromTwoVectors(touchRay, ray));
+
+    float angularChange = std::cos(ray.dot(touchRay));
+    touchRay = ray;
+    touchMotion += angularChange;
+}
+
+void CelestiaCore::touchUp3D(const Eigen::Vector3f& ray)
+{
+    if (touchMotion < dragAngleThreshold)
+    {
+        if (views.size() > 1)
+            pickView(ray);
+
+        Selection oldSel = sim->getSelection();
+        Selection newSel = sim->pickObject(ray, renderer->getRenderFlags(), pickTolerance);
+        addToHistory();
+        sim->setSelection(newSel);
+        if (!oldSel.empty() && oldSel == newSel)
+            sim->centerSelection();
+    }
+
+    touchRay = -Eigen::Vector3f::UnitZ();
+    touchMotion = 0.0f;
+}
 
 void CelestiaCore::keyDown(int key, int modifiers)
 {

@@ -255,8 +255,12 @@ class CelestiaCore // : public Watchable<CelestiaCore>
     void mouseMove(float, float, int);
     void mouseMove(float, float);
     void pickView(float, float);
+    void pickView(const Eigen::Vector3f);
     void joystickAxis(int axis, float amount);
     void joystickButton(int button, bool down);
+    void touchDown3D(const Eigen::Vector3f&);
+    void touchMove3D(const Eigen::Vector3f&);
+    void touchUp3D(const Eigen::Vector3f&);
     void resize(GLsizei w, GLsizei h);
     void draw();
     void draw(View*);
@@ -532,6 +536,7 @@ class CelestiaCore // : public Watchable<CelestiaCore>
 
     float oldFOV;
     float mouseMotion{ 0.0f };
+    float touchMotion{ 0.0f };
     double dollyMotion{ 0.0 };
     double dollyTime{ 0.0 };
     double zoomMotion{ 0.0 };
@@ -542,6 +547,7 @@ class CelestiaCore // : public Watchable<CelestiaCore>
 
     bool viewChanged{ true };
 
+    Eigen::Vector3f touchRay{ -Eigen::Vector3f::UnitZ() };
     Eigen::Vector3f joystickRotation{ Eigen::Vector3f::Zero() };
     bool joyButtonsPressed[JoyButtonCount];
     bool keysPressed[KeyCount];
