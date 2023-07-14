@@ -228,7 +228,7 @@ class CelestiaCore // : public Watchable<CelestiaCore>
     bool initSimulation(const fs::path& configFileName = fs::path(),
                         const std::vector<fs::path>& extrasDirs = {},
                         ProgressNotifier* progressNotifier = nullptr);
-    bool initRenderer();
+    bool initRenderer(bool useMesaPackInvert = true);
     void start(double t);
     void start();
     void getLightTravelDelay(double distanceKm, int&, int&, float&);
@@ -447,6 +447,8 @@ class CelestiaCore // : public Watchable<CelestiaCore>
     void setLayoutDirection(LayoutDirection);
     void enableMessages();
     void disableMessages();
+    void enableOverlayImage();
+    void disableOverlayImage();
 
     std::string_view getCurrentMessage() const;
 
@@ -599,6 +601,7 @@ class CelestiaCore // : public Watchable<CelestiaCore>
 
     LayoutDirection layoutDirection { LayoutDirection::LeftToRight };
     bool showMessage{ true };
+    bool showOverlayImage{ true };
 
     Selection lastSelection;
     std::string selectionNames;

@@ -3158,8 +3158,8 @@ void CelestiaCore::renderOverlay()
 
     overlay->begin();
 
-    if (m_script != nullptr && image != nullptr)
-        image->render((float) currentTime, width, height);
+    if (showOverlayImage && m_script != nullptr && image != nullptr)
+        image->render(static_cast<float>(currentTime), width, height);
 
     if (views.size() > 1)
     {
@@ -4115,7 +4115,7 @@ LoadFontHelper(const Renderer *renderer, const fs::path &p)
     return LoadTextureFont(renderer, path, index, size);
 }
 
-bool CelestiaCore::initRenderer()
+bool CelestiaCore::initRenderer([[maybe_unused]] bool useMesaPackInvert)
 {
     renderer->setRenderFlags(Renderer::ShowStars |
                              Renderer::ShowPlanets |
@@ -4129,6 +4129,9 @@ bool CelestiaCore::initRenderer()
     detailOptions.orbitWindowEnd = config->orbitWindowEnd;
     detailOptions.orbitPeriodsShown = config->orbitPeriodsShown;
     detailOptions.linearFadeFraction = config->linearFadeFraction;
+#ifndef GL_ES
+    detailOptions.useMesaPackInvert = useMesaPackInvert;
+#endif
 
     // Prepare the scene for rendering.
     if (!renderer->init((int) width, (int) height, detailOptions))
@@ -5034,6 +5037,16 @@ std::string_view CelestiaCore::getCurrentMessage() const
     if (currentTime < messageStart + messageDuration && messageTextPosition)
         return messageText;
     return {};
+}
+
+void CelestiaCore::enableOverlayImage()
+{
+    showOverlayImage = true;
+}
+
+void CelestiaCore::disableOverlayImage()
+{
+    showOverlayImage = false;
 }
 
 void CelestiaCore::setLogFile(const fs::path &fn)
