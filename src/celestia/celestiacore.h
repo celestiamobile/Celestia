@@ -261,6 +261,7 @@ class CelestiaCore // : public Watchable<CelestiaCore>
     void draw();
     void draw(View*);
     void tick();
+    void tick(double dt);
 
     Simulation* getSimulation() const;
     Renderer* getRenderer() const;
