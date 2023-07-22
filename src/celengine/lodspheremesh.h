@@ -17,12 +17,19 @@
 #include <Eigen/Core>
 
 #include <celengine/glsupport.h>
+#include <celrender/gl/vertexobject.h>
 
 class Texture;
 
 namespace celmath
 {
 class Frustum;
+}
+
+namespace celestia::gl
+{
+class Buffer;
+class VertexObject;
 }
 
 class CelestiaGLProgram;
@@ -80,6 +87,12 @@ public:
                        CelestiaGLProgram *);
 
     void renderSection(int phi0, int theta0, int extent, const RenderInfo&, CelestiaGLProgram *);
+
+    void initializeVertexBuffer();
+    bool m_initialized{ false };
+    std::unique_ptr<celestia::gl::Buffer>        m_bo{ nullptr };
+    std::unique_ptr<celestia::gl::Buffer>        m_io{ nullptr };
+    std::unique_ptr<celestia::gl::VertexObject>  m_vo{ nullptr };
 
     int vertexSize{ 0 };
 
