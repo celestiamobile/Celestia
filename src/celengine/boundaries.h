@@ -11,6 +11,7 @@
 #pragma once
 
 #include <iosfwd>
+#include <memory>
 #include <vector>
 
 #include <Eigen/Core>
@@ -20,21 +21,17 @@ class ConstellationBoundaries
  public:
     using Chain = std::vector<Eigen::Vector3f>;
 
-    ConstellationBoundaries();
-    ~ConstellationBoundaries();
+    explicit ConstellationBoundaries(std::vector<Chain>&&);
+    ~ConstellationBoundaries() = default;
     ConstellationBoundaries(const ConstellationBoundaries&)            = delete;
     ConstellationBoundaries(ConstellationBoundaries&&)                 = delete;
     ConstellationBoundaries& operator=(const ConstellationBoundaries&) = delete;
     ConstellationBoundaries& operator=(ConstellationBoundaries&&)      = delete;
 
-    void moveto(float ra, float dec);
-    void lineto(float ra, float dec);
-
-    const std::vector<Chain*>& getChains() const;
+    const std::vector<Chain>& getChains() const;
 
  private:
-    Chain* currentChain{ nullptr };
-    std::vector<Chain*> chains;
+    std::vector<Chain> chains;
 };
 
-ConstellationBoundaries* ReadBoundaries(std::istream&);
+std::unique_ptr<ConstellationBoundaries> ReadBoundaries(std::istream&);
