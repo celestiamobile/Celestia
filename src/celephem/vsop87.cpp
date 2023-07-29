@@ -43,11 +43,6 @@ struct VSOPSeries
     {
     }
 
-    // Temporary fix for Android NDK libc++ which does not expose empty array methods as constexpr
-    explicit constexpr VSOPSeries(const std::array<VSOPTerm, 0>& arr)
-        : terms(nullptr), nTerms(0)
-    {};
-
     const VSOPTerm* terms;
     std::size_t nTerms;
 };
