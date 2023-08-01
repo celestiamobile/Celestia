@@ -145,14 +145,12 @@ constexpr std::string_view NormalVertexPosition = R"glsl(
 constexpr std::string_view LineVertexPosition = R"glsl(
     vec4 thisPos = calc_vp(in_Position);
     vec4 nextPos = calc_vp(in_PositionNext);
-    float w = thisPos.w;
-    thisPos /= w;
+    thisPos /= thisPos.w;
     nextPos /= nextPos.w;
     vec2 transform = normalize(nextPos.xy - thisPos.xy);
     transform = vec2(transform.y * lineWidthX, -transform.x * lineWidthY) * in_ScaleFactor;
     gl_Position = thisPos;
     gl_Position.xy += transform;
-    gl_Position *= w;
 )glsl"sv;
 
 std::string_view
