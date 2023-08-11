@@ -50,11 +50,12 @@
 #include "convertobj.h"
 #include "pathmanager.h"
 
-#include "glshader.h"
-#include "glsupport.h"
 #include "materialwidget.h"
 #include "modelviewwidget.h"
 
+
+namespace cmodview
+{
 
 namespace
 {
@@ -70,8 +71,7 @@ MainWindow::MainWindow() :
     m_materialWidget(nullptr),
     m_statusBarLabel(nullptr),
     m_saveAction(nullptr),
-    m_saveAsAction(nullptr),
-    m_gl2Action(nullptr)
+    m_saveAsAction(nullptr)
 {
     m_modelView = new ModelViewWidget(this);
     m_statusBarLabel = new QLabel(this);
@@ -106,14 +106,6 @@ MainWindow::MainWindow() :
     QAction* wireFrameStyleAction = new QAction(tr("&Wireframe"), styleGroup);
     wireFrameStyleAction->setCheckable(true);
     wireFrameStyleAction->setData((int) ModelViewWidget::WireFrameStyle);
-    QActionGroup* renderPathGroup = new QActionGroup(styleMenu);
-    QAction* fixedFunctionAction = new QAction(tr("Fixed Function"), renderPathGroup);
-    fixedFunctionAction->setCheckable(true);
-    fixedFunctionAction->setChecked(true);
-    fixedFunctionAction->setData((int) ModelViewWidget::FixedFunctionPath);
-    m_gl2Action = new QAction(tr("OpenGL 2.0"), renderPathGroup);
-    m_gl2Action->setCheckable(true);
-    m_gl2Action->setData((int) ModelViewWidget::OpenGL2Path);
     QAction* backgroundColorAction = new QAction(tr("&Background Color..."), this);
     QAction* ambientLightAction = new QAction(tr("&Ambient Light"), this);
     ambientLightAction->setCheckable(true);
@@ -123,9 +115,6 @@ MainWindow::MainWindow() :
 
     styleMenu->addAction(normalStyleAction);
     styleMenu->addAction(wireFrameStyleAction);
-    styleMenu->addSeparator();
-    styleMenu->addAction(fixedFunctionAction);
-    styleMenu->addAction(m_gl2Action);
     styleMenu->addSeparator();
     styleMenu->addAction(ambientLightAction);
     styleMenu->addAction(shadowsAction);
@@ -166,7 +155,6 @@ MainWindow::MainWindow() :
 
     // Connect Style menu
     connect(styleGroup, SIGNAL(triggered(QAction*)), this, SLOT(setRenderStyle(QAction*)));
-    connect(renderPathGroup, SIGNAL(triggered(QAction*)), this, SLOT(setRenderPath(QAction*)));
     connect(backgroundColorAction, SIGNAL(triggered()), this, SLOT(editBackgroundColor()));
     connect(ambientLightAction, SIGNAL(toggled(bool)), m_modelView, SLOT(setAmbientLight(bool)));
     connect(shadowsAction, SIGNAL(toggled(bool)), m_modelView, SLOT(setShadows(bool)));
@@ -193,8 +181,6 @@ MainWindow::MainWindow() :
     connect(m_modelView, SIGNAL(selectionChanged()), this, SLOT(updateSelectionInfo()));
     connect(m_materialWidget, SIGNAL(materialEdited(const cmod::Material&)), this, SLOT(changeCurrentMaterial(const cmod::Material&)));
     toolsMenu->addAction(materialDock->toggleViewAction());
-
-    connect(m_modelView, SIGNAL(contextCreated()), this, SLOT(initializeGL()));
 }
 
 
@@ -219,24 +205,6 @@ void MainWindow::closeEvent(QCloseEvent* event)
     saveSettings();
     event->accept();
 }
-
-
-// Initialization that occurs only after an OpenGL context has been created
-void MainWindow::initializeGL()
-{
-    // Enable the GL2 path by default if OpenGL 2.0 shaders are available
-    if (GLShaderProgram::hasOpenGLShaderPrograms())
-    {
-        m_gl2Action->setChecked(true);
-        m_modelView->setRenderPath(ModelViewWidget::OpenGL2Path);
-    }
-    else
-    {
-        m_gl2Action->setEnabled(false);
-    }
-}
-
-
 
 
 bool
@@ -377,7 +345,7 @@ MainWindow::openModel(const QString& fileName)
         std::string fileNameStd = std::string(fileName.toUtf8().data());
 
         QFileInfo info(fileName);
-        GetPathManager()->reset();
+        cmodtools::GetPathManager()->reset();
 
         if (info.suffix().toLower() == "3ds")
         {
@@ -388,7 +356,7 @@ MainWindow::openModel(const QString& fileName)
                 return;
             }
 
-            std::unique_ptr<cmod::Model> model = Convert3DSModel(*scene, GetPathManager()->getHandle);
+            auto model = cmodtools::Convert3DSModel(*scene, cmodtools::GetPathManager()->getHandle);
             if (model == nullptr)
             {
                 QMessageBox::warning(this, "Load error", tr("Internal error converting 3DS file %1").arg(fileName));
@@ -400,10 +368,10 @@ MainWindow::openModel(const QString& fileName)
             double weldTolerance = 1.0e-6;
             bool weldVertices = true;
 
-            model = GenerateModelNormals(*model,
-                                         celmath::degToRad(smoothAngle),
-                                         weldVertices,
-                                         weldTolerance);
+            model = cmodtools::GenerateModelNormals(*model,
+                                                    celmath::degToRad(smoothAngle),
+                                                    weldVertices,
+                                                    weldTolerance);
 
             if (!model)
             {
@@ -415,7 +383,7 @@ MainWindow::openModel(const QString& fileName)
                 for (unsigned int i = 0; model->getMesh(i) != nullptr; i++)
                 {
                     cmod::Mesh* mesh = model->getMesh(i);
-                    UniquifyVertices(*mesh);
+                    cmodtools::UniquifyVertices(*mesh);
                 }
 
                 setModel(fileName, std::move(model));
@@ -430,7 +398,7 @@ MainWindow::openModel(const QString& fileName)
                 return;
             }
 
-            WavefrontLoader loader(in);
+            cmodtools::WavefrontLoader loader(in);
             std::unique_ptr<cmod::Model> model = loader.load();
 
             if (model == nullptr)
@@ -443,7 +411,7 @@ MainWindow::openModel(const QString& fileName)
             for (unsigned int i = 0; model->getMesh(i) != nullptr; i++)
             {
                 cmod::Mesh* mesh = model->getMesh(i);
-                UniquifyVertices(*mesh);
+                cmodtools::UniquifyVertices(*mesh);
             }
 
             setModel(fileName, std::move(model));
@@ -457,7 +425,7 @@ MainWindow::openModel(const QString& fileName)
                 return;
             }
 
-            std::unique_ptr<cmod::Model> model = cmod::LoadModel(in, GetPathManager()->getHandle);
+            std::unique_ptr<cmod::Model> model = cmod::LoadModel(in, cmodtools::GetPathManager()->getHandle);
             if (model == nullptr)
             {
                 QMessageBox::warning(this, "Load error", tr("Error reading CMOD file %1").arg(fileName));
@@ -502,7 +470,7 @@ MainWindow::saveModel(const QString& saveFileName)
     std::ofstream out(fileNameStd, std::ios::out | std::ios::binary);
     bool ok = false;
     if (out.good())
-        ok = SaveModelBinary(m_modelView->model(), out, GetPathManager()->getSource);
+        ok = SaveModelBinary(m_modelView->model(), out, cmodtools::GetPathManager()->getSource);
 
     if (!ok)
     {
@@ -528,22 +496,6 @@ MainWindow::setRenderStyle(QAction* action)
     case ModelViewWidget::NormalStyle:
     case ModelViewWidget::WireFrameStyle:
         m_modelView->setRenderStyle(renderStyle);
-        break;
-    default:
-        break;
-    }
-}
-
-
-void
-MainWindow::setRenderPath(QAction* action)
-{
-    ModelViewWidget::RenderPath renderPath = (ModelViewWidget::RenderPath) action->data().toInt();
-    switch (renderPath)
-    {
-    case ModelViewWidget::FixedFunctionPath:
-    case ModelViewWidget::OpenGL2Path:
-        m_modelView->setRenderPath(renderPath);
         break;
     default:
         break;
@@ -596,10 +548,10 @@ MainWindow::generateNormals()
         double weldTolerance = toleranceEdit->text().toDouble();
         bool weldVertices = true;
 
-        std::unique_ptr<cmod::Model> newModel = GenerateModelNormals(*model,
-                                                                     celmath::degToRad(smoothAngle),
-                                                                     weldVertices,
-                                                                     weldTolerance);
+        auto newModel = cmodtools::GenerateModelNormals(*model,
+                                                        celmath::degToRad(smoothAngle),
+                                                        weldVertices,
+                                                        weldTolerance);
         if (!newModel)
         {
             QMessageBox::warning(this, tr("Internal Error"), tr("Out of memory error during normal generation"));
@@ -659,7 +611,7 @@ MainWindow::generateTangents()
         for (unsigned int i = 0; model->getMesh(i) != nullptr; i++)
         {
             const cmod::Mesh* mesh = model->getMesh(i);
-            cmod::Mesh newMesh = GenerateTangents(*mesh, weldVertices);
+            cmod::Mesh newMesh = cmodtools::GenerateTangents(*mesh, weldVertices);
             if (newMesh.getVertexCount() == 0)
             {
                 std::cerr << "Error generating normals!\n";
@@ -688,7 +640,7 @@ MainWindow::uniquifyVertices()
     for (unsigned int i = 0; model->getMesh(i) != nullptr; i++)
     {
         cmod::Mesh* mesh = model->getMesh(i);
-        UniquifyVertices(*mesh);
+        cmodtools::UniquifyVertices(*mesh);
     }
 
     showModelStatistics();
@@ -703,7 +655,7 @@ MainWindow::mergeMeshes()
     if (!model)
         return;
 
-    setModel(modelFileName(), MergeModelMeshes(*model));
+    setModel(modelFileName(), cmodtools::MergeModelMeshes(*model));
 }
 
 
@@ -756,3 +708,5 @@ MainWindow::editBackgroundColor()
         m_modelView->setBackgroundColor(originalColor);
     }
 }
+
+} // end namespace cmodview
