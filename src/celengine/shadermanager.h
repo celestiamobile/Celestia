@@ -151,6 +151,7 @@ constexpr inline unsigned int MaxShaderEclipseShadows = 3;
 struct CelestiaGLProgramLight
 {
     Vec3ShaderParameter direction;
+    Vec3ShaderParameter color;
     Vec3ShaderParameter diffuse;
     Vec3ShaderParameter specular;
     Vec3ShaderParameter halfVector;
@@ -210,9 +211,6 @@ class CelestiaGLProgram
 
  public:
     CelestiaGLProgramLight lights[MaxShaderLights];
-    Vec3ShaderParameter fragLightColor[MaxShaderLights];
-    Vec3ShaderParameter fragLightSpecColor[MaxShaderLights];
-    FloatShaderParameter fragLightBrightness[MaxShaderLights];
     FloatShaderParameter ringShadowLOD[MaxShaderLights];
     Vec3ShaderParameter eyePosition;
     FloatShaderParameter shininess;

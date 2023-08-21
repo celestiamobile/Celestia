@@ -82,14 +82,14 @@ void main(void)
 }
 )glsl"sv;
 
-#ifndef GL_ES
-constexpr std::string_view VersionHeader = "#version 120\n"sv;
-constexpr std::string_view VersionHeaderGL3 = "#version 150\n"sv;
-constexpr std::string_view CommonHeader = "\n"sv;
-#else
+#ifdef GL_ES
 constexpr std::string_view VersionHeader = "#version 100\n"sv;
 constexpr std::string_view VersionHeaderGL3 = "#version 320 es\n"sv;
 constexpr std::string_view CommonHeader = "precision highp float;\n"sv;
+#else
+constexpr std::string_view VersionHeader = "#version 120\n"sv;
+constexpr std::string_view VersionHeaderGL3 = "#version 150\n"sv;
+constexpr std::string_view CommonHeader = "\n"sv;
 #endif
 constexpr std::string_view VertexHeader = R"glsl(
 uniform mat4 ModelViewMatrix;
@@ -184,17 +184,11 @@ uniform vec2 texCoordDelta3;
 std::string
 LightProperty(unsigned int i, std::string_view property)
 {
-#ifndef USE_GLSL_STRUCTS
-    return fmt::format("light{}_{}", i, property);
-#else
+#ifdef USE_GLSL_STRUCTS
     return fmt::format("lights[{}].{}", i, property);
+#else
+    return fmt::format("light{}_{}", i, property);
 #endif
-}
-
-std::string
-FragLightProperty(unsigned int i, std::string_view property)
-{
-    return fmt::format("light{}{}", property, i);
 }
 
 std::string
@@ -814,7 +808,18 @@ DeclareLights(const ShaderProperties& props)
         return {};
 
     std::ostringstream stream;
-#ifndef USE_GLSL_STRUCTS
+#ifdef USE_GLSL_STRUCTS
+    stream << "uniform struct {\n";
+    stream << "   vec3 direction;\n";
+    stream << "   vec3 diffuse;\n";
+    stream << "   vec3 specular;\n";
+    stream << "   vec3 halfVector;\n";
+    if ((props.texUsage & ShaderProperties::AtmosphereModel) || props.hasScattering())
+        stream << "   vec3 color;\n";
+    if (props.texUsage & ShaderProperties::NightTexture)
+        stream << "   float brightness;\n";
+    stream << "} lights[" << props.nLights << "];\n";
+#else
     for (unsigned int i = 0; i < props.nLights; i++)
     {
         stream << DeclareUniform(fmt::format("light{}_direction", i), Shader_Vector3);
@@ -824,19 +829,11 @@ DeclareLights(const ShaderProperties& props)
             stream << DeclareUniform(fmt::format("light{}_specular", i), Shader_Vector3);
             stream << DeclareUniform(fmt::format("light{}_halfVector", i), Shader_Vector3);
         }
+        if ((props.texUsage & ShaderProperties::AtmosphereModel) || props.hasScattering())
+            stream << DeclareUniform(fmt::format("light{}_color", i), Shader_Vector3);
         if (props.texUsage & ShaderProperties::NightTexture)
             stream << DeclareUniform(fmt::format("light{}_brightness", i), Shader_Float);
     }
-
-#else
-    stream << "uniform struct {\n";
-    stream << "   vec3 direction;\n";
-    stream << "   vec3 diffuse;\n";
-    stream << "   vec3 specular;\n";
-    stream << "   vec3 halfVector;\n";
-    if (props.texUsage & ShaderProperties::NightTexture)
-        stream << "   float brightness;\n";
-    stream << "} lights[" << props.nLights << "];\n";
 #endif
 
     return stream.str();
@@ -1187,7 +1184,7 @@ AtmosphericEffects(const ShaderProperties& props)
     std::string scatter;
     if (hasAbsorption)
     {
-        source += "    vec3 sunColor = exp(-extinctionCoeff * density * distSun);\n";
+        source += "    vec3 sunColor = " + LightProperty(0, "color") + " * exp(-extinctionCoeff * density * distSun);\n";
         source += "    vec3 ex = exp(-extinctionCoeff * density * distAtm);\n";
 
         scatter = "(1.0 - exp(-scatterCoeffSum * density * distAtm))";
@@ -2247,18 +2244,6 @@ ShaderManager::buildFragmentShader(const ShaderProperties& props)
     if (props.hasSpecular())
         source += DeclareUniform("shininess", Shader_Float);
 
-    if (props.usesTangentSpaceLighting() || props.hasSpecular() || props.usesShadows())
-    {
-        for (unsigned int i = 0; i < props.nLights; i++)
-        {
-            source += DeclareUniform(FragLightProperty(i, "color"), Shader_Vector3);
-            if (props.hasSpecular())
-                source += DeclareUniform(FragLightProperty(i, "specColor"), Shader_Vector3);
-            if ((props.texUsage & ShaderProperties::NightTexture) != 0)
-                source += DeclareUniform(FragLightProperty(i, "brightness"), Shader_Float);
-        }
-    }
-
     // Declare shadow parameters
     if (props.hasEclipseShadows())
     {
@@ -2431,19 +2416,19 @@ ShaderManager::buildFragmentShader(const ShaderProperties& props)
             }
 
             if ((props.texUsage & ShaderProperties::NightTexture) != 0)
-                source += "totalLight += l * " + FragLightProperty(i, "brightness") + ";\n";
+                source += "totalLight += l * " + LightProperty(i, "brightness") + ";\n";
 
             if (props.hasShadowsForLight(i))
                 source += ShadowsForLightSource(props, i);
 
             std::string illum(props.hasShadowsForLight(i) ? "l * shadow" : "l");
-            source += "diff.rgb += " + illum + " * " + FragLightProperty(i, "color") + ";\n";
+            source += "diff.rgb += " + illum + " * " + LightProperty(i, "diffuse") + ";\n";
 
             if (props.hasSpecular())
             {
                 source += "H = normalize(eyeDir_tan + " + LightDir_tan(i) + ");\n";
                 source += "NH = max(0.0, dot(n, H));\n";
-                source += "spec.rgb += " + illum + " * pow(NH, shininess) * " + FragLightProperty(i, "specColor") + ";\n";
+                source += "spec.rgb += " + illum + " * pow(NH, shininess) * " + LightProperty(i, "specular") + ";\n";
             }
         }
     }
@@ -2459,9 +2444,9 @@ ShaderManager::buildFragmentShader(const ShaderProperties& props)
                 source += ShadowsForLightSource(props, i);
 
             std::string illum(props.hasShadowsForLight(i) ? "shadow" : SeparateDiffuse(i));
-            source += "diff.rgb += " + illum + " * " + FragLightProperty(i, "color") + ";\n";
+            source += "diff.rgb += " + illum + " * " + LightProperty(i, "diffuse") + ";\n";
             source += "NH = max(0.0, dot(N, normalize(" + LightProperty(i, "halfVector") + ")));\n";
-            source += "spec.rgb += " + illum + " * pow(NH, shininess) * " + FragLightProperty(i, "specColor") + ";\n";
+            source += "spec.rgb += " + illum + " * pow(NH, shininess) * " + LightProperty(i, "specular") + ";\n";
             if (props.hasShadowMap() && i == 0)
                 source += ApplyShadow(true);
         }
@@ -2474,7 +2459,7 @@ ShaderManager::buildFragmentShader(const ShaderProperties& props)
         for (unsigned i = 0; i < props.nLights; i++)
         {
             source += ShadowsForLightSource(props, i);
-            source += "diff.rgb += shadow * " + FragLightProperty(i, "color") + ";\n";
+            source += "diff.rgb += shadow * " + LightProperty(i, "diffuse") + ";\n";
 
             if (props.hasShadowMap() && i == 0)
                 ApplyShadow(false);
@@ -2763,8 +2748,6 @@ ShaderManager::buildRingsFragmentShader(const ShaderProperties& props)
     source += CommonHeader;
 
     source += DeclareUniform("ambientColor", Shader_Vector3);
-    for (unsigned int i = 0; i < props.nLights; i++)
-        source += DeclareUniform(FragLightProperty(i, "color"), Shader_Vector3);
 
     source += DeclareLights(props);
 
@@ -2835,11 +2818,11 @@ ShaderManager::buildRingsFragmentShader(const ShaderProperties& props)
             source += "diff.rgb += (shadow * " + SeparateDiffuse(i) + ") * " +
                 FragLightProperty(i, "color") + ";\n";
 #endif
-            source += "diff.rgb += (shadow * intensity) * " + FragLightProperty(i, "color") + ";\n";
+            source += "diff.rgb += (shadow * intensity) * " + LightProperty(i, "diffuse") + ";\n";
         }
         else
         {
-            source += "diff.rgb += intensity * " + FragLightProperty(i, "color") + ";\n";
+            source += "diff.rgb += intensity * " + LightProperty(i, "diffuse") + ";\n";
 #if 0
             source += SeparateDiffuse(i) + " = (dot(" +
                 LightProperty(i, "direction") + ", eyeDir) + 1.0) * 0.5;\n";
@@ -2969,10 +2952,10 @@ ShaderManager::buildEmissiveVertexShader(const ShaderProperties& props)
     // models, the material color is premultiplied with the light color.
     // Emissive shaders interoperate better with other shaders if they also
     // take the color from light source 0.
-#ifndef USE_GLSL_STRUCTS
-    source += DeclareUniform("light0_diffuse", Shader_Vector3);
-#else
+#ifdef USE_GLSL_STRUCTS
     source += std::string("uniform struct {\n   vec3 diffuse;\n} lights[1];\n");
+#else
+    source += DeclareUniform("light0_diffuse", Shader_Vector3);
 #endif
 
     if (props.usePointSize())
@@ -3159,8 +3142,6 @@ ShaderManager::buildParticleFragmentShader(const ShaderProperties& props)
     if (props.usesShadows())
     {
         source << DeclareUniform("ambientColor", Shader_Vector3);
-        for (unsigned int i = 0; i < props.nLights; i++)
-            source << DeclareUniform(FragLightProperty(i, "color"), Shader_Vector3);
     }
 
     // Declare shadow parameters
@@ -3471,11 +3452,9 @@ CelestiaGLProgram::initParameters()
         lights[i].halfVector = vec3Param(LightProperty(i, "halfVector").c_str());
         if (props.texUsage & ShaderProperties::NightTexture)
             lights[i].brightness = floatParam(LightProperty(i, "brightness").c_str());
+        if ((props.texUsage & ShaderProperties::AtmosphereModel) || props.hasScattering())
+            lights[i].color = vec3Param(LightProperty(i, "color").c_str());
 
-        fragLightColor[i] = vec3Param(FragLightProperty(i, "color").c_str());
-        fragLightSpecColor[i] = vec3Param(FragLightProperty(i, "specColor").c_str());
-        if (props.texUsage & ShaderProperties::NightTexture)
-            fragLightBrightness[i] = floatParam(FragLightProperty(i, "brightness").c_str());
         if (props.hasRingShadowForLight(i))
             ringShadowLOD[i] = floatParam(IndexedParameter("ringShadowLOD", i).c_str());
         for (unsigned int j = 0; j < props.getEclipseShadowCountForLight(i); j++)
@@ -3653,6 +3632,7 @@ CelestiaGLProgram::setLightParameters(const LightingState& ls,
         const DirectionalLight& light = ls.lights[i];
 
         Eigen::Vector3f lightColor = light.color.toVector3() * light.irradiance;
+        lights[i].color = light.color.toVector3();
         lights[i].direction = light.direction_obj;
 
         // Include a phase-based normalization factor to prevent planets from appearing
@@ -3664,23 +3644,7 @@ CelestiaGLProgram::setLightParameters(const LightingState& ls,
             lightColor *= photometricNormFactor;
         }
 
-        if (props.usesShadows() ||
-            (props.texUsage & ShaderProperties::NormalTexture) != 0 ||
-            props.hasSpecular() ||
-            props.lightModel == ShaderProperties::RingIllumModel)
-        {
-            fragLightColor[i] = lightColor.cwiseProduct(diffuseColor);
-            if (props.hasSpecular())
-            {
-                fragLightSpecColor[i] = lightColor.cwiseProduct(specularColor);
-            }
-            fragLightBrightness[i] = lightColor.maxCoeff();
-        }
-        else
-        {
-            lights[i].diffuse = lightColor.cwiseProduct(diffuseColor);
-        }
-
+        lights[i].diffuse = lightColor.cwiseProduct(diffuseColor);
         lights[i].brightness = lightColor.maxCoeff();
         lights[i].specular = lightColor.cwiseProduct(specularColor);
 
