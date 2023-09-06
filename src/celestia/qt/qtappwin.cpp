@@ -415,7 +415,11 @@ void CelestiaAppWindow::init(const CelestiaCommandLineOptions& options)
 
     QAction* fullScreenAction = new QAction(_("Full screen"), this);
     fullScreenAction->setCheckable(true);
-    fullScreenAction->setShortcut(QString(_("Shift+F11")));
+    // Qt defines Key_Return as enter key on keyboard and Key_Enter as enter key on numeric keypad
+    // Capture both keys
+    QList<QKeySequence> shortcuts;
+    shortcuts << QKeySequence(_("ALT+Enter")) << QKeySequence(_("ALT+Return"));
+    fullScreenAction->setShortcuts(shortcuts);
 
     // Set the full screen check state only after reading settings
     fullScreenAction->setChecked(isFullScreen());
@@ -1441,13 +1445,13 @@ void CelestiaAppWindow::createMenus()
 
     QAction* splitViewVertAction = new QAction(QIcon(":/icons/split-vert.png"),
                                                _("Split view vertically"), this);
-    splitViewVertAction->setShortcut(QString(_("Ctrl+R")));
+    splitViewVertAction->setShortcut(QString(_("Ctrl+U")));
     connect(splitViewVertAction, SIGNAL(triggered()), this, SLOT(slotSplitViewVertically()));
     multiviewMenu->addAction(splitViewVertAction);
 
     QAction* splitViewHorizAction = new QAction(QIcon(":/icons/split-horiz.png"),
                                                 _("Split view horizontally"), this);
-    splitViewHorizAction->setShortcut(QString(_("Ctrl+U")));
+    splitViewHorizAction->setShortcut(QString(_("Ctrl+R")));
     connect(splitViewHorizAction, SIGNAL(triggered()), this, SLOT(slotSplitViewHorizontally()));
     multiviewMenu->addAction(splitViewHorizAction);
 
