@@ -313,18 +313,6 @@ void Body::setDensity(float _density)
 }
 
 
-float Body::getAlbedo() const
-{
-    return getGeomAlbedo();
-}
-
-
-void Body::setAlbedo(float _albedo)
-{
-    setGeomAlbedo(_albedo);
-}
-
-
 float Body::getGeomAlbedo() const
 {
     return geomAlbedo;
@@ -1392,24 +1380,6 @@ Body* PlanetarySystem::find(std::string_view _name, bool deepSearch, bool i18n) 
     return nullptr;
 }
 
-
-bool PlanetarySystem::traverse(TraversalFunc func, void* info) const
-{
-    for (int i = 0; i < getSystemSize(); i++)
-    {
-        Body* body = getBody(i);
-        // assert(body != nullptr);
-        if (!func(body, info))
-            return false;
-        if (body->getSatellites())
-        {
-            if (!body->getSatellites()->traverse(func, info))
-                return false;
-        }
-    }
-
-    return true;
-}
 
 void PlanetarySystem::getCompletion(std::vector<std::string>& completion,
                                     std::string_view _name,

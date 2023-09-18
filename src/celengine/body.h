@@ -59,9 +59,6 @@ class PlanetarySystem
         StopTraversal       = 1
     };
 
-    typedef bool (*TraversalFunc)(Body*, void*);
-
-    bool traverse(TraversalFunc, void*) const;
     Body* find(std::string_view, bool deepSearch = false, bool i18n = false) const;
     void getCompletion(std::vector<std::string>& completion, std::string_view _name, bool i18n, bool rec = true) const;
 
@@ -226,8 +223,6 @@ class Body
     void setDensity(float);
 
     // Albedo functions and temperature
-    [[deprecated]] float getAlbedo() const;
-    [[deprecated]] void setAlbedo(float);
     float getGeomAlbedo() const;
     void setGeomAlbedo(float);
     float getBondAlbedo() const;
