@@ -10,6 +10,8 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
+#include "timelinephase.h"
+
 #include <cassert>
 
 #include <celephem/orbit.h>
@@ -17,12 +19,11 @@
 #include "body.h"
 #include "frame.h"
 #include "frametree.h"
-#include "timelinephase.h"
 #include "universe.h"
 
-using namespace std;
 
-TimelinePhase::TimelinePhase(Body* _body,
+TimelinePhase::TimelinePhase(CreateToken,
+                             Body* _body,
                              double _startTime,
                              double _endTime,
                              const ReferenceFrame::SharedConstPtr& _orbitFrame,
@@ -68,13 +69,7 @@ TimelinePhase::CreateTimelinePhase(Universe& universe,
     }
     else if (center.star() != nullptr)
     {
-        SolarSystem* solarSystem = universe.getSolarSystem(center.star());
-        if (solarSystem == nullptr)
-        {
-            // No solar system defined for this star yet, so we need
-            // to create it.
-            solarSystem = universe.createSolarSystem(center.star());
-        }
+        const SolarSystem* solarSystem = universe.getOrCreateSolarSystem(center.star());
         frameTree = solarSystem->getFrameTree();
     }
     else
@@ -83,14 +78,15 @@ TimelinePhase::CreateTimelinePhase(Universe& universe,
         return nullptr;
     }
 
-    auto phase = shared_ptr<const TimelinePhase>(new TimelinePhase(body,
-                                                                   startTime,
-                                                                   endTime,
-                                                                   orbitFrame,
-                                                                   &orbit,
-                                                                   bodyFrame,
-                                                                   &rotationModel,
-                                                                   frameTree));
+    auto phase = std::make_shared<TimelinePhase>(CreateToken(),
+                                                 body,
+                                                 startTime,
+                                                 endTime,
+                                                 orbitFrame,
+                                                 &orbit,
+                                                 bodyFrame,
+                                                 &rotationModel,
+                                                 frameTree);
 
     frameTree->addChild(phase);
 

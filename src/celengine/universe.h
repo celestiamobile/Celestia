@@ -66,7 +66,6 @@ class Universe
 
     void getCompletionPath(std::vector<std::string>& completion,
                            std::string_view s,
-                           bool i18n,
                            celestia::util::array_view<const Selection> contexts,
                            bool withLocations = false) const;
 
@@ -74,7 +73,7 @@ class Universe
     SolarSystem* getNearestSolarSystem(const UniversalCoord& position) const;
     SolarSystem* getSolarSystem(const Star* star) const;
     SolarSystem* getSolarSystem(const Selection&) const;
-    SolarSystem* createSolarSystem(Star* star) const;
+    SolarSystem* getOrCreateSolarSystem(Star* star) const;
 
     void getNearStars(const UniversalCoord& position,
                       float maxDistance,
@@ -93,7 +92,6 @@ class Universe
  private:
     void getCompletion(std::vector<std::string>& completion,
                        std::string_view s,
-                       bool i18n,
                        celestia::util::array_view<const Selection> contexts,
                        bool withLocations = false) const;
 

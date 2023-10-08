@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cassert>
 #include <algorithm>
+#include <utility>
 #include <celcompat/numbers.h>
 #include <celmath/mathlib.h>
 #include <celutil/gettext.h>
@@ -30,42 +31,16 @@ using namespace std;
 using namespace celmath;
 
 
-Body::Body(PlanetarySystem* _system, const string& _name) :
+Body::Body(PlanetarySystem* _system, const std::string& _name) :
     system(_system),
     orbitVisibility(UseClassVisibility)
 {
     setName(_name);
     recomputeCullingRadius();
-    system->addBody(this);
 }
 
 
-Body::~Body()
-{
-    if (system)
-        system->removeBody(this);
-    // Remove from frame hierarchy
-
-    // Clean up the reference mark list
-    if (referenceMarks)
-    {
-        for (const auto r : *referenceMarks)
-            delete r;
-        delete referenceMarks;
-    }
-
-    delete timeline;
-    delete satellites;
-    delete frameTree;
-
-    if(altSurfaces)
-    {
-        for (const auto &s : *altSurfaces)
-            delete s.second;
-        delete altSurfaces;
-    }
-    delete locations;
-}
+Body::~Body() = default;
 
 
 /*! Reset body attributes to their default values. The object hierarchy is left untouched,
@@ -86,10 +61,8 @@ void Body::setDefaultProperties()
     geometryOrientation = Quaternionf::Identity();
     geometry = InvalidResource;
     surface = Surface(Color::White);
-    delete atmosphere;
-    atmosphere = nullptr;
-    delete rings;
-    rings = nullptr;
+    atmosphere.reset();
+    rings.reset();
     classification = Unknown;
     visible = true;
     clickable = true;
@@ -179,32 +152,28 @@ PlanetarySystem* Body::getSystem() const
 
 FrameTree* Body::getFrameTree() const
 {
-    return frameTree;
+    return frameTree.get();
 }
 
 
 FrameTree* Body::getOrCreateFrameTree()
 {
     if (!frameTree)
-        frameTree = new FrameTree(this);
-    return frameTree;
+        frameTree = std::make_unique<FrameTree>(this);
+    return frameTree.get();
 }
 
 
 const Timeline* Body::getTimeline() const
 {
-    return timeline;
+    return timeline.get();
 }
 
 
-void Body::setTimeline(Timeline* newTimeline)
+void Body::setTimeline(std::unique_ptr<Timeline>&& newTimeline)
 {
-    if (timeline != newTimeline)
-    {
-        delete timeline;
-        timeline = newTimeline;
-        markChanged();
-    }
+    timeline = std::move(newTimeline);
+    markChanged();
 }
 
 
@@ -509,45 +478,52 @@ void Body::setGeometryScale(float scale)
 
 PlanetarySystem* Body::getSatellites() const
 {
-    return satellites;
+    return satellites.get();
 }
 
-void Body::setSatellites(PlanetarySystem* ssys)
+PlanetarySystem* Body::getOrCreateSatellites()
 {
-    satellites = ssys;
+    if (satellites == nullptr)
+        satellites = std::make_unique<PlanetarySystem>(this);
+    return satellites.get();
 }
 
 
 RingSystem* Body::getRings() const
 {
-    return rings;
+    return rings.get();
 }
 
-void Body::setRings(const RingSystem& _rings)
+void Body::setRings(std::unique_ptr<RingSystem>&& _rings)
 {
-    if (!rings)
-        rings = new RingSystem(_rings);
-    else
-        *rings = _rings;
+    rings = std::move(_rings);
+    recomputeCullingRadius();
+}
+
+void Body::scaleRings(float scaleFactor)
+{
+    if (rings == nullptr)
+        return;
+
+    rings->innerRadius *= scaleFactor;
+    rings->outerRadius *= scaleFactor;
     recomputeCullingRadius();
 }
 
 
 const Atmosphere* Body::getAtmosphere() const
 {
-    return atmosphere;
+    return atmosphere.get();
 }
 
 Atmosphere* Body::getAtmosphere()
 {
-    return atmosphere;
+    return atmosphere.get();
 }
 
-void Body::setAtmosphere(const Atmosphere& _atmosphere)
+void Body::setAtmosphere(std::unique_ptr<Atmosphere>&& _atmosphere)
 {
-    if (!atmosphere)
-        atmosphere = new Atmosphere();
-    *atmosphere = _atmosphere;
+    atmosphere = std::move(_atmosphere);
     recomputeCullingRadius();
 }
 
@@ -570,16 +546,16 @@ UniversalCoord Body::getPosition(double tdb) const
 {
     Vector3d position = Vector3d::Zero();
 
-    auto phase = timeline->findPhase(tdb);
+    const TimelinePhase* phase = timeline->findPhase(tdb).get();
     Vector3d p = phase->orbit()->positionAtTime(tdb);
-    auto frame = phase->orbitFrame();
+    const ReferenceFrame* frame = phase->orbitFrame().get();
 
     while (frame->getCenter().getType() == SelectionType::Body)
     {
-        phase = frame->getCenter().body()->timeline->findPhase(tdb);
+        phase = frame->getCenter().body()->timeline->findPhase(tdb).get();
         position += frame->getOrientation(tdb).conjugate() * p;
         p = phase->orbit()->positionAtTime(tdb);
-        frame = phase->orbitFrame();
+        frame = phase->orbitFrame().get();
     }
 
     position += frame->getOrientation(tdb).conjugate() * p;
@@ -595,7 +571,7 @@ UniversalCoord Body::getPosition(double tdb) const
  */
 Quaterniond Body::getOrientation(double tdb) const
 {
-    auto phase = timeline->findPhase(tdb);
+    const TimelinePhase* phase = timeline->findPhase(tdb).get();
     return phase->rotationModel()->orientationAtTime(tdb) * phase->bodyFrame()->getOrientation(tdb);
 }
 
@@ -604,9 +580,9 @@ Quaterniond Body::getOrientation(double tdb) const
  */
 Vector3d Body::getVelocity(double tdb) const
 {
-    auto phase = timeline->findPhase(tdb);
+    const TimelinePhase* phase = timeline->findPhase(tdb).get();
 
-    auto orbitFrame = phase->orbitFrame();
+    const ReferenceFrame* orbitFrame = phase->orbitFrame().get();
 
     Vector3d v = phase->orbit()->velocityAtTime(tdb);
     v = orbitFrame->getOrientation(tdb).conjugate() * v + orbitFrame->getCenter().getVelocity(tdb);
@@ -625,11 +601,11 @@ Vector3d Body::getVelocity(double tdb) const
  */
 Vector3d Body::getAngularVelocity(double tdb) const
 {
-    auto phase = timeline->findPhase(tdb);
+    const TimelinePhase* phase = timeline->findPhase(tdb).get();
 
     Vector3d v = phase->rotationModel()->angularVelocityAtTime(tdb);
 
-    auto bodyFrame = phase->bodyFrame();
+    const ReferenceFrame* bodyFrame = phase->bodyFrame().get();
     v = bodyFrame->getOrientation(tdb).conjugate() * v;
     if (!bodyFrame->isInertial())
     {
@@ -648,7 +624,7 @@ Vector3d Body::getAngularVelocity(double tdb) const
  */
 Matrix4d Body::getLocalToAstrocentric(double tdb) const
 {
-    auto phase = timeline->findPhase(tdb);
+    const TimelinePhase* phase = timeline->findPhase(tdb).get();
     Vector3d p = phase->orbitFrame()->convertToAstrocentric(phase->orbit()->positionAtTime(tdb), tdb);
     return Eigen::Transform<double, 3, Affine>(Translation3d(p)).matrix();
 }
@@ -659,7 +635,7 @@ Matrix4d Body::getLocalToAstrocentric(double tdb) const
 Vector3d Body::getAstrocentricPosition(double tdb) const
 {
     // TODO: Switch the iterative method used in getPosition
-    auto phase = timeline->findPhase(tdb);
+    const TimelinePhase* phase = timeline->findPhase(tdb).get();
     return phase->orbitFrame()->convertToAstrocentric(phase->orbit()->positionAtTime(tdb), tdb);
 }
 
@@ -668,7 +644,7 @@ Vector3d Body::getAstrocentricPosition(double tdb) const
  */
 Quaterniond Body::getEclipticToFrame(double tdb) const
 {
-    auto phase = timeline->findPhase(tdb);
+    const TimelinePhase* phase = timeline->findPhase(tdb).get();
     return phase->bodyFrame()->getOrientation(tdb);
 }
 
@@ -678,7 +654,7 @@ Quaterniond Body::getEclipticToFrame(double tdb) const
  */
 Quaterniond Body::getEclipticToEquatorial(double tdb) const
 {
-    auto phase = timeline->findPhase(tdb);
+    const TimelinePhase* phase = timeline->findPhase(tdb).get();
     return phase->rotationModel()->equatorOrientationAtTime(tdb) * phase->bodyFrame()->getOrientation(tdb);
 }
 
@@ -688,7 +664,7 @@ Quaterniond Body::getEclipticToEquatorial(double tdb) const
  */
 Quaterniond Body::getEclipticToBodyFixed(double tdb) const
 {
-    auto phase = timeline->findPhase(tdb);
+    const TimelinePhase* phase = timeline->findPhase(tdb).get();
     return phase->rotationModel()->orientationAtTime(tdb) * phase->bodyFrame()->getOrientation(tdb);
 }
 
@@ -698,7 +674,7 @@ Quaterniond Body::getEclipticToBodyFixed(double tdb) const
 // meridian, and z-axis at a right angle the xy plane.
 Quaterniond Body::getEquatorialToBodyFixed(double tdb) const
 {
-    auto phase = timeline->findPhase(tdb);
+    const TimelinePhase* phase = timeline->findPhase(tdb).get();
     return phase->rotationModel()->spin(tdb);
 }
 
@@ -950,50 +926,28 @@ Surface* Body::getAlternateSurface(const string& name) const
     if (iter == altSurfaces->end())
         return nullptr;
 
-    return iter->second;
+    return iter->second.get();
 }
 
 
-void Body::addAlternateSurface(const string& name, Surface* surface)
+void Body::addAlternateSurface(const string& name, std::unique_ptr<Surface>&& altSurface)
 {
     if (!altSurfaces)
-        altSurfaces = new AltSurfaceTable();
+        altSurfaces = std::make_unique<AltSurfaceTable>();
 
-    //altSurfaces->insert(AltSurfaceTable::value_type(name, surface));
-    (*altSurfaces)[name] = surface;
+    (*altSurfaces)[name] = std::move(altSurface);
 }
 
 
-vector<string>* Body::getAlternateSurfaceNames() const
+void Body::addLocation(std::unique_ptr<Location>&& loc)
 {
-    vector<string>* names = new vector<string>();
-    if (altSurfaces)
-    {
-        std::transform(altSurfaces->begin(), altSurfaces->end(),
-                       std::back_inserter(*names),
-                       [](const auto& s) { return s.first; });
-    }
-
-    return names;
-}
-
-
-void Body::addLocation(Location* loc)
-{
-    assert(loc != nullptr);
     if (!loc)
         return;
 
     if (!locations)
-        locations = new vector<Location*>();
-    locations->push_back(loc);
+        locations = std::make_unique<std::vector<std::unique_ptr<Location>>>();
     loc->setParentBody(this);
-}
-
-
-vector<Location*>* Body::getLocations() const
-{
-    return locations;
+    locations->push_back(std::move(loc));
 }
 
 
@@ -1002,15 +956,14 @@ Location* Body::findLocation(std::string_view name, bool i18n) const
     if (!locations)
         return nullptr;
 
-    for (const auto location : *locations)
-    {
-        if (!UTF8StringCompare(name, location->getName(false)))
-            return location;
-        if (i18n && !UTF8StringCompare(name, location->getName(true)))
-            return location;
-    }
+    auto iter = i18n
+        ? std::find_if(locations->cbegin(), locations->cend(),
+                       [&name](const auto& loc) { return UTF8StringCompare(name, loc->getName(false)) == 0 ||
+                                                         UTF8StringCompare(name, loc->getName(true)) == 0; })
+        : std::find_if(locations->cbegin(), locations->cend(),
+                       [&name](const auto& loc) { return UTF8StringCompare(name, loc->getName(false)) == 0; });
 
-    return nullptr;
+    return iter == locations->cend() ? nullptr : iter->get();
 }
 
 
@@ -1026,6 +979,9 @@ void Body::computeLocations()
 
     locationsComputed = true;
 
+    if (locations == nullptr)
+        return;
+
     // No work to do if there's no mesh, or if the mesh cannot be loaded
     if (geometry == InvalidResource)
         return;
@@ -1037,9 +993,10 @@ void Body::computeLocations()
     // not necessary.
     double boundingRadius = 2.0;
 
-    for (const auto location : *locations)
+    for (const auto& location : *locations)
     {
-        Vector3f v = location->getPosition();
+        Location* loc = location.get();
+        Vector3f v = loc->getPosition();
         float alt = v.norm() - radius;
         if (alt > 0.1f * radius) // assume we don't have locations with height > 0.1*radius
             continue;
@@ -1052,7 +1009,7 @@ void Body::computeLocations()
         if (g->pick(ray, t))
         {
             v *= (float) ((1.0 - t) * radius + alt);
-            location->setPosition(v);
+            loc->setPosition(v);
         }
     }
 }
@@ -1061,11 +1018,11 @@ void Body::computeLocations()
 /*! Add a new reference mark.
  */
 void
-Body::addReferenceMark(ReferenceMark* refMark)
+Body::addReferenceMark(std::unique_ptr<ReferenceMark>&& refMark)
 {
     if (referenceMarks == nullptr)
-        referenceMarks = new list<ReferenceMark*>();
-    referenceMarks->push_back(refMark);
+        referenceMarks = std::make_unique<std::list<std::unique_ptr<ReferenceMark>>>();
+    referenceMarks->push_back(std::move(refMark));
     recomputeCullingRadius();
 }
 
@@ -1075,16 +1032,17 @@ Body::addReferenceMark(ReferenceMark* refMark)
 void
 Body::removeReferenceMark(const string& tag)
 {
-    if (referenceMarks != nullptr)
-    {
-        ReferenceMark* refMark = findReferenceMark(tag);
-        if (refMark)
-        {
-            referenceMarks->remove(refMark);
-            delete refMark;
-            recomputeCullingRadius();
-        }
-    }
+    if (referenceMarks == nullptr)
+        return;
+
+    auto iter = std::find_if(referenceMarks->begin(),
+                             referenceMarks->end(),
+                             [&tag](const auto& rm) { return rm->getTag() == tag; });
+    if (iter == referenceMarks->end())
+        return;
+
+    referenceMarks->erase(iter);
+    recomputeCullingRadius();
 }
 
 
@@ -1092,31 +1050,18 @@ Body::removeReferenceMark(const string& tag)
  *  no reference marks with the specified tag, this method will return
  *  nullptr.
  */
-ReferenceMark*
+const ReferenceMark*
 Body::findReferenceMark(const string& tag) const
 {
     if (referenceMarks == nullptr)
         return nullptr;
 
-    if (auto iter = std::find_if(referenceMarks->begin(),
-                                 referenceMarks->end(),
-                                 [&tag](const auto* rm) { return rm->getTag() == tag; });
-        iter != referenceMarks->end())
-    {
-            return *iter;
-    }
-
-    return nullptr;
-}
-
-
-/*! Get the list of reference marks associated with this body. May return
- *  nullptr if there are no reference marks.
- */
-const list<ReferenceMark*>*
-Body::getReferenceMarks() const
-{
-    return referenceMarks;
+    auto iter = std::find_if(referenceMarks->begin(),
+                             referenceMarks->end(),
+                             [&tag](const auto& rm) { return rm->getTag() == tag; });
+    return iter == referenceMarks->end()
+        ? nullptr
+        : iter->get();
 }
 
 
@@ -1216,7 +1161,7 @@ void Body::recomputeCullingRadius()
 
     if (referenceMarks)
     {
-        for (const auto rm : *referenceMarks)
+        for (const auto& rm : *referenceMarks)
         {
             r = max(r, rm->boundingSphereRadius());
         }
@@ -1264,77 +1209,53 @@ void PlanetarySystem::addAlias(Body* body, const string& alias)
 {
     assert(body->getSystem() == this);
 
-    objectIndex.insert(make_pair(alias, body));
+    objectIndex.try_emplace(alias, body);
 }
 
 
-/*! Remove the an alias for an object. This method does nothing
- *  if the alias is not present in the index, or if the alias
- *  refers to a different object.
- */
-void PlanetarySystem::removeAlias(const Body* body, const string& alias)
+Body* PlanetarySystem::addBody(const std::string& name)
 {
-    assert(body->getSystem() == this);
-
-    ObjectIndex::iterator iter = objectIndex.find(alias);
-    if (iter != objectIndex.end())
-    {
-        if (iter->second == body)
-            objectIndex.erase(iter);
-    }
+    auto body = std::make_unique<Body>(this, name);
+    addBodyToNameIndex(body.get());
+    return satellites.emplace_back(std::move(body)).get();
 }
 
 
-void PlanetarySystem::addBody(Body* body)
+void PlanetarySystem::removeBody(const Body* body)
 {
-    satellites.push_back(body);
-    addBodyToNameIndex(body);
+    if (body->getSystem() != this)
+        return;
+    auto iter = std::find_if(satellites.begin(), satellites.end(),
+                             [body](const auto& sat) { return sat.get() == body; });
+    if (iter == satellites.end())
+        return;
+
+    removeBodyFromNameIndex(body);
+    satellites.erase(iter);
 }
 
 
 // Add all aliases for the body to the name index
 void PlanetarySystem::addBodyToNameIndex(Body* body)
 {
-    const vector<string>& names = body->getNames();
+    const std::vector<std::string>& names = body->getNames();
     for (const auto& name : names)
     {
-        objectIndex.insert(make_pair(name, body));
+        objectIndex.try_emplace(name, body);
     }
 }
 
 
-// Remove all references to the body in the name index.
 void PlanetarySystem::removeBodyFromNameIndex(const Body* body)
 {
-    assert(body->getSystem() == this);
-
-    // Erase the object from the object indices
-    const vector<string>& names = body->getNames();
+    const std::vector<std::string>& names = body->getNames();
     for (const auto& name : names)
     {
-        removeAlias(body, name);
+        auto iter = objectIndex.find(name);
+        if (iter == objectIndex.end() || iter->second != body)
+            continue;
+        objectIndex.erase(iter);
     }
-}
-
-
-void PlanetarySystem::removeBody(Body* body)
-{
-    auto iter = std::find(satellites.begin(), satellites.end(), body);
-    if (iter != satellites.end())
-        satellites.erase(iter);
-
-    removeBodyFromNameIndex(body);
-}
-
-
-void PlanetarySystem::replaceBody(Body* oldBody, Body* newBody)
-{
-    auto iter = std::find(satellites.begin(), satellites.end(), oldBody);
-    if (iter != satellites.end())
-      *iter = newBody;
-
-    removeBodyFromNameIndex(oldBody);
-    addBodyToNameIndex(newBody);
 }
 
 
@@ -1362,8 +1283,9 @@ Body* PlanetarySystem::find(std::string_view _name, bool deepSearch, bool i18n) 
 
     if (deepSearch)
     {
-        for (const auto sat : satellites)
+        for (const auto& satellite : satellites)
         {
+            Body* sat = satellite.get();
             if (!UTF8StringCompare(sat->getName(false), _name))
                 return sat;
             if (i18n && !UTF8StringCompare(sat->getName(true), _name))
@@ -1383,7 +1305,6 @@ Body* PlanetarySystem::find(std::string_view _name, bool deepSearch, bool i18n) 
 
 void PlanetarySystem::getCompletion(std::vector<std::string>& completion,
                                     std::string_view _name,
-                                    bool i18n,
                                     bool deepSearch) const
 {
     // Search through all names in this planetary system.
@@ -1392,8 +1313,10 @@ void PlanetarySystem::getCompletion(std::vector<std::string>& completion,
         const string& alias = index.first;
 
         if (UTF8StartsWith(alias, _name))
+        {
             completion.push_back(alias);
-        else if (i18n)
+        }
+        else
         {
             std::string lname = D_(alias.c_str());
             if (lname != alias && UTF8StartsWith(lname, _name))
@@ -1401,26 +1324,14 @@ void PlanetarySystem::getCompletion(std::vector<std::string>& completion,
         }
     }
 
+    if (!deepSearch)
+        return;
+
     // Scan child objects
-    if (deepSearch)
+    for (const auto& sat : satellites)
     {
-        for (const auto sat : satellites)
-        {
-            if (sat->getSatellites())
-                sat->getSatellites()->getCompletion(completion, _name, i18n);
-        }
+        const PlanetarySystem* satelliteSystem = sat->getSatellites();
+        if (satelliteSystem != nullptr)
+            satelliteSystem->getCompletion(completion, _name);
     }
-}
-
-
-/*! Get the order of the object in the list of children. Returns -1 if the
- *  specified body is not a child object.
- */
-int PlanetarySystem::getOrder(const Body* body) const
-{
-    auto iter = std::find(satellites.begin(), satellites.end(), body);
-    if (iter == satellites.end())
-        return -1;
-
-    return iter - satellites.begin();
 }
