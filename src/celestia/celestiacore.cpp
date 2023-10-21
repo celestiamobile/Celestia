@@ -77,12 +77,14 @@
 
 using namespace Eigen;
 using namespace std;
-using namespace astro::literals;
 using namespace celmath;
 using namespace celestia;
+using namespace celestia::astro::literals;
 using namespace celestia::engine;
 using namespace celestia::scripts;
 using namespace celestia::util;
+
+namespace astro = celestia::astro;
 
 static const int DragThreshold = 3;
 
@@ -187,6 +189,8 @@ bool ReadLeapSecondsFile(const fs::path& path, std::vector<astro::LeapSecondReco
         double jd = (timestamp - 2208988800) / 86400.0 + 2440587.5;
         leapSeconds.push_back({seconds, jd});
     }
+
+    std::sort(leapSeconds.begin(), leapSeconds.end(), [](const auto& a, const auto& b) { return a.t < b.t; });
 
     astro::setLeapSeconds(leapSeconds);
     return true;

@@ -15,8 +15,8 @@
 #include "hash.h"
 #include "value.h"
 
-namespace celutil = celestia::util;
-
+namespace astro = celestia::astro;
+namespace util = celestia::util;
 
 // Define these here: at declaration the vector member contains an incomplete type
 AssociativeArray::~AssociativeArray() = default;
@@ -63,7 +63,7 @@ std::optional<fs::path> AssociativeArray::getPath(std::string_view key) const
     const std::string* v = getString(key);
     if (v == nullptr) { return std::nullopt; }
 
-    return std::make_optional(celutil::PathExp(*v));
+    return std::make_optional(util::PathExp(*v));
 }
 
 
