@@ -335,10 +335,6 @@ SkyGrid::render(Renderer& renderer,
                 int windowWidth,
                 int windowHeight)
 {
-    // 90 degree rotation about the x-axis used to transform coordinates
-    // to Celestia's system.
-    Quaterniond xrot90 = XRotation(-celestia::numbers::pi / 2.0);
-
     auto vfov = static_cast<double>(renderer.getProjectionMode()->getFOV(observer.getZoom()));
     double viewAspectRatio = static_cast<double>(windowWidth) / static_cast<double>(windowHeight);
 
@@ -369,7 +365,13 @@ SkyGrid::render(Renderer& renderer,
     Vector3d c3( w,  h, -1.0);
 
     Quaterniond cameraOrientation = renderer.getCameraOrientation();
-    Matrix3d r = (cameraOrientation * xrot90 * m_orientation.conjugate() * xrot90.conjugate()).toRotationMatrix().transpose();
+
+    // 90 degree rotation about the x-axis used to transform coordinates
+    // to Celestia's system.
+    Matrix3d r = (cameraOrientation *
+                  celmath::XRot90Conjugate<double> *
+                  m_orientation.conjugate() *
+                  celmath::XRot90<double>).toRotationMatrix().transpose();
 
     // Transform the frustum corners by the camera and grid
     // rotations.
@@ -475,19 +477,21 @@ SkyGrid::render(Renderer& renderer,
     int raIncrement  = meridianSpacing(idealMeridianSpacing);
     int decIncrement = parallelSpacing(idealParallelSpacing);
 
-    int startRa  = (int) std::ceil (totalLongitudeUnits * (minTheta / (celestia::numbers::pi * 2.0)) / (double) raIncrement) * raIncrement;
-    int endRa    = (int) std::floor(totalLongitudeUnits * (maxTheta / (celestia::numbers::pi * 2.0)) / (double) raIncrement) * raIncrement;
-    int startDec = (int) std::ceil (DEG_MIN_SEC_TOTAL  * (minDec / celestia::numbers::pi) / (double) decIncrement) * decIncrement;
-    int endDec   = (int) std::floor(DEG_MIN_SEC_TOTAL  * (maxDec / celestia::numbers::pi) / (double) decIncrement) * decIncrement;
+    int startRa  = (int) std::ceil (totalLongitudeUnits * (minTheta * 0.5 * celestia::numbers::inv_pi) / (double) raIncrement) * raIncrement;
+    int endRa    = (int) std::floor(totalLongitudeUnits * (maxTheta * 0.5 * celestia::numbers::inv_pi) / (double) raIncrement) * raIncrement;
+    int startDec = (int) std::ceil (DEG_MIN_SEC_TOTAL  * (minDec * celestia::numbers::inv_pi) / (double) decIncrement) * decIncrement;
+    int endDec   = (int) std::floor(DEG_MIN_SEC_TOTAL  * (maxDec * celestia::numbers::inv_pi) / (double) decIncrement) * decIncrement;
 
     // Get the orientation at single precision
-    Quaterniond q = xrot90 * m_orientation * xrot90.conjugate();
+    Quaterniond q = celmath::XRot90Conjugate<double> * m_orientation * celmath::XRot90<double>;
     Quaternionf orientationf = q.cast<float>();
 
     // Radius of sphere is arbitrary, with the constraint that it shouldn't
     // intersect the near or far plane of the view frustum.
     Matrix4f m = renderer.getModelViewMatrix() *
-                 celmath::rotate((xrot90 * m_orientation.conjugate() * xrot90.conjugate()).cast<float>()) *
+                 celmath::rotate((celmath::XRot90Conjugate<double> *
+                                  m_orientation.conjugate() *
+                                  celmath::XRot90<double>).cast<float>()) *
                  celmath::scale(1000.0f);
     Matrices matrices = {&renderer.getProjectionMatrix(), &m};
 
