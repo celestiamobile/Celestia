@@ -8,8 +8,8 @@
 // of the License, or (at your option) any later version.
 
 #include <cctype>
+#include <cstdio>
 #include <cstring>
-#include <iostream>
 #include <memory>
 #include <string_view>
 #include <system_error>
@@ -579,7 +579,7 @@ SDL_Application::toggleFullscreen()
         // First try to activate real fullscreen mode
         ret = SDL_SetWindowFullscreen(m_mainWindow, SDL_WINDOW_FULLSCREEN);
         // Then try to emulate fulscreen resizing to the desktop size
-        if (ret == 0)
+        if (ret < 0)
             ret = SDL_SetWindowFullscreen(m_mainWindow, SDL_WINDOW_FULLSCREEN_DESKTOP);
         if (ret == 0)
             m_fullscreen = true;
@@ -619,7 +619,7 @@ FatalErrorImpl(fmt::string_view format, fmt::format_args args)
                                        message.c_str(),
                                        nullptr);
     if (ret < 0)
-        std::cerr << message << std::endl;
+        fmt::print(stderr, "{}\n", message);
 }
 
 template <typename... Args> void
@@ -634,19 +634,19 @@ DumpGLInfo()
     const char* s;
     s = reinterpret_cast<const char*>(glGetString(GL_VERSION));
     if (s != nullptr)
-        std::cout << s << '\n';
+        fmt::print("GL Version: {}\n", s);
 
     s = reinterpret_cast<const char*>(glGetString(GL_VENDOR));
     if (s != nullptr)
-        std::cout << s << '\n';
+        fmt::print("GL Vendor: {}\n", s);
 
     s = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
     if (s != nullptr)
-        std::cout << s << '\n';
+        fmt::print("GL Renderer: {}\n", s);
 
     s = reinterpret_cast<const char*>(glGetString(GL_SHADING_LANGUAGE_VERSION));
     if (s != nullptr)
-        std::cout << s << '\n';
+        fmt::print("GLSL Version: {}\n", s);
 }
 
 int
@@ -654,11 +654,14 @@ sdlmain(int /* argc */, char ** /* argv */)
 {
     setlocale(LC_ALL, "");
     setlocale(LC_NUMERIC, "C");
+
+#ifdef ENABLE_NLS
     bindtextdomain("celestia", LOCALEDIR);
     bind_textdomain_codeset("celestia", "UTF-8");
     bindtextdomain("celestia-data", LOCALEDIR);
     bind_textdomain_codeset("celestia-data", "UTF-8");
     textdomain("celestia");
+#endif
 
     const char *dataDir = getenv("CELESTIA_DATA_DIR");
     if (dataDir == nullptr)
