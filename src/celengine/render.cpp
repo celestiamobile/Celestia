@@ -3245,6 +3245,8 @@ void Renderer::addRenderListEntries(RenderListEntry& rle,
             rle.isOpaque = true;
         }
         rle.radius = body.getRadius();
+        if (body.getRings() != nullptr)
+            rle.radius += body.getRings()->outerRadius;
         renderList.push_back(rle);
     }
 
@@ -5276,8 +5278,6 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
 
         setCurrentProjectionMatrix(proj);
 
-        auto intervalFrustum = projectionMode->getFrustum(nearPlaneDistance, farPlaneDistance, observer.getZoom());
-
         int firstInInterval = i;
 
         // Render just the opaque objects in the first pass
@@ -5298,6 +5298,8 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
         // Render orbit paths
         if (!orbitPathList.empty())
         {
+            celmath::Frustum intervalFrustum = projectionMode->getFrustum(nearPlaneDistance, farPlaneDistance, observer.getZoom());
+
             // Scan through the list of orbits and render any that overlap this interval
             for (const auto& orbit : orbitPathList)
             {
