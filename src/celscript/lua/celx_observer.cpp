@@ -46,8 +46,8 @@ Observer* to_observer(lua_State* l, int index)
 {
     CelxLua celx(l);
 
-    Observer** o = static_cast<Observer**>(lua_touserdata(l, index));
-    CelestiaCore* appCore = celx.appCore(AllErrors);
+    auto o = static_cast<Observer* const*>(lua_touserdata(l, index));
+    const CelestiaCore* appCore = celx.appCore(AllErrors);
 
     // Check if pointer is still valid, i.e. is used by a view:
     if (o != nullptr && getViewByObserver(appCore, *o) != nullptr)
@@ -764,7 +764,7 @@ static int observer_getspeed(lua_State* l)
     CelxLua celx(l);
     celx.checkArgs(1, 1, "No argument expected for observer:getspeed()");
 
-    Observer* obs = this_observer(l);
+    const Observer* obs = this_observer(l);
 
     lua_pushnumber(l, (lua_Number) astro::kilometersToMicroLightYears(obs->getTargetSpeed()));
 
@@ -801,16 +801,18 @@ static int observer_splitview(lua_State* l)
     CelxLua celx(l);
     celx.checkArgs(2, 3, "One or two arguments expected for observer:splitview()");
 
-    Observer* obs = this_observer(l);
+    const Observer* obs = this_observer(l);
     CelestiaCore* appCore = celx.appCore(AllErrors);
     const char* splitType = celx.safeGetString(2, AllErrors, "First argument to observer:splitview() must be a string");
-    View::Type type = (compareIgnoringCase(splitType, "h") == 0) ? View::HorizontalSplit : View::VerticalSplit;
+    celestia::View::Type type = (compareIgnoringCase(splitType, "h") == 0)
+        ? celestia::View::HorizontalSplit
+        : celestia::View::VerticalSplit;
     double splitPos = celx.safeGetNumber(3, WrongType, "Number expected as argument to observer:splitview()", 0.5);
     if (splitPos < 0.1)
         splitPos = 0.1;
     if (splitPos > 0.9)
         splitPos = 0.9;
-    View* view = getViewByObserver(appCore, obs);
+    celestia::View* view = getViewByObserver(appCore, obs);
     appCore->splitView(type, view, (float)splitPos);
     return 0;
 }
@@ -820,9 +822,9 @@ static int observer_deleteview(lua_State* l)
     CelxLua celx(l);
     celx.checkArgs(1, 1, "No argument expected for observer:deleteview()");
 
-    Observer* obs = this_observer(l);
+    const Observer* obs = this_observer(l);
     CelestiaCore* appCore = celx.appCore(AllErrors);
-    View* view = getViewByObserver(appCore, obs);
+    celestia::View* view = getViewByObserver(appCore, obs);
     appCore->deleteView(view);
     return 0;
 }
@@ -832,9 +834,9 @@ static int observer_singleview(lua_State* l)
     CelxLua celx(l);
     celx.checkArgs(1, 1, "No argument expected for observer:singleview()");
 
-    Observer* obs = this_observer(l);
+    const Observer* obs = this_observer(l);
     CelestiaCore* appCore = celx.appCore(AllErrors);
-    View* view = getViewByObserver(appCore, obs);
+    const celestia::View* view = getViewByObserver(appCore, obs);
     appCore->singleView(view);
     return 0;
 }
@@ -844,9 +846,9 @@ static int observer_makeactiveview(lua_State* l)
     CelxLua celx(l);
     celx.checkArgs(1, 1, "No argument expected for observer:makeactiveview()");
 
-    Observer* obs = this_observer(l);
+    const Observer* obs = this_observer(l);
     CelestiaCore* appCore = celx.appCore(AllErrors);
-    View* view = getViewByObserver(appCore, obs);
+    const celestia::View* view = getViewByObserver(appCore, obs);
     appCore->setActiveView(view);
     return 0;
 }
