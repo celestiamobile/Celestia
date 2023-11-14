@@ -672,16 +672,32 @@ void
 HudFonts::setFont(const std::shared_ptr<TextureFont>& f)
 {
     m_font = f;
-    m_fontHeight = f->getHeight();
-    m_emWidth = engine::TextLayout::getTextWidth("M", f.get());
+    if (f == nullptr)
+    {
+        m_titleFontHeight = 0;
+        m_titleEmWidth = 0;
+    }
+    else
+    {
+        m_fontHeight = f->getHeight();
+        m_emWidth = engine::TextLayout::getTextWidth("M", f.get());
+    }
 }
 
 void
 HudFonts::setTitleFont(const std::shared_ptr<TextureFont>& f)
 {
     m_titleFont = f;
-    m_titleFontHeight = f->getHeight();
-    m_titleEmWidth = engine::TextLayout::getTextWidth("M", f.get());
+    if (f == nullptr)
+    {
+        m_titleFontHeight = 0;
+        m_titleEmWidth = 0;
+    }
+    else
+    {
+        m_titleFontHeight = f->getHeight();
+        m_titleEmWidth = engine::TextLayout::getTextWidth("M", f.get());
+    }
 }
 
 Hud::~Hud() = default;
