@@ -18,6 +18,8 @@
 
 #include <fmt/format.h>
 
+#include <celastro/astro.h>
+#include <celastro/date.h>
 #include <celephem/orbit.h>
 #include <celephem/rotation.h>
 #include "univcoord.h"
@@ -26,6 +28,7 @@ using namespace std::string_view_literals;
 using celestia::util::IntrusivePtr;
 
 namespace astro = celestia::astro;
+namespace math = celestia::math;
 
 namespace
 {
@@ -1083,7 +1086,7 @@ float Star::getRadius() const
     // Use the Stefan-Boltzmann law to estimate the radius of a
     // star from surface temperature and luminosity
     return astro::SOLAR_RADIUS<float> * std::sqrt(lum) *
-        celmath::square(SOLAR_TEMPERATURE / getTemperature());
+        math::square(SOLAR_TEMPERATURE / getTemperature());
 }
 
 

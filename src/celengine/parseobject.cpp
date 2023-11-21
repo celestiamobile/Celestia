@@ -18,6 +18,8 @@
 #include "trajmanager.h"
 #include "rotationmanager.h"
 #include "universe.h"
+#include <celastro/astro.h>
+#include <celastro/date.h>
 #include <celcompat/numbers.h>
 #include <celephem/customorbit.h>
 #include <celephem/customrotation.h>
@@ -34,13 +36,13 @@
 
 using namespace Eigen;
 using namespace std;
-using namespace celmath;
 using celestia::ephem::TrajectoryInterpolation;
 using celestia::ephem::TrajectoryPrecision;
 using celestia::util::GetLogger;
 
 namespace astro = celestia::astro;
 namespace ephem = celestia::ephem;
+namespace math = celestia::math;
 
 /**
  * Returns the default units scale for orbits.
@@ -222,10 +224,10 @@ CreateKeplerianOrbit(const Hash* orbitData,
     else if (auto meanLongitude = orbitData->getAngle<double>("MeanLongitude"); meanLongitude.has_value())
         elements.meanAnomaly = *meanLongitude - (elements.argPericenter + elements.longAscendingNode);
 
-    elements.inclination = celmath::degToRad(elements.inclination);
-    elements.longAscendingNode = celmath::degToRad(elements.longAscendingNode);
-    elements.argPericenter = celmath::degToRad(elements.argPericenter);
-    elements.meanAnomaly = celmath::degToRad(elements.meanAnomaly);
+    elements.inclination = celestia::math::degToRad(elements.inclination);
+    elements.longAscendingNode = celestia::math::degToRad(elements.longAscendingNode);
+    elements.argPericenter = celestia::math::degToRad(elements.argPericenter);
+    elements.meanAnomaly = celestia::math::degToRad(elements.meanAnomaly);
 
     if (elements.eccentricity < 1.0)
     {
@@ -701,9 +703,9 @@ CreateOrbit(const Selection& centralObject,
         GetLogger()->error("Could not find custom orbit named '{}'\n", *customOrbitName);
     }
 
-#ifdef USE_SPICE
     if (const Value* spiceOrbitDataValue = planetData->getValue("SpiceOrbit"); spiceOrbitDataValue != nullptr)
     {
+#ifdef USE_SPICE
         const Hash* spiceOrbitData = spiceOrbitDataValue->getHash();
         if (spiceOrbitData == nullptr)
         {
@@ -720,8 +722,10 @@ CreateOrbit(const Selection& centralObject,
             GetLogger()->error("Bad spice orbit\n");
             GetLogger()->error("Could not load SPICE orbit\n");
         }
-    }
+#else
+        GetLogger()->warn("Spice support is not enabled, ignoring SpiceOrbit definition\n");
 #endif
+    }
 
     // Trajectory calculated by Lua script
     if (const Value* scriptedOrbitValue = planetData->getValue("ScriptedOrbit"); scriptedOrbitValue != nullptr)
@@ -843,9 +847,9 @@ CreateFixedRotationModel(double offset,
                          double inclination,
                          double ascendingNode)
 {
-    Quaterniond q = YRotation(-celestia::numbers::pi - offset) *
-                    XRotation(-inclination) *
-                    YRotation(-ascendingNode);
+    Quaterniond q = math::YRotation(-celestia::numbers::pi - offset) *
+                    math::XRotation(-inclination) *
+                    math::YRotation(-ascendingNode);
 
     return std::make_unique<celestia::ephem::ConstantOrientation>(q);
 }
@@ -858,13 +862,13 @@ CreateUniformRotationModel(const Hash* rotationData,
     // Default to synchronous rotation
     auto period = rotationData->getTime<double>("Period", 1.0, 1.0 / astro::HOURS_PER_DAY).value_or(syncRotationPeriod);
 
-    auto offset = degToRad(rotationData->getAngle<double>("MeridianAngle").value_or(0.0));
+    auto offset = math::degToRad(rotationData->getAngle<double>("MeridianAngle").value_or(0.0));
 
     double epoch = astro::J2000;
     ParseDate(rotationData, "Epoch", epoch);
 
-    auto inclination = degToRad(rotationData->getAngle<double>("Inclination").value_or(0.0));
-    auto ascendingNode = degToRad(rotationData->getAngle<double>("AscendingNode").value_or(0.0));
+    auto inclination = math::degToRad(rotationData->getAngle<double>("Inclination").value_or(0.0));
+    auto ascendingNode = math::degToRad(rotationData->getAngle<double>("AscendingNode").value_or(0.0));
 
     // No period was specified, and the default synchronous
     // rotation period is zero, indicating that the object
@@ -888,13 +892,13 @@ CreateUniformRotationModel(const Hash* rotationData,
 static std::unique_ptr<celestia::ephem::ConstantOrientation>
 CreateFixedRotationModel(const Hash* rotationData)
 {
-    auto offset = degToRad(rotationData->getAngle<double>("MeridianAngle").value_or(0.0));
-    auto inclination = degToRad(rotationData->getAngle<double>("Inclination").value_or(0.0));
-    auto ascendingNode = degToRad(rotationData->getAngle<double>("AscendingNode").value_or(0.0));
+    auto offset = math::degToRad(rotationData->getAngle<double>("MeridianAngle").value_or(0.0));
+    auto inclination = math::degToRad(rotationData->getAngle<double>("Inclination").value_or(0.0));
+    auto ascendingNode = math::degToRad(rotationData->getAngle<double>("AscendingNode").value_or(0.0));
 
-    Quaterniond q = YRotation(-celestia::numbers::pi - offset) *
-                    XRotation(-inclination) *
-                    YRotation(-ascendingNode);
+    Quaterniond q = math::YRotation(-celestia::numbers::pi - offset) *
+                    math::XRotation(-inclination) *
+                    math::YRotation(-ascendingNode);
 
     return std::make_unique<celestia::ephem::ConstantOrientation>(q);
 }
@@ -903,13 +907,13 @@ CreateFixedRotationModel(const Hash* rotationData)
 static std::unique_ptr<celestia::ephem::ConstantOrientation>
 CreateFixedAttitudeRotationModel(const Hash* rotationData)
 {
-    auto heading = degToRad(rotationData->getAngle<double>("Heading").value_or(0.0));
-    auto tilt = degToRad(rotationData->getAngle<double>("Tilt").value_or(0.0));
-    auto roll = degToRad(rotationData->getAngle<double>("Roll").value_or(0.0));
+    auto heading = math::degToRad(rotationData->getAngle<double>("Heading").value_or(0.0));
+    auto tilt = math::degToRad(rotationData->getAngle<double>("Tilt").value_or(0.0));
+    auto roll = math::degToRad(rotationData->getAngle<double>("Roll").value_or(0.0));
 
-    Quaterniond q = YRotation(-celestia::numbers::pi - heading) *
-                    XRotation(-tilt) *
-                    ZRotation(-roll);
+    Quaterniond q = math::YRotation(-celestia::numbers::pi - heading) *
+                    math::XRotation(-tilt) *
+                    math::ZRotation(-roll);
 
     return std::make_unique<celestia::ephem::ConstantOrientation>(q);
 }
@@ -922,13 +926,13 @@ CreatePrecessingRotationModel(const Hash* rotationData,
     // Default to synchronous rotation
     double period = rotationData->getTime<double>("Period", 1.0, 1.0 / astro::HOURS_PER_DAY).value_or(syncRotationPeriod);
 
-    auto offset = degToRad(rotationData->getAngle<double>("MeridianAngle").value_or(0.0));
+    auto offset = math::degToRad(rotationData->getAngle<double>("MeridianAngle").value_or(0.0));
 
     double epoch = astro::J2000;
     ParseDate(rotationData, "Epoch", epoch);
 
-    auto inclination = degToRad(rotationData->getAngle<double>("Inclination").value_or(0.0));
-    auto ascendingNode = degToRad(rotationData->getAngle<double>("AscendingNode").value_or(0.0));
+    auto inclination = math::degToRad(rotationData->getAngle<double>("Inclination").value_or(0.0));
+    auto ascendingNode = math::degToRad(rotationData->getAngle<double>("AscendingNode").value_or(0.0));
 
     // The default value of 0 is handled specially, interpreted to indicate
     // that there's no precession.
@@ -1013,9 +1017,9 @@ CreateRotationModel(const Hash* planetData,
                            *customRotationModelName);
     }
 
-#ifdef USE_SPICE
     if (const Value* spiceRotationDataValue = planetData->getValue("SpiceRotation"); spiceRotationDataValue != nullptr)
     {
+#ifdef USE_SPICE
         const Hash* spiceRotationData = spiceRotationDataValue->getHash();
         if (spiceRotationData == nullptr)
         {
@@ -1030,8 +1034,10 @@ CreateRotationModel(const Hash* planetData,
             }
             GetLogger()->error("Bad spice rotation model\nCould not load SPICE rotation model\n");
         }
-    }
+#else
+        GetLogger()->warn("Spice support is not enabled, ignoring SpiceRotation definition\n");
 #endif
+    }
 
     if (const Value* scriptedRotationValue = planetData->getValue("ScriptedRotation"); scriptedRotationValue != nullptr)
     {
@@ -1124,7 +1130,7 @@ CreateRotationModel(const Hash* planetData,
     if (auto offsetVal = planetData->getNumber<float>("RotationOffset"); offsetVal.has_value())
     {
         specified = true;
-        offset = degToRad(*offsetVal);
+        offset = math::degToRad(*offsetVal);
     }
 
     double epoch = astro::J2000;
@@ -1137,14 +1143,14 @@ CreateRotationModel(const Hash* planetData,
     if (auto inclinationVal = planetData->getNumber<float>("Obliquity"); inclinationVal.has_value())
     {
         specified = true;
-        inclination = degToRad(*inclinationVal);
+        inclination = math::degToRad(*inclinationVal);
     }
 
     float ascendingNode = 0.0f;
     if (auto ascendingNodeVal = planetData->getNumber<float>("EquatorAscendingNode"); ascendingNodeVal.has_value())
     {
         specified = true;
-        ascendingNode = degToRad(*ascendingNodeVal);
+        ascendingNode = math::degToRad(*ascendingNodeVal);
     }
 
     double precessionRate = 0.0f;

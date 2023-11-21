@@ -28,7 +28,6 @@
 #include <celengine/glshader.h>
 #include <celengine/texture.h>
 #include <celimage/image.h>
-#include <celimage/imageformats.h>
 #include <celmath/geomutil.h>
 #include <celmath/mathlib.h>
 #include <celmodel/model.h>
@@ -36,6 +35,9 @@
 #include "pathmanager.h"
 
 #define DEBUG_SHADOWS 0
+
+namespace math = celestia::math;
+using celestia::engine::Image;
 
 namespace cmodview
 {
@@ -387,9 +389,9 @@ MaterialLibrary::loadTexture(const QString& fileName)
 
     std::unique_ptr<Image> image;
     if constexpr (std::is_same_v<fs::path::value_type, wchar_t>)
-        image = LoadImageFromFile(fileName.toStdWString());
+        image = Image::load(fileName.toStdWString());
     else
-        image = LoadImageFromFile(fileName.toStdString());
+        image = Image::load(fileName.toStdString());
 
     if (image == nullptr)
         return nullptr;
@@ -654,7 +656,7 @@ ModelViewWidget::select(const Eigen::Vector2f& viewportPoint)
     }
 
     float aspectRatio = static_cast<float>(size().width()) / static_cast<float>(size().height());
-    auto fovRad = celmath::degToRad(VIEWPORT_FOV);
+    auto fovRad = math::degToRad(VIEWPORT_FOV);
     float h = std::tan(fovRad / 2.0f);
     Eigen::Vector3d direction(h * aspectRatio * viewportPoint.x(), h * viewportPoint.y(), -1.0f);
     direction.normalize();
@@ -750,7 +752,7 @@ ModelViewWidget::paintGL()
 
     glMatrixMode(GL_PROJECTION);
     double aspectRatio = (double) size().width() / (double) size().height();
-    glLoadMatrixd(celmath::Perspective(static_cast<double>(VIEWPORT_FOV), aspectRatio, nearDistance, farDistance).data());
+    glLoadMatrixd(math::Perspective(static_cast<double>(VIEWPORT_FOV), aspectRatio, nearDistance, farDistance).data());
 
     glEnable(GL_LIGHTING);
 
@@ -814,7 +816,7 @@ ModelViewWidget::paintGL()
         {
             glDisable(GL_DEPTH_TEST);
             glMatrixMode(GL_PROJECTION);
-            glLoadMatrixd(celmath::Ortho2D(0.0, static_cast<double>(width()), 0.0, static_cast<double>(height()).data());
+            glLoadMatrixd(math::Ortho2D(0.0, static_cast<double>(width()), 0.0, static_cast<double>(height()).data());
             glMatrixMode(GL_MODELVIEW);
             glLoadIdentity();
             glDisable(GL_LIGHTING);

@@ -18,6 +18,7 @@
 #include <celengine/category.h>
 #include <celengine/texture.h>
 #include <celestia/audiosession.h>
+#include <celestia/hud.h>
 #include <celestia/url.h>
 #include <celestia/celestiacore.h>
 #include <celestia/view.h>
@@ -43,7 +44,6 @@ using namespace Eigen;
 using namespace celestia;
 using namespace celestia::scripts;
 using celestia::util::GetLogger;
-
 
 extern const char* KbdCallback;
 extern const char* CleanupCallback;
@@ -404,10 +404,10 @@ static int celestia_getlayoutdirection(lua_State* l)
     Celx_CheckArgs(l, 1, 1, "No argument expected in celestia:getlayoutdirection");
     switch (this_celestia(l)->getLayoutDirection())
     {
-    case CelestiaCore::LayoutDirection::LeftToRight:
+    case celestia::LayoutDirection::LeftToRight:
         lua_pushstring(l, "ltr");
         break;
-    case CelestiaCore::LayoutDirection::RightToLeft:
+    case celestia::LayoutDirection::RightToLeft:
         lua_pushstring(l, "rtl");
         break;
     default:
@@ -424,9 +424,9 @@ static int celestia_setlayoutdirection(lua_State* l)
 
     string layoutDirection = Celx_SafeGetString(l, 2, AllErrors, "Argument to celestia:setlayoutdirection must be a string");
     if (layoutDirection == "ltr") // NOSONAR
-        appCore->setLayoutDirection(CelestiaCore::LayoutDirection::LeftToRight);
+        appCore->setLayoutDirection(LayoutDirection::LeftToRight);
     else if (layoutDirection == "rtl")
-        appCore->setLayoutDirection(CelestiaCore::LayoutDirection::RightToLeft);
+        appCore->setLayoutDirection(LayoutDirection::RightToLeft);
     else
        Celx_DoError(l, "Invalid layoutDirection");
     return 0;
@@ -769,9 +769,9 @@ static int celestia_setoverlayelements(lua_State* l)
         return 0;
     }
 
-    int overlayElements = appCore->getOverlayElements();
+    auto overlayElements = appCore->getOverlayElements();
     lua_pushnil(l);
-    auto &OverlayElementMap = appCore->scriptMaps()->OverlayElementMap;
+    const auto &OverlayElementMap = appCore->scriptMaps()->OverlayElementMap;
     while (lua_next(l, -2) != 0)
     {
         string key;
@@ -794,13 +794,13 @@ static int celestia_setoverlayelements(lua_State* l)
             Celx_DoError(l, "Values in table-argument to celestia:setoverlayelements() must be boolean");
             return 0;
         }
-        if (OverlayElementMap.count(key) == 0)
+        if (auto it = OverlayElementMap.find(key); it == OverlayElementMap.end())
         {
             GetLogger()->warn("Unknown key: {}\n", key);
         }
         else
         {
-            int element = OverlayElementMap[key];
+            auto element = static_cast<HudElements>(it->second);
             if (value)
                 overlayElements |= element;
             else
@@ -817,7 +817,7 @@ static int celestia_getoverlayelements(lua_State* l)
     Celx_CheckArgs(l, 1, 1, "No arguments expected for celestia:getoverlayelements()");
     CelestiaCore* appCore = this_celestia(l);
     lua_newtable(l);
-    const int overlayElements = appCore->getOverlayElements();
+    const auto overlayElements = appCore->getOverlayElements();
     std::string oemString;
     oemString.reserve(FlagMapNameLength);
     for (const auto& oem : appCore->scriptMaps()->OverlayElementMap)
@@ -825,7 +825,7 @@ static int celestia_getoverlayelements(lua_State* l)
         oemString.clear();
         oemString.append(oem.first);
         lua_pushstring(l, oemString.c_str());
-        lua_pushboolean(l, (oem.second & overlayElements) != 0);
+        lua_pushboolean(l, util::is_set(overlayElements, static_cast<HudElements>(oem.second)));
         lua_settable(l,-3);
     }
     return 1;
@@ -854,9 +854,9 @@ static int celestia_settextcolor(lua_State* l)
 static int celestia_gettextcolor(lua_State* l)
 {
     Celx_CheckArgs(l, 1, 1, "No arguments expected for celestia:getgalaxylightgain()");
-    CelestiaCore* appCore = this_celestia(l);
+    const CelestiaCore* appCore = this_celestia(l);
 
-    Color color = appCore->getTextColor();
+    const Color& color = appCore->getTextColor();
     lua_pushnumber(l, color.red());
     lua_pushnumber(l, color.green());
     lua_pushnumber(l, color.blue());
@@ -1072,7 +1072,7 @@ static int celestia_getobserver(lua_State* l)
 static int celestia_getobservers(lua_State* l)
 {
     Celx_CheckArgs(l, 1, 1, "No arguments expected for celestia:getobservers()");
-    CelestiaCore* appCore = this_celestia(l);
+    const CelestiaCore* appCore = this_celestia(l);
 
     vector<Observer*> observer_list;
     getObservers(appCore, observer_list);
@@ -1868,7 +1868,7 @@ static int celestia_newposition(lua_State* l)
         }
         else if (lua_isstring(l, i+2))
         {
-            components[i] = celestia::util::DecodeFromBase64(lua_tostring(l, i+2));
+            components[i] = util::DecodeFromBase64(lua_tostring(l, i+2));
         }
         else
         {
@@ -1984,7 +1984,7 @@ static int celestia_requestkeyboard(lua_State* l)
         return 0;
     }
 
-    int mode = appCore->getTextEnterMode();
+    auto mode = appCore->getTextEnterMode();
 
     if (lua_toboolean(l, 2))
     {
@@ -1996,11 +1996,11 @@ static int celestia_requestkeyboard(lua_State* l)
         }
         lua_remove(l, -1);
 
-        mode = mode | CelestiaCore::KbPassToScript;
+        mode = mode | Hud::TextEnterMode::PassToScript;
     }
     else
     {
-        mode = mode & ~CelestiaCore::KbPassToScript;
+        mode = mode & ~Hud::TextEnterMode::PassToScript;
     }
     appCore->setTextEnterMode(mode);
 
@@ -2189,10 +2189,10 @@ static int celestia_seturl(lua_State* l)
     CelestiaCore* appCore = this_celestia(l);
 
     string url = Celx_SafeGetString(l, 2, AllErrors, "First argument to celestia:seturl must be a string");
-    Observer* obs = to_observer(l, 3);
+    const Observer* obs = to_observer(l, 3);
     if (obs == nullptr)
         obs = appCore->getSimulation()->getActiveObserver();
-    View* view = getViewByObserver(appCore, obs);
+    const celestia::View* view = getViewByObserver(appCore, obs);
     appCore->setActiveView(view);
 
     appCore->goToUrl(url);
@@ -2205,10 +2205,10 @@ static int celestia_geturl(lua_State* l)
     Celx_CheckArgs(l, 1, 2, "None or one argument expected for celestia:geturl");
     CelestiaCore* appCore = this_celestia(l);
 
-    Observer* obs = to_observer(l, 2);
+    const Observer* obs = to_observer(l, 2);
     if (obs == nullptr)
         obs = appCore->getSimulation()->getActiveObserver();
-    View* view = getViewByObserver(appCore, obs);
+    const celestia::View* view = getViewByObserver(appCore, obs);
     appCore->setActiveView(view);
 
     CelestiaState appState(appCore);
@@ -2765,7 +2765,7 @@ static int celestia_loadfont(lua_State* l)
 
 std::shared_ptr<TextureFont> getFont(CelestiaCore* appCore)
 {
-    return appCore->font;
+    return appCore->hud->font();
 }
 
 static int celestia_getfont(lua_State* l)
@@ -2783,7 +2783,7 @@ static int celestia_getfont(lua_State* l)
 
 std::shared_ptr<TextureFont> getTitleFont(CelestiaCore* appCore)
 {
-    return appCore->titleFont;
+    return appCore->hud->titleFont();
 }
 
 static int celestia_gettitlefont(lua_State* l)

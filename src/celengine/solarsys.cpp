@@ -50,6 +50,7 @@ using std::size_t;
 using std::strncmp;
 
 using celestia::util::GetLogger;
+namespace math = celestia::math;
 
 namespace
 {
@@ -696,7 +697,7 @@ void ReadAtmosphere(Body* body,
     if (auto cloudHeight = atmosData->getLength<float>("CloudHeight"); cloudHeight.has_value())
         atmosphere->cloudHeight = *cloudHeight;
     if (auto cloudSpeed = atmosData->getNumber<float>("CloudSpeed"); cloudSpeed.has_value())
-        atmosphere->cloudSpeed = celmath::degToRad(*cloudSpeed);
+        atmosphere->cloudSpeed = math::degToRad(*cloudSpeed);
 
     if (const std::string* cloudTexture = atmosData->getString("CloudMap"); cloudTexture != nullptr)
     {
@@ -827,6 +828,20 @@ Body* CreateBody(const std::string& name,
 
     bool semiAxesSpecified = false;
     auto semiAxes = planetData->getVector3<double>("SemiAxes");
+
+    if (semiAxes.has_value())
+    {
+        if ((*semiAxes).x() <= 0.0 || (*semiAxes).y() <= 0.0 || (*semiAxes).z() <= 0.0)
+        {
+            GetLogger()->error(_("Invalid SemiAxes value for object {}: [{}, {}, {}]\n"),
+                               name,
+                               (*semiAxes).x(),
+                               (*semiAxes).y(),
+                               (*semiAxes).z());
+            semiAxes.reset();
+        }
+    }
+
     if (radiusSpecified && semiAxes.has_value())
     {
         // If the radius has been specified, treat SemiAxes as dimensionless
@@ -846,7 +861,16 @@ Body* CreateBody(const std::string& name,
     {
         auto oblateness = planetData->getNumber<float>("Oblateness");
         if (oblateness.has_value())
-            body->setSemiAxes(body->getRadius() * Eigen::Vector3f(1.0f, 1.0f - *oblateness, 1.0f));
+        {
+            if (*oblateness >= 0.0f && *oblateness < 1.0f)
+            {
+                body->setSemiAxes(body->getRadius() * Eigen::Vector3f(1.0f, 1.0f - *oblateness, 1.0f));
+            }
+            else
+            {
+                GetLogger()->error(_("Invalid Oblateness value for object {}: {}\n"), name, *oblateness);
+            }
+        }
     }
 
     int classification = body->getClassification();

@@ -28,9 +28,9 @@
 
 using namespace Eigen;
 using namespace std;
-using namespace celmath;
 
 namespace astro = celestia::astro;
+namespace math = celestia::math;
 
 Body::Body(PlanetarySystem* _system, const std::string& _name) :
     system(_system),
@@ -261,19 +261,18 @@ void Body::setMass(float _mass)
 
 float Body::getDensity() const
 {
-    if (density > 0)
+    if (density > 0.0f)
         return density;
 
-    if (radius == 0 || !isSphere())
-        return 0;
+    if (radius == 0.0f || !isEllipsoid())
+        return 0.0f;
 
-    // assume that we have a spherical body
     // @mass unit is mass of Earth
     // @astro::EarthMass unit is kg
     // @radius unit km
     // so we divide density by 1e9 to have kg/m^3
-    double volume = 4.0 / 3.0 * celestia::numbers::pi * ::pow(radius, 3);
-    return (float) mass * astro::EarthMass / 1e9 / volume;
+    float volume = 4.0f / 3.0f * celestia::numbers::pi_v<float> * semiAxes.prod();
+    return volume == 0.0f ? 0.0f : mass * static_cast<float>(astro::EarthMass / 1e9) / volume;
 }
 
 
@@ -351,8 +350,8 @@ float Body::getTemperature(double time) const
         for (const auto *s : *orbitingStars)
         {
             float distFromSun = (float)s->getPosition(time).distanceFromKm(bodyPos);
-            float lum = square(s->getRadius()) * pow(s->getTemperature(), 4.0f);
-            flux += lum / square(distFromSun);
+            float lum = math::square(s->getRadius()) * pow(s->getTemperature(), 4.0f);
+            flux += lum / math::square(distFromSun);
         }
         temp = std::pow((1.0f - getBondAlbedo()) * flux, 0.25f) * (celestia::numbers::sqrt2_v<float> * 0.5f);
     }
@@ -693,8 +692,8 @@ Vector3d Body::planetocentricToCartesian(double lon, double lat, double alt) con
 {
 
     using celestia::numbers::pi;
-    double phi = -degToRad(lat) + pi * 0.5;
-    double theta = degToRad(lon) - pi;
+    double phi = -math::degToRad(lat) + pi * 0.5;
+    double theta = math::degToRad(lon) - pi;
 
     Vector3d pos(cos(theta) * sin(phi),
                  cos(phi),
@@ -723,18 +722,18 @@ Vector3d Body::planetocentricToCartesian(const Vector3d& lonLatAlt) const
 Vector3d Body::geodeticToCartesian(double lon, double lat, double alt) const
 {
     using celestia::numbers::pi;
-    double phi = degToRad(lat);
-    double theta = degToRad(lon) + pi;
-    double a2x = square(semiAxes.x());
-    double a2y = square(semiAxes.z()); // swap y & z to convert from Celestia axes
-    double b2  = square(semiAxes.y());
+    double phi = math::degToRad(lat);
+    double theta = math::degToRad(lon) + pi;
+    double a2x = math::square(semiAxes.x());
+    double a2y = math::square(semiAxes.z()); // swap y & z to convert from Celestia axes
+    double b2  = math::square(semiAxes.y());
     double e2x = (a2x - b2) / a2x;
     double e2e = (a2x - a2y) / a2x;
     double sinphi, cosphi;
-    sincos(phi, sinphi, cosphi);
+    math::sincos(phi, sinphi, cosphi);
     double sintheta, costheta;
-    sincos(theta, sintheta, costheta);
-    double v = semiAxes.x() / std::sqrt(1.0 - e2x * square(sinphi) - e2e  * square(cosphi) * square(sintheta));
+    math::sincos(theta, sintheta, costheta);
+    double v = semiAxes.x() / std::sqrt(1.0 - e2x * math::square(sinphi) - e2e  * math::square(cosphi) * math::square(sintheta));
     double xg = (v + alt) * cosphi * costheta;
     double yg = (v * (1.0 - e2e) + alt) * cosphi * sintheta;
     double zg = (v * (1.0 - e2x) + alt) * sinphi;
@@ -802,10 +801,10 @@ float Body::getLuminosity(float sunLuminosity,
     // double irradiance = power / sphereArea(astro::AUtoKilometers(1.0) * 1000);
 
     // Compute the irradiance at the body's distance from the star
-    double satIrradiance = power / sphereArea(distanceFromSun * 1000);
+    double satIrradiance = power / math::sphereArea(distanceFromSun * 1000);
 
     // Compute the total energy hitting the planet
-    double incidentEnergy = satIrradiance * circleArea(radius * 1000);
+    double incidentEnergy = satIrradiance * math::circleArea(radius * 1000);
 
     double reflectedEnergy = incidentEnergy * getReflectivity();
 

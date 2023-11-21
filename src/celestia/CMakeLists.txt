@@ -13,15 +13,24 @@ set(CELESTIA_SOURCES
   favorites.h
   helper.cpp
   helper.h
+  hud.cpp
+  hud.h
   moviecapture.h
   scriptmenu.cpp
   scriptmenu.h
+  textinput.cpp
+  textinput.h
   textprintposition.cpp
   textprintposition.h
+  timeinfo.h
   url.cpp
   url.h
   view.cpp
   view.h
+  viewmanager.cpp
+  viewmanager.h
+  windowmetrics.cpp
+  windowmetrics.h
 )
 
 if(ENABLE_FFMPEG)
@@ -55,6 +64,7 @@ if(ENABLE_MINIAUDIO)
 endif()
 
 set(CELESTIA_CORE_LIBS $<TARGET_OBJECTS:cel3ds>
+                       $<TARGET_OBJECTS:celastro>
                        $<TARGET_OBJECTS:celengine>
                        $<TARGET_OBJECTS:celephem>
                        $<TARGET_OBJECTS:celimage>

@@ -28,6 +28,7 @@
 #include <celengine/body.h>
 #include <celengine/glsupport.h>
 
+#include <celastro/date.h>
 #include <celcompat/charconv.h>
 #include <celcompat/filesystem.h>
 #include <celmath/mathlib.h>
@@ -39,7 +40,6 @@
 #include <celutil/filetype.h>
 #include <celutil/logger.h>
 #include <celutil/stringutils.h>
-#include <celengine/astro.h>
 #include <celscript/legacy/cmdparser.h>
 
 #include "celestia/celestiacore.h"
@@ -4287,11 +4287,11 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd,
             break;
 
         case ID_VIEW_HSPLIT:
-            appCore->splitView(View::HorizontalSplit);
+            appCore->splitView(celestia::View::HorizontalSplit);
             break;
 
         case ID_VIEW_VSPLIT:
-            appCore->splitView(View::VerticalSplit);
+            appCore->splitView(celestia::View::VerticalSplit);
             break;
 
         case ID_VIEW_SINGLE:

@@ -31,7 +31,6 @@
 #include "gtkegl.h"
 #endif
 
-#include <celengine/astro.h>
 #include <celengine/galaxy.h>
 #include <celengine/glsupport.h>
 #include <celengine/simulation.h>
@@ -187,7 +186,7 @@ void GtkWatcher::notifyChange(CelestiaCore*, int property)
 
     else if (property == CelestiaCore::TextEnterModeChanged)
     {
-        if (app->core->getTextEnterMode() != 0)
+        if (app->core->getTextEnterMode() != celestia::Hud::TextEnterMode::Normal)
         {
             /* Grey-out the menu */
             gtk_widget_set_sensitive(app->mainMenu, FALSE);

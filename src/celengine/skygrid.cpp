@@ -10,11 +10,12 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <sstream>
-#include <iomanip>
-#include <algorithm>
+#include <iterator>
+
+#include <fmt/format.h>
 
 #include <celcompat/numbers.h>
 #include <celmath/geomutil.h>
@@ -26,7 +27,6 @@
 
 using namespace Eigen;
 using namespace std;
-using namespace celmath;
 using namespace celestia;
 using celestia::render::LineRenderer;
 
@@ -209,24 +209,27 @@ getCoordLabelVAlign(int planeIndex)
 string
 SkyGrid::latitudeLabel(int latitude, int latitudeStep) const
 {
-    // Produce a sexigesimal string
-    ostringstream out;
-    if (latitude < 0)
-        out << '-';
-    out << std::abs(latitude / DEG) << UTF8_DEGREE_SIGN;
-    if (latitudeStep % DEG != 0)
-    {
-        out << ' ' << setw(2) << setfill('0') << std::abs((latitude / MIN) % 60) << '\'';
-        if (latitudeStep % MIN != 0)
-        {
-            out << ' ' << setw(2) << setfill('0') << std::abs((latitude / SEC) % 60);
-            if (latitudeStep % SEC != 0)
-                out << '.' << setw(3) << setfill('0') << latitude % SEC;
-            out << '"';
-        }
-    }
+    using namespace std::string_literals;
 
-    return out.str();
+    // Produce a sexigesimal string
+    std::string result = latitude == 0 ? "0°"s
+                       : latitude < 0 ? fmt::format("-{}°", -latitude / DEG)
+                       : fmt::format("+{}°", latitude / DEG);
+    if (latitudeStep % DEG == 0)
+        return result;
+
+    latitude = std::abs(latitude);
+
+    fmt::format_to(std::back_inserter(result), " {:02}'", (latitude / MIN) % 60);
+    if (latitudeStep % MIN == 0)
+        return result;
+
+    fmt::format_to(std::back_inserter(result), " {:02}", (latitude / SEC) % 60);
+    if (latitudeStep % SEC != 0)
+        fmt::format_to(std::back_inserter(result), ".{:03}", latitude % SEC);
+
+    result.push_back('"');
+    return result;
 }
 
 
@@ -251,7 +254,6 @@ SkyGrid::longitudeLabel(int longitude, int longitudeStep) const
     }
 
     // Produce a sexigesimal string
-    ostringstream out;
     if (longitude < 0)
         longitude += totalUnits;
 
@@ -261,20 +263,20 @@ SkyGrid::longitudeLabel(int longitude, int longitudeStep) const
     if (m_longitudeDirection == IncreasingClockwise)
         longitude = (totalUnits - longitude) % totalUnits;
 
-    out << longitude / baseUnit << baseUnitSymbol;
-    if (longitudeStep % baseUnit != 0)
-    {
-        out << ' ' << setw(2) << setfill('0') << (longitude / MIN) % 60 << minuteSymbol;
-        if (longitudeStep % MIN != 0)
-        {
-            out << ' ' << setw(2) << setfill('0') << (longitude / SEC) % 60;
-            if (longitudeStep % SEC != 0)
-                out << '.' << setw(3) << setfill('0') << longitude % SEC;
-            out << secondSymbol;
-        }
-    }
+    std::string result = fmt::format("{}{}", longitude / baseUnit, baseUnitSymbol);
+    if (longitudeStep % baseUnit == 0)
+        return result;
 
-    return out.str();
+    fmt::format_to(std::back_inserter(result), " {:02}{}", (longitude / MIN) % 60, minuteSymbol);
+    if (longitudeStep % MIN == 0)
+        return result;
+
+    fmt::format_to(std::back_inserter(result), " {:02}", (longitude / SEC) % 60);
+    if (longitudeStep % SEC != 0)
+        fmt::format_to(std::back_inserter(result), ".{:03}", longitude % SEC);
+
+    result.push_back(secondSymbol);
+    return result;
 }
 
 
@@ -344,7 +346,7 @@ SkyGrid::render(Renderer& renderer,
     // diagonal between viewport corners.
     double h = tan(vfov / 2);
     double w = h * viewAspectRatio;
-    double diag = sqrt(1.0 + square(h) + square(h * viewAspectRatio));
+    double diag = sqrt(1.0 + math::square(h) + math::square(h * viewAspectRatio));
     double cosHalfFov = 1.0 / diag;
     double halfFov = acos(cosHalfFov);
 
@@ -369,9 +371,9 @@ SkyGrid::render(Renderer& renderer,
     // 90 degree rotation about the x-axis used to transform coordinates
     // to Celestia's system.
     Matrix3d r = (cameraOrientation *
-                  celmath::XRot90Conjugate<double> *
+                  math::XRot90Conjugate<double> *
                   m_orientation.conjugate() *
-                  celmath::XRot90<double>).toRotationMatrix().transpose();
+                  math::XRot90<double>).toRotationMatrix().transpose();
 
     // Transform the frustum corners by the camera and grid
     // rotations.
@@ -483,16 +485,16 @@ SkyGrid::render(Renderer& renderer,
     int endDec   = (int) std::floor(DEG_MIN_SEC_TOTAL  * (maxDec * celestia::numbers::inv_pi) / (double) decIncrement) * decIncrement;
 
     // Get the orientation at single precision
-    Quaterniond q = celmath::XRot90Conjugate<double> * m_orientation * celmath::XRot90<double>;
+    Quaterniond q = math::XRot90Conjugate<double> * m_orientation * math::XRot90<double>;
     Quaternionf orientationf = q.cast<float>();
 
     // Radius of sphere is arbitrary, with the constraint that it shouldn't
     // intersect the near or far plane of the view frustum.
     Matrix4f m = renderer.getModelViewMatrix() *
-                 celmath::rotate((celmath::XRot90Conjugate<double> *
+                 math::rotate((math::XRot90Conjugate<double> *
                                   m_orientation.conjugate() *
-                                  celmath::XRot90<double>).cast<float>()) *
-                 celmath::scale(1000.0f);
+                                  math::XRot90<double>).cast<float>()) *
+                 math::scale(1000.0f);
     Matrices matrices = {&renderer.getProjectionMatrix(), &m};
 
     double arcStep = (maxTheta - minTheta) / (double) ARC_SUBDIVISIONS;
@@ -529,8 +531,8 @@ SkyGrid::render(Renderer& renderer,
             Vector3d isect0(Vector3d::Zero());
             Vector3d isect1(Vector3d::Zero());
 
-            if (planeCircleIntersection(frustumNormal[k], center, axis0, axis1,
-                                        &isect0, &isect1))
+            if (math::planeCircleIntersection(frustumNormal[k], center, axis0, axis1,
+                                              &isect0, &isect1))
             {
                 string labelText = latitudeLabel(dec, decIncrement);
 
@@ -604,8 +606,8 @@ SkyGrid::render(Renderer& renderer,
             Vector3d isect0(Vector3d::Zero());
             Vector3d isect1(Vector3d::Zero());
 
-            if (planeCircleIntersection(frustumNormal[k], center, axis0, axis1,
-                                        &isect0, &isect1))
+            if (math::planeCircleIntersection(frustumNormal[k], center, axis0, axis1,
+                                              &isect0, &isect1))
             {
                 string labelText = longitudeLabel(ra, raIncrement);
 
