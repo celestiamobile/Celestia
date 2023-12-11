@@ -18,6 +18,7 @@
 using namespace std;
 
 namespace astro = celestia::astro;
+namespace util = celestia::util;
 
 // DatePicker is a Win32 control for setting the date. It replaces the
 // date picker from commctl, adding a number of features appropriate
@@ -159,7 +160,7 @@ DatePicker::redraw(HDC hdc)
     char dayBuf[32];
     char yearBuf[32];
 
-    string monthStr = UTF8ToCurrentCP(_(Months[date.month - 1]));
+    string monthStr = util::UTF8ToCurrentCP(_(Months[date.month - 1]));
     sprintf(dayBuf, "%02d", date.day);
     sprintf(yearBuf, "%5d", date.year);
 
@@ -609,10 +610,10 @@ DatePicker::getSystemTime(SYSTEMTIME* sysTime)
 static LRESULT
 DatePickerNCCreate(HWND hwnd, CREATESTRUCT& cs)
 {
-    DWORD exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+    LONG_PTR exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
 
     exStyle |= WS_EX_CLIENTEDGE;
-    SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
+    SetWindowLongPtr(hwnd, GWL_EXSTYLE, exStyle);
 
     return DefWindowProc(hwnd, WM_NCCREATE, 0, reinterpret_cast<LPARAM>(&cs));
 }

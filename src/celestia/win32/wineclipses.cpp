@@ -37,6 +37,7 @@ using namespace celestia::win32;
 
 namespace astro = celestia::astro;
 namespace math = celestia::math;
+namespace util = celestia::util;
 
 static vector<Eclipse> eclipseList;
 
@@ -62,11 +63,11 @@ bool InitEclipseFinderColumns(HWND listView)
     for (i = 0; i < nColumns; i++)
         columns[i] = lvc;
 
-    string header0 = UTF8ToCurrentCP(_("Planet"));
-    string header1 = UTF8ToCurrentCP(_("Satellite"));
-    string header2 = UTF8ToCurrentCP(_("Date"));
-    string header3 = UTF8ToCurrentCP(_("Start"));
-    string header4 = UTF8ToCurrentCP(_("Duration"));
+    string header0 = util::UTF8ToCurrentCP(_("Planet"));
+    string header1 = util::UTF8ToCurrentCP(_("Satellite"));
+    string header2 = util::UTF8ToCurrentCP(_("Date"));
+    string header3 = util::UTF8ToCurrentCP(_("Start"));
+    string header4 = util::UTF8ToCurrentCP(_("Duration"));
 
     columns[0].pszText = const_cast<char*>(header0.c_str());
     columns[0].cx = DpToPixels(65, listView);
@@ -125,19 +126,19 @@ void EclipseFinderDisplayItem(LPNMLVDISPINFOA nm)
     switch (nm->item.iSubItem)
     {
     case 0:
-        strncpy(callbackScratch, UTF8ToCurrentCP(eclipse->receiver->getName(true)).c_str(), sizeof(callbackScratch) - 1);
+        strncpy(callbackScratch, util::UTF8ToCurrentCP(eclipse->receiver->getName(true)).c_str(), sizeof(callbackScratch) - 1);
         nm->item.pszText = callbackScratch;
         break;
 
     case 1:
-        strncpy(callbackScratch, UTF8ToCurrentCP(eclipse->occulter->getName(true)).c_str(), sizeof(callbackScratch) - 1);
+        strncpy(callbackScratch, util::UTF8ToCurrentCP(eclipse->occulter->getName(true)).c_str(), sizeof(callbackScratch) - 1);
         nm->item.pszText = callbackScratch;
         break;
 
     case 2:
         {
             astro::Date startDate(eclipse->startTime);
-            string monthStr = UTF8ToCurrentCP(_(MonthNames[startDate.month - 1]));
+            string monthStr = util::UTF8ToCurrentCP(_(MonthNames[startDate.month - 1]));
             sprintf(callbackScratch, "%2d %s %4d",
                     startDate.day,
                     monthStr.c_str(),
@@ -275,7 +276,6 @@ BOOL APIENTRY EclipseFinderProc(HWND hDlg,
                                 WPARAM wParam,
                                 LPARAM lParam)
 {
-    //EclipseFinderDialog* eclipseFinderDlg = reinterpret_cast<EclipseFinderDialog*>(GetWindowLong(hDlg, DWL_USER));
     EclipseFinderDialog* eclipseFinderDlg = reinterpret_cast<EclipseFinderDialog*>(GetWindowLongPtr(hDlg, DWLP_USER));
 
     switch (message)
@@ -285,7 +285,6 @@ BOOL APIENTRY EclipseFinderProc(HWND hDlg,
             EclipseFinderDialog* efd = reinterpret_cast<EclipseFinderDialog*>(lParam);
             if (efd == NULL)
                 return EndDialog(hDlg, 0);
-            //SetWindowLong(hDlg, DWL_USER, lParam);
             SetWindowLongPtr(hDlg, DWLP_USER, lParam);
             HWND hwnd = GetDlgItem(hDlg, IDC_ECLIPSES_LIST);
             InitEclipseFinderColumns(hwnd);
@@ -294,12 +293,12 @@ BOOL APIENTRY EclipseFinderProc(HWND hDlg,
             CheckRadioButton(hDlg, IDC_SOLARECLIPSE, IDC_LUNARECLIPSE, IDC_SOLARECLIPSE);
             efd->type = Eclipse::Solar;
 
-            string item0 = UTF8ToCurrentCP(_("Earth"));
-            string item1 = UTF8ToCurrentCP(_("Jupiter"));
-            string item2 = UTF8ToCurrentCP(_("Saturn"));
-            string item3 = UTF8ToCurrentCP(_("Uranus"));
-            string item4 = UTF8ToCurrentCP(_("Neptune"));
-            string item5 = UTF8ToCurrentCP(_("Pluto"));
+            string item0 = util::UTF8ToCurrentCP(_("Earth"));
+            string item1 = util::UTF8ToCurrentCP(_("Jupiter"));
+            string item2 = util::UTF8ToCurrentCP(_("Saturn"));
+            string item3 = util::UTF8ToCurrentCP(_("Uranus"));
+            string item4 = util::UTF8ToCurrentCP(_("Neptune"));
+            string item5 = util::UTF8ToCurrentCP(_("Pluto"));
 
             SendDlgItemMessage(hDlg, IDC_ECLIPSETARGET, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(item0.c_str()));
             SendDlgItemMessage(hDlg, IDC_ECLIPSETARGET, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(item1.c_str()));
