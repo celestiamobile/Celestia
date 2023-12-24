@@ -223,15 +223,14 @@ FillinSurface(const AssociativeArray* surfaceData,
     constexpr auto nightFlags = engine::TextureFlags::WrapTexture;
     constexpr auto specularFlags = engine::TextureFlags::WrapTexture;
 
-    auto bumpHeight = surfaceData->getNumber<float>("BumpHeight").value_or(2.5f);
-
     bool blendTexture = surfaceData->getBoolean("BlendTexture").value_or(false);
     bool emissive = surfaceData->getBoolean("Emissive").value_or(false);
 
     SetOrUnset(surface->appearanceFlags, Surface::BlendTexture, blendTexture);
     SetOrUnset(surface->appearanceFlags, Surface::Emissive, emissive);
     SetOrUnset(surface->appearanceFlags, Surface::ApplyBaseTexture, baseTexture.has_value());
-    SetOrUnset(surface->appearanceFlags, Surface::ApplyBumpMap, (bumpTexture.has_value() || normalTexture.has_value()));
+    SetOrUnset(surface->appearanceFlags, Surface::ApplyNormalMap, normalTexture.has_value());
+    SetOrUnset(surface->appearanceFlags, Surface::ApplyNormalMap, bumpTexture.has_value());
     SetOrUnset(surface->appearanceFlags, Surface::ApplyNightMap, nightTexture.has_value());
     SetOrUnset(surface->appearanceFlags, Surface::SeparateSpecularMap, specularTexture.has_value());
     SetOrUnset(surface->appearanceFlags, Surface::ApplyOverlay, overlayTexture.has_value());
@@ -244,11 +243,27 @@ FillinSurface(const AssociativeArray* surfaceData,
     if (specularTexture.has_value())
         surface->specularTexture = texturePaths.getHandle(*specularTexture, path, specularFlags);
 
-    // If both are present, NormalMap overrides BumpMap
     if (normalTexture.has_value())
-        surface->bumpTexture = texturePaths.getHandle(*normalTexture, path, bumpFlags);
-    else if (bumpTexture.has_value())
-        surface->bumpTexture = texturePaths.getHandle(*bumpTexture, path, bumpFlags, bumpHeight);
+    {
+        surface->normalTexture = texturePaths.getHandle(*normalTexture, path, bumpFlags);
+        SetOrUnset(surface->appearanceFlags, Surface::ApplyNormalMap, true);
+    }
+    if (bumpTexture.has_value())
+    {
+        auto bumpOffset = surfaceData->getLength<float>("BumpOffset");
+        if (bumpOffset.has_value())
+        {
+            surface->bumpTexture = texturePaths.getHandle(*bumpTexture, path, bumpFlags);
+            surface->bumpOffset = bumpOffset.value();
+            surface->bumpHeight = surfaceData->getNumber<float>("BumpHeight").value_or(0.0f);
+            SetOrUnset(surface->appearanceFlags, Surface::ApplyBumpMap, true);
+        }
+        else
+        {
+            surface->normalTexture = texturePaths.getHandle(*bumpTexture, path, bumpFlags, surfaceData->getNumber<float>("BumpHeight").value_or(2.5f));
+            SetOrUnset(surface->appearanceFlags, Surface::ApplyNormalMap, true);
+        }
+    }
 
     if (overlayTexture.has_value())
         surface->overlayTexture = texturePaths.getHandle(*overlayTexture, path, baseFlags);

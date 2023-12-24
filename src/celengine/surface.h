@@ -24,13 +24,14 @@ struct Surface
     enum {
         BlendTexture         = 0x1,
         ApplyBaseTexture     = 0x2,
-        ApplyBumpMap         = 0x4,
+        ApplyNormalMap       = 0x4,
         ApplyNightMap        = 0x10,
         ApplySpecularityMap  = 0x20,
         SpecularReflection   = 0x40,
         Emissive             = 0x80,
         SeparateSpecularMap  = 0x100,
         ApplyOverlay         = 0x200,
+        ApplyBumpMap         = 0x400,
     };
 
     std::uint32_t appearanceFlags{ 0 };
@@ -39,9 +40,11 @@ struct Surface
     float specularPower{ 0.0f };
     celestia::util::TextureHandle baseTexture{ celestia::util::TextureHandle::Invalid };    // surface colors
     celestia::util::TextureHandle bumpTexture{ celestia::util::TextureHandle::Invalid };    // normal map based on terrain relief
+    celestia::util::TextureHandle normalTexture{ celestia::util::TextureHandle::Invalid };    // normal map based on terrain relief
     celestia::util::TextureHandle nightTexture{ celestia::util::TextureHandle::Invalid };   // artificial lights to show on night side
     celestia::util::TextureHandle specularTexture{ celestia::util::TextureHandle::Invalid };// specular mask
     celestia::util::TextureHandle overlayTexture{ celestia::util::TextureHandle::Invalid }; // overlay texture, applied last
     float bumpHeight{ 0.0f };       // scale of bump map relief
+    float bumpOffset{ 0.0f };
     float lunarLambert{ 0.0f };     // mix between Lambertian and Lommel-Seeliger (lunar-like) photometric functions
 };

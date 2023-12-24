@@ -2146,6 +2146,9 @@ void Renderer::renderObject(const Vector3f& pos,
     // Get the textures . . .
     if (obj.surface->baseTexture != util::TextureHandle::Invalid)
         ri.baseTex = m_textureManager->find(obj.surface->baseTexture);
+    if ((obj.surface->appearanceFlags & Surface::ApplyNormalMap) != 0 &&
+        obj.surface->normalTexture != util::TextureHandle::Invalid)
+        ri.normalTex = m_textureManager->find(obj.surface->normalTexture);
     if ((obj.surface->appearanceFlags & Surface::ApplyBumpMap) != 0 &&
         obj.surface->bumpTexture != util::TextureHandle::Invalid)
         ri.bumpTex = m_textureManager->find(obj.surface->bumpTexture);
@@ -2202,6 +2205,12 @@ void Renderer::renderObject(const Vector3f& pos,
     ri.orientation = getCameraOrientationf() * obj.orientation.conjugate();
 
     ri.pixWidth = discSizeInPixels;
+
+    if (ri.bumpTex != nullptr)
+    {
+        ri.bumpOffset = obj.surface->bumpOffset / radius;
+        ri.bumpHeight = obj.surface->bumpHeight / radius;
+    }
 
     // Set up the colors
     if (ri.baseTex == nullptr ||
@@ -4260,10 +4269,10 @@ void Renderer::loadTextures(Body* body)
     {
         m_textureManager->find(surface.baseTexture);
     }
-    if ((surface.appearanceFlags & Surface::ApplyBumpMap) != 0 &&
-        surface.bumpTexture != util::TextureHandle::Invalid)
+    if ((surface.appearanceFlags & Surface::ApplyNormalMap) != 0 &&
+        surface.normalTexture != util::TextureHandle::Invalid)
     {
-        m_textureManager->find(surface.bumpTexture);
+        m_textureManager->find(surface.normalTexture);
     }
     if ((surface.appearanceFlags & Surface::ApplyNightMap) != 0 &&
         util::is_set(renderFlags, RenderFlags::ShowNightMaps))

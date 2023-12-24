@@ -104,10 +104,10 @@ invariant gl_Position;
 constexpr std::string_view GeomHeaderGL3 = VertexHeader;
 
 constexpr std::string_view VPFunctionFishEye = R"glsl(
-vec4 calc_vp(vec4 in_Position)
+vec4 calc_vp(vec4 position)
 {
     float PID2 = 1.570796326794896619231322;
-    vec4 inPos = ModelViewMatrix * in_Position;
+    vec4 inPos = ModelViewMatrix * position;
     float l = length(inPos.xy);
     if (l != 0.0)
     {
@@ -117,20 +117,20 @@ vec4 calc_vp(vec4 in_Position)
     }
     return ProjectionMatrix * inPos;
 }
-void set_vp(vec4 in_Position)
+void set_vp(vec4 position)
 {
-    gl_Position = calc_vp(in_Position);
+    gl_Position = calc_vp(position);
 }
 )glsl"sv;
 
 constexpr std::string_view VPFunctionUsual = R"glsl(
-vec4 calc_vp(vec4 in_Position)
+vec4 calc_vp(vec4 position)
 {
-    return MVPMatrix * in_Position;
+    return MVPMatrix * position;
 }
-void set_vp(vec4 in_Position)
+void set_vp(vec4 position)
 {
-    gl_Position = calc_vp(in_Position);
+    gl_Position = calc_vp(position);
 }
 )glsl"sv;
 
@@ -141,11 +141,11 @@ VPFunction(bool enabled)
 }
 
 constexpr std::string_view NormalVertexPosition = R"glsl(
-    set_vp(in_Position);
+    set_vp(v_Position);
 )glsl"sv;
 
 constexpr std::string_view LineVertexPosition = R"glsl(
-    vec4 thisPos = calc_vp(in_Position);
+    vec4 thisPos = calc_vp(v_Position);
     vec4 nextPos = calc_vp(in_PositionNext);
     thisPos.xy /= thisPos.w;
     nextPos.xy /= nextPos.w;
@@ -399,6 +399,23 @@ std::string
 TexCoord2D(unsigned int i, bool transform)
 {
     return transform ? fmt::format("(texCoordBase{} + texCoordDelta{} * in_TexCoord{}.st)", i, i, i) : fmt::format("in_TexCoord{}.st", i);
+}
+
+
+std::string
+Position(const ShaderProperties& props)
+{
+    if (util::is_set(props.texUsage, TexUsage::BumpTexture))
+    {
+        unsigned int texCoordIndex = (!props.hasSharedTextureCoords() && util::is_set(props.texUsage, TexUsage::DiffuseTexture)) ? 1 : 0;
+        std::string_view code = R"glsl(
+vec2 bumpTexCoord = {};
+bumpTexCoord.x += textureOffset;
+vec4 v_Position = vec4(in_Position.xyz * (1.0 + bumpOffset + texture2D(bumpTex, bumpTexCoord).r * bumpHeight), in_Position.w);
+)glsl"sv;
+        return fmt::format(code, TexCoord2D(texCoordIndex, props.hasTextureCoordTransform()));
+    }
+    return "vec4 v_Position = in_Position;\n";
 }
 
 
@@ -948,7 +965,7 @@ std::string
 PointSizeCalculation()
 {
     std::string source;
-    source += "float ptSize = pointScale * in_PointSize / length(vec3(ModelViewMatrix * in_Position));\n";
+    source += "float ptSize = pointScale * in_PointSize / length(vec3(ModelViewMatrix * v_Position));\n";
     source += "pointFade = min(1.0, ptSize * ptSize);\n";
     source += "gl_PointSize = ptSize;\n";
 
@@ -1183,6 +1200,14 @@ R"glsl(
     source += CommonHeader;
     source += VertexHeader;
     source += CommonAttribs;
+
+    if (util::is_set(props.texUsage, TexUsage::BumpTexture))
+    {
+        source += DeclareUniform("bumpHeight", Shader_Float);
+        source += DeclareUniform("bumpOffset", Shader_Float);
+        source += DeclareUniform("bumpTex", Shader_Sampler2D);
+    }
+
     if (props.hasTextureCoordTransform())
         source += TextureTransformUniforms;
 
@@ -1239,11 +1264,14 @@ R"glsl(
 
     // Begin main() function
     source += "\nvoid main(void)\n{\n";
+
+    source += Position(props);
+
     if (props.lightModel != LightingModel::ParticleDiffuseModel)
         source += "normal = in_Normal;\n";
 
     if (props.isViewDependent() || props.hasScattering() || props.hasEclipseShadows())
-        source += "position = in_Position.xyz;\n";
+        source += "position = v_Position.xyz;\n";
 
     if (props.usesTangentSpaceLighting())
         source += "tangent = in_Tangent;\n";
@@ -1254,7 +1282,7 @@ R"glsl(
     if (props.hasShadowMap())
     {
         source += "cosNormalLightDir = dot(in_Normal, " + LightProperty(0, "direction") + ");\n";
-        source += "shadowTexCoord0 = ShadowMatrix0 * vec4(in_Position.xyz, 1.0);\n";
+        source += "shadowTexCoord0 = ShadowMatrix0 * vec4(v_Position.xyz, 1.0);\n";
     }
 
     unsigned int nTexCoords = 0;
@@ -1266,6 +1294,7 @@ R"glsl(
     if (props.hasSharedTextureCoords())
     {
         if (util::is_set(props.texUsage, TexUsage::DiffuseTexture  |
+                                         TexUsage::BumpTexture     |
                                          TexUsage::NormalTexture   |
                                          TexUsage::SpecularTexture |
                                          TexUsage::NightTexture    |
@@ -1283,6 +1312,9 @@ R"glsl(
             source += "diffTexCoord = " + TexCoord2D(nTexCoords, hasTexCoordTransform) + " + vec2(textureOffset, 0.0);\n";
             nTexCoords++;
         }
+
+        if (util::is_set(props.texUsage, TexUsage::BumpTexture))
+            nTexCoords ++;
 
         if (util::is_set(props.texUsage, TexUsage::NormalTexture))
         {
@@ -1313,12 +1345,12 @@ R"glsl(
     if (props.hasRingShadows())
     {
         source += "vec3 ringShadowProj;\n";
-        source += "float t = -(dot(in_Position.xyz, ringPlane.xyz) + ringPlane.w);\n";
+        source += "float t = -(dot(v_Position.xyz, ringPlane.xyz) + ringPlane.w);\n";
         for (unsigned int j = 0; j < props.nLights; j++)
         {
             if (props.hasRingShadowForLight(j))
             {
-                source += "ringShadowProj = in_Position.xyz + " +
+                source += "ringShadowProj = v_Position.xyz + " +
                   LightProperty(j, "direction") +
                   " * max(0.0, t / dot(" +
                   LightProperty(j, "direction") + ", ringPlane.xyz));\n";
@@ -1352,11 +1384,11 @@ R"glsl(
                 // fp32 texture serving as a lookup table.
 #if 0
                 // Compute the intersection of the sun direction and the cloud layer (currently assumed to be a sphere)
-                source += "    float rq = dot(" + LightProperty(j, "direction") + ", in_Position.xyz);\n";
-                source += "    float qq = dot(in_Position.xyz, in_Position.xyz) - cloudHeight * cloudHeight;\n";
+                source += "    float rq = dot(" + LightProperty(j, "direction") + ", v_Position.xyz);\n";
+                source += "    float qq = dot(v_Position.xyz, v_Position.xyz) - cloudHeight * cloudHeight;\n";
                 source += "    float d = sqrt(max(rq * rq - qq, 0.0));\n";
-                source += "    vec3 cloudSpherePos = (in_Position.xyz + (-rq + d) * " + LightProperty(j, "direction") + ");\n";
-                //source += "    vec3 cloudSpherePos = in_Position.xyz;\n";
+                source += "    vec3 cloudSpherePos = (v_Position.xyz + (-rq + d) * " + LightProperty(j, "direction") + ");\n";
+                //source += "    vec3 cloudSpherePos = v_Position.xyz;\n";
 
                 // Find the texture coordinates at this point on the sphere by converting from rectangular to spherical; this is an
                 // expensive calculation to perform per vertex.
@@ -1766,6 +1798,13 @@ buildRingsVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
     source += VertexHeader;
     source += CommonAttribs;
 
+    if (util::is_set(props.texUsage, TexUsage::BumpTexture))
+    {
+        source += DeclareUniform("bumpHeight", Shader_Float);
+        source += DeclareUniform("bumpOffset", Shader_Float);
+        source += DeclareUniform("bumpTex", Shader_Sampler2D);
+    }
+
     source += DeclareUniform("ringWidth", Shader_Float);
     source += DeclareUniform("ringRadius", Shader_Float);
 
@@ -1784,10 +1823,12 @@ buildRingsVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
 
     source += "\nvoid main(void)\n{\n";
 
+    source += Position(props);
+
     if (util::is_set(props.texUsage, TexUsage::DiffuseTexture))
         source += "diffTexCoord = " + TexCoord2D(0, false) + ";\n";
 
-    source += "position = in_Position.xyz * (ringRadius + ringWidth * in_TexCoord0.s);\n";
+    source += "position = v_Position.xyz * (ringRadius + ringWidth * in_TexCoord0.s);\n";
     if (props.hasEclipseShadows())
     {
         for (unsigned int i = 0; i < props.nLights; i++)
@@ -1925,6 +1966,14 @@ buildAtmosphereVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
     source += CommonHeader;
     source += VertexHeader;
     source += CommonAttribs;
+
+    if (util::is_set(props.texUsage, TexUsage::BumpTexture))
+    {
+        source += DeclareUniform("bumpHeight", Shader_Float);
+        source += DeclareUniform("bumpOffset", Shader_Float);
+        source += DeclareUniform("bumpTex", Shader_Sampler2D);
+    }
+
     if (props.hasTextureCoordTransform())
         source += TextureTransformUniforms;
 
@@ -1937,7 +1986,8 @@ buildAtmosphereVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
 
     // Begin main() function
     source += "\nvoid main(void)\n{\n";
-    source += "    position = in_Position.xyz;\n";
+    source += Position(props);
+    source += "    position = v_Position.xyz;\n";
     source += "    normal = in_Normal;\n";
     source += VertexPosition(props);
     source += "}\n";
@@ -2016,6 +2066,14 @@ buildEmissiveVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
     source += CommonHeader;
     source += VertexHeader;
     source += CommonAttribs;
+
+    if (util::is_set(props.texUsage, TexUsage::BumpTexture))
+    {
+        source += DeclareUniform("bumpHeight", Shader_Float);
+        source += DeclareUniform("bumpOffset", Shader_Float);
+        source += DeclareUniform("bumpTex", Shader_Sampler2D);
+    }
+
     if (props.hasTextureCoordTransform())
         source += TextureTransformUniforms;
 
@@ -2038,6 +2096,8 @@ buildEmissiveVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
 
     // Begin main() function
     source += "\nvoid main(void)\n{\n";
+
+    source += Position(props);
 
     // Optional texture coordinates (generated automatically for point
     // sprites.)
@@ -2133,6 +2193,14 @@ buildParticleVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
     source += CommonHeader;
     source += VertexHeader;
     source += CommonAttribs;
+
+    if (util::is_set(props.texUsage, TexUsage::BumpTexture))
+    {
+        source += DeclareUniform("bumpHeight", Shader_Float);
+        source += DeclareUniform("bumpOffset", Shader_Float);
+        source += DeclareUniform("bumpTex", Shader_Sampler2D);
+    }
+
     if (props.hasTextureCoordTransform())
         source += TextureTransformUniforms;
 
@@ -2159,6 +2227,8 @@ buildParticleVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
     // Begin main() function
     source += "\nvoid main(void)\n{\n";
 
+    source += Position(props);
+
 #define PARTICLE_PHASE_PARAMETER 0
 #if PARTICLE_PHASE_PARAMETER
     float g = -0.4f;
@@ -2166,7 +2236,7 @@ buildParticleVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
 
     fmt::format_to(std::back_inserter(source), "    float mieK = {};\n", miePhaseAsymmetry);
 
-    source += "    vec3 eyeDir = normalize(eyePosition - in_Position.xyz);\n";
+    source += "    vec3 eyeDir = normalize(eyePosition - v_Position.xyz);\n";
     source += "    float brightness = 0.0;\n";
     for (unsigned int i = 0; i < std::min(1u, props.nLights); i++)
     {
@@ -2961,6 +3031,12 @@ CelestiaGLProgram::initParameters()
         lineWidthX           = floatParam("lineWidthX");
         lineWidthY           = floatParam("lineWidthY");
     }
+
+    if (util::is_set(props.texUsage, TexUsage::BumpTexture))
+    {
+        bumpHeight           = floatParam("bumpHeight");
+        bumpOffset           = floatParam("bumpOffset");
+    }
 }
 
 
@@ -2974,6 +3050,13 @@ CelestiaGLProgram::initSamplers()
     if (util::is_set(props.texUsage, TexUsage::DiffuseTexture))
     {
         if (GLint slot = glGetUniformLocation(program.getID(), "diffTex"); slot != -1)
+            glUniform1i(slot, nSamplers);
+        nSamplers++;
+    }
+
+    if (util::is_set(props.texUsage, TexUsage::BumpTexture))
+    {
+        if (GLint slot = glGetUniformLocation(program.getID(), "bumpTex"); slot != -1)
             glUniform1i(slot, nSamplers);
         nSamplers++;
     }

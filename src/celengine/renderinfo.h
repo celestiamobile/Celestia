@@ -21,6 +21,7 @@ struct RenderInfo
     Color color{ 1.0f, 1.0f, 1.0f };
     Texture* baseTex{ nullptr };
     Texture* bumpTex{ nullptr };
+    Texture* normalTex{ nullptr };
     Texture* nightTex{ nullptr };
     Texture* glossTex{ nullptr };
     Texture* overlayTex{ nullptr };
@@ -36,4 +37,6 @@ struct RenderInfo
     Eigen::Quaternionf orientation{ Eigen::Quaternionf::Identity() };
     float pixWidth{ 1.0f };
     float pointScale{ 1.0f };
+    float bumpHeight{ 0.0f };
+    float bumpOffset{ 0.0f };
 };
