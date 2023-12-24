@@ -232,11 +232,11 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
         textures.try_push_back(ri.baseTex);
     }
 
-    if (ri.bumpTex != nullptr)
+    if (ri.normalTex != nullptr)
     {
         shadprop.texUsage |= ShaderProperties::NormalTexture;
-        textures.try_push_back(ri.bumpTex);
-        if (ri.bumpTex->getFormatOptions() & Texture::DXT5NormalMap)
+        textures.try_push_back(ri.normalTex);
+        if (ri.normalTex->getFormatOptions() & Texture::DXT5NormalMap)
             shadprop.texUsage |= ShaderProperties::CompressedNormalTexture;
     }
 
@@ -424,7 +424,7 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
         prog->setEclipseShadowParameters(ls, semiAxes, planetOrientation);
 
     unsigned int attributes = LODSphereMesh::Normals;
-    if (ri.bumpTex != nullptr)
+    if (ri.normalTex != nullptr)
         attributes |= LODSphereMesh::Tangents;
 
     Renderer::PipelineState ps;

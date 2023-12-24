@@ -219,7 +219,7 @@ void FillinSurface(const Hash* surfaceData,
     SetOrUnset(surface->appearanceFlags, Surface::BlendTexture, blendTexture);
     SetOrUnset(surface->appearanceFlags, Surface::Emissive, emissive);
     SetOrUnset(surface->appearanceFlags, Surface::ApplyBaseTexture, baseTexture != nullptr);
-    SetOrUnset(surface->appearanceFlags, Surface::ApplyBumpMap, (bumpTexture != nullptr || normalTexture != nullptr));
+    SetOrUnset(surface->appearanceFlags, Surface::ApplyNormalMap, (bumpTexture != nullptr || normalTexture != nullptr));
     SetOrUnset(surface->appearanceFlags, Surface::ApplyNightMap, nightTexture != nullptr);
     SetOrUnset(surface->appearanceFlags, Surface::SeparateSpecularMap, specularTexture != nullptr);
     SetOrUnset(surface->appearanceFlags, Surface::ApplyOverlay, overlayTexture != nullptr);
@@ -234,9 +234,9 @@ void FillinSurface(const Hash* surfaceData,
 
     // If both are present, NormalMap overrides BumpMap
     if (normalTexture != nullptr)
-        surface->bumpTexture.setTexture(*normalTexture, path, bumpFlags);
+        surface->normalTexture.setTexture(*normalTexture, path, bumpFlags);
     else if (bumpTexture != nullptr)
-        surface->bumpTexture.setTexture(*bumpTexture, path, bumpHeight, bumpFlags);
+        surface->normalTexture.setTexture(*bumpTexture, path, bumpHeight, bumpFlags);
 
     if (overlayTexture != nullptr)
         surface->overlayTexture.setTexture(*overlayTexture, path, baseFlags);

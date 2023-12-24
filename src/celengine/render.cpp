@@ -2230,9 +2230,9 @@ void Renderer::renderObject(const Vector3f& pos,
     // Get the textures . . .
     if (obj.surface->baseTexture.tex[textureResolution] != InvalidResource)
         ri.baseTex = obj.surface->baseTexture.find(textureResolution);
-    if ((obj.surface->appearanceFlags & Surface::ApplyBumpMap) != 0 &&
-        obj.surface->bumpTexture.tex[textureResolution] != InvalidResource)
-        ri.bumpTex = obj.surface->bumpTexture.find(textureResolution);
+    if ((obj.surface->appearanceFlags & Surface::ApplyNormalMap) != 0 &&
+        obj.surface->normalTexture.tex[textureResolution] != InvalidResource)
+        ri.normalTex = obj.surface->normalTexture.find(textureResolution);
     if ((obj.surface->appearanceFlags & Surface::ApplyNightMap) != 0 &&
         (renderFlags & ShowNightMaps) != 0)
         ri.nightTex = obj.surface->nightTexture.find(textureResolution);
@@ -4339,9 +4339,9 @@ void Renderer::loadTextures(Body* body)
 
     if (surface.baseTexture.tex[textureResolution] != InvalidResource)
         surface.baseTexture.find(textureResolution);
-    if ((surface.appearanceFlags & Surface::ApplyBumpMap) != 0 &&
-        surface.bumpTexture.tex[textureResolution] != InvalidResource)
-        surface.bumpTexture.find(textureResolution);
+    if ((surface.appearanceFlags & Surface::ApplyNormalMap) != 0 &&
+        surface.normalTexture.tex[textureResolution] != InvalidResource)
+        surface.normalTexture.find(textureResolution);
     if ((surface.appearanceFlags & Surface::ApplyNightMap) != 0 &&
         (renderFlags & ShowNightMaps) != 0)
         surface.nightTexture.find(textureResolution);

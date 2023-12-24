@@ -271,7 +271,7 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
 
     // Set up the textures used by this object
     Texture* baseTex = nullptr;
-    Texture* bumpTex = nullptr;
+    Texture* normalTex = nullptr;
     Texture* specTex = nullptr;
     Texture* emissiveTex = nullptr;
 
@@ -314,15 +314,15 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
 
     if (normalMap != InvalidResource)
     {
-        bumpTex = GetTextureManager()->find(normalMap);
-        if (bumpTex != nullptr)
+        normalTex = GetTextureManager()->find(normalMap);
+        if (normalTex != nullptr)
         {
             shaderProps.texUsage |= ShaderProperties::NormalTexture;
-            if (bumpTex->getFormatOptions() & Texture::DXT5NormalMap)
+            if (normalTex->getFormatOptions() & Texture::DXT5NormalMap)
             {
                 shaderProps.texUsage |= ShaderProperties::CompressedNormalTexture;
             }
-            textures[nTextures++] = bumpTex;
+            textures[nTextures++] = normalTex;
         }
     }
 

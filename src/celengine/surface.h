@@ -22,7 +22,7 @@ class Surface
         color(c),
         specularPower(0.0f),
         baseTexture(),
-        bumpTexture(),
+        normalTexture(),
         nightTexture(),
         overlayTexture(),
         bumpHeight(0.0f),
@@ -33,7 +33,7 @@ class Surface
     enum {
         BlendTexture         = 0x1,
         ApplyBaseTexture     = 0x2,
-        ApplyBumpMap         = 0x4,
+        ApplyNormalMap       = 0x4,
         ApplyNightMap        = 0x10,
         ApplySpecularityMap  = 0x20,
         SpecularReflection   = 0x40,
@@ -47,7 +47,7 @@ class Surface
     Color specularColor;
     float specularPower;
     MultiResTexture baseTexture;    // surface colors
-    MultiResTexture bumpTexture;    // normal map based on terrain relief
+    MultiResTexture normalTexture;  // normal map based on terrain relief
     MultiResTexture nightTexture;   // artificial lights to show on night side
     MultiResTexture specularTexture;// specular mask
     MultiResTexture overlayTexture; // overlay texture, applied last
