@@ -223,6 +223,9 @@ class CelestiaGLProgram
     Vec4ShaderParameter ringPlane;
     Vec3ShaderParameter ringCenter;
 
+    FloatShaderParameter bumpHeight;
+    FloatShaderParameter bumpOffset;
+
     // Mix of Lambertian and "lunar" (Lommel-Seeliger) photometric models.
     // 0 = pure Lambertian, 1 = L-S
     FloatShaderParameter lunarLambert;

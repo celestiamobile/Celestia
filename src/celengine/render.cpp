@@ -2290,6 +2290,12 @@ void Renderer::renderObject(const Vector3f& pos,
 
     ri.pixWidth = discSizeInPixels;
 
+    if (ri.bumpTex != nullptr)
+    {
+        ri.bumpOffset = obj.surface->bumpOffset / radius;
+        ri.bumpHeight = obj.surface->bumpHeight / radius;
+    }
+
     // Set up the colors
     if (ri.baseTex == nullptr ||
         (obj.surface->appearanceFlags & Surface::BlendTexture) != 0)

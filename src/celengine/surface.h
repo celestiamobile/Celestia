@@ -27,6 +27,7 @@ class Surface
         nightTexture(),
         overlayTexture(),
         bumpHeight(0.0f),
+        bumpOffset(0.0f),
         lunarLambert(0.0f)
     {};
 
@@ -55,5 +56,6 @@ class Surface
     MultiResTexture specularTexture;// specular mask
     MultiResTexture overlayTexture; // overlay texture, applied last
     float bumpHeight;               // scale of bump map relief
+    float bumpOffset;               // scale of bump map relief
     float lunarLambert;             // mix between Lambertian and Lommel-Seeliger (lunar-like) photometric functions
 };
