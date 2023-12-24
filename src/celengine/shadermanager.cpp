@@ -1971,6 +1971,10 @@ R"glsl(
     source += CommonHeader;
     source += VertexHeader;
     source += CommonAttribs;
+
+    if ((props.texUsage & ShaderProperties::BumpTexture) != 0)
+        source += DeclareUniform("bumpTex", Shader_Sampler1D);
+
     if (props.hasTextureCoordTransform())
         source += TextureTransformUniforms;
 
@@ -2554,6 +2558,10 @@ ShaderManager::buildRingsVertexShader(const ShaderProperties& props)
     source += CommonHeader;
     source += VertexHeader;
     source += CommonAttribs;
+
+    if ((props.texUsage & ShaderProperties::BumpTexture) != 0)
+        source += DeclareUniform("bumpTex", Shader_Sampler1D);
+
     if (props.hasTextureCoordTransform())
         source += TextureTransformUniforms;
 
@@ -2696,6 +2704,10 @@ ShaderManager::buildRingsVertexShader(const ShaderProperties& props)
     source += CommonHeader;
     source += VertexHeader;
     source += CommonAttribs;
+
+    if ((props.texUsage & ShaderProperties::BumpTexture) != 0)
+        source += DeclareUniform("bumpTex", Shader_Sampler1D);
+
     if (props.hasTextureCoordTransform())
         source += TextureTransformUniforms;
 
@@ -2854,6 +2866,10 @@ ShaderManager::buildAtmosphereVertexShader(const ShaderProperties& props)
     source += CommonHeader;
     source += VertexHeader;
     source += CommonAttribs;
+
+    if ((props.texUsage & ShaderProperties::BumpTexture) != 0)
+        source += DeclareUniform("bumpTex", Shader_Sampler1D);
+
     if (props.hasTextureCoordTransform())
         source += TextureTransformUniforms;
 
@@ -2942,6 +2958,10 @@ ShaderManager::buildEmissiveVertexShader(const ShaderProperties& props)
     source += CommonHeader;
     source += VertexHeader;
     source += CommonAttribs;
+
+    if ((props.texUsage & ShaderProperties::BumpTexture) != 0)
+        source += DeclareUniform("bumpTex", Shader_Sampler1D);
+
     if (props.hasTextureCoordTransform())
         source += TextureTransformUniforms;
 
@@ -3059,6 +3079,10 @@ ShaderManager::buildParticleVertexShader(const ShaderProperties& props)
     source << CommonHeader;
     source << VertexHeader;
     source << CommonAttribs;
+
+    if ((props.texUsage & ShaderProperties::BumpTexture) != 0)
+        source << DeclareUniform("bumpTex", Shader_Sampler1D);
+
     if (props.hasTextureCoordTransform())
         source << TextureTransformUniforms;
 
@@ -3554,6 +3578,13 @@ CelestiaGLProgram::initSamplers()
     if (props.texUsage & ShaderProperties::DiffuseTexture)
     {
         int slot = glGetUniformLocation(program->getID(), "diffTex");
+        if (slot != -1)
+            glUniform1i(slot, nSamplers++);
+    }
+
+    if (props.texUsage & ShaderProperties::BumpTexture)
+    {
+        int slot = glGetUniformLocation(program->getID(), "bumpTex");
         if (slot != -1)
             glUniform1i(slot, nSamplers++);
     }

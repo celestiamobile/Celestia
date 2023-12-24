@@ -22,6 +22,7 @@ class Surface
         color(c),
         specularPower(0.0f),
         baseTexture(),
+        bumpTexture(),
         normalTexture(),
         nightTexture(),
         overlayTexture(),
@@ -40,6 +41,7 @@ class Surface
         Emissive             = 0x80,
         SeparateSpecularMap  = 0x100,
         ApplyOverlay         = 0x200,
+        ApplyBumpMap         = 0x400,
     };
 
     uint32_t appearanceFlags;
@@ -47,6 +49,7 @@ class Surface
     Color specularColor;
     float specularPower;
     MultiResTexture baseTexture;    // surface colors
+    MultiResTexture bumpTexture;    // bump map based on terrain relief
     MultiResTexture normalTexture;  // normal map based on terrain relief
     MultiResTexture nightTexture;   // artificial lights to show on night side
     MultiResTexture specularTexture;// specular mask

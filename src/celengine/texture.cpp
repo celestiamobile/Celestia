@@ -997,9 +997,5 @@ LoadHeightMapFromFile(const fs::path& filename,
 
     img->forceLinear();
 
-    auto normalMap = img->computeNormalMap(height, addressMode == Texture::Wrap);
-    if (normalMap == nullptr)
-        return nullptr;
-
-    return CreateTextureFromImage(*normalMap, addressMode, Texture::DefaultMipMaps);
+    return CreateTextureFromImage(*img, addressMode, Texture::DefaultMipMaps);
 }

@@ -23,6 +23,7 @@ struct RenderInfo
 {
     Color color{ 1.0f, 1.0f, 1.0f };
     Texture* baseTex{ nullptr };
+    Texture* bumpTex{ nullptr };
     Texture* normalTex{ nullptr };
     Texture* nightTex{ nullptr };
     Texture* glossTex{ nullptr };

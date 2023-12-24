@@ -75,6 +75,7 @@ class ShaderProperties
      StaticPointSize         = 0x10000,
      LineAsTriangles         = 0x20000,
      TextureCoordTransform   = 0x40000,
+     BumpTexture             = 0x80000,
  };
 
  enum

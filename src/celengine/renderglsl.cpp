@@ -232,7 +232,12 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
         textures.try_push_back(ri.baseTex);
     }
 
-    if (ri.normalTex != nullptr)
+    if (ri.bumpTex != nullptr)
+    {
+        shadprop.texUsage |= ShaderProperties::BumpTexture;
+        textures.try_push_back(ri.bumpTex);
+    }
+    else if (ri.normalTex != nullptr)
     {
         shadprop.texUsage |= ShaderProperties::NormalTexture;
         textures.try_push_back(ri.normalTex);

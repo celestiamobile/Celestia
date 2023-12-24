@@ -2233,6 +2233,9 @@ void Renderer::renderObject(const Vector3f& pos,
     if ((obj.surface->appearanceFlags & Surface::ApplyNormalMap) != 0 &&
         obj.surface->normalTexture.tex[textureResolution] != InvalidResource)
         ri.normalTex = obj.surface->normalTexture.find(textureResolution);
+    if ((obj.surface->appearanceFlags & Surface::ApplyBumpMap) != 0 &&
+        obj.surface->bumpTexture.tex[textureResolution] != InvalidResource)
+        ri.bumpTex = obj.surface->bumpTexture.find(textureResolution);
     if ((obj.surface->appearanceFlags & Surface::ApplyNightMap) != 0 &&
         (renderFlags & ShowNightMaps) != 0)
         ri.nightTex = obj.surface->nightTexture.find(textureResolution);
