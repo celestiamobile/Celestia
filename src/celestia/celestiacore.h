@@ -15,6 +15,7 @@
 #include <functional>
 #include <string_view>
 #include <tuple>
+#include <optional>
 #include <celutil/filetype.h>
 #include <celutil/timer.h>
 #include <celutil/watcher.h>
@@ -220,6 +221,7 @@ public:
     void mouseMove(float, float);
     void joystickAxis(int axis, float amount);
     void joystickButton(int button, bool down);
+    void pinchUpdate(float focusX, float focusY, float scale);
     void resize(GLsizei w, GLsizei h);
     void draw();
     void draw(celestia::View*);
@@ -404,6 +406,8 @@ private:
     void updateSelectionFromInput();
     bool readStars(const CelestiaConfig&, ProgressNotifier*);
     void renderOverlay();
+    Eigen::Vector3f getPickRay(float x, float y, const celestia::View *view);
+    void updateFOV(float fov, std::optional<Eigen::Vector2f> focus, const celestia::View *view);
 #ifdef CELX
     bool initLuaHook(ProgressNotifier*);
 #endif // CELX
@@ -492,6 +496,15 @@ private:
     int distanceToScreen{ 400 };
 
     float pickTolerance { 4.0f };
+
+#ifdef ENABLE_RAY_BASED_DRAGGING
+    std::optional<Eigen::Vector2f> dragLocation { std::nullopt };
+    std::optional<bool> dragStartFromSurface { std::nullopt };
+#endif
+
+#ifdef ENABLE_FOCUS_ZOOMING
+    std::optional<Eigen::Vector2f> dragStart{ std::nullopt };
+#endif
 
     std::unique_ptr<ViewportEffect> viewportEffect { nullptr };
     bool isViewportEffectUsed { false };

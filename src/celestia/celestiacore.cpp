@@ -407,6 +407,19 @@ void CelestiaCore::mouseButtonDown(float x, float y, int button)
 {
     mouseMotion = 0.0f;
 
+#if defined(ENABLE_RAY_BASED_DRAGGING) || defined(ENABLE_FOCUS_ZOOMING)
+    auto newLocation = Eigen::Vector2f(x, y);
+
+#ifdef ENABLE_RAY_BASED_DRAGGING
+    dragLocation = newLocation;
+    dragStartFromSurface = std::nullopt;
+#endif
+
+#ifdef ENABLE_FOCUS_ZOOMING
+    dragStart = newLocation;
+#endif
+#endif
+
 #ifdef CELX
     if (m_script != nullptr)
     {
@@ -429,6 +442,15 @@ void CelestiaCore::mouseButtonDown(float x, float y, int button)
 
 void CelestiaCore::mouseButtonUp(float x, float y, int button)
 {
+#ifdef ENABLE_RAY_BASED_DRAGGING
+    dragLocation = std::nullopt;
+    dragStartFromSurface = std::nullopt;
+#endif
+
+#ifdef ENABLE_FOCUS_ZOOMING
+    dragStart = std::nullopt;
+#endif
+
     // Four pixel tolerance for picking
     float obsPickTolerance = sim->getActiveObserver()->getFOV() / static_cast<float>(metrics.height) * this->pickTolerance;
 
@@ -454,17 +476,7 @@ void CelestiaCore::mouseButtonUp(float x, float y, int button)
         {
             viewManager->pickView(sim, metrics, x, y);
 
-            float pickX;
-            float pickY;
-            float aspectRatio = static_cast<float>(metrics.width) / static_cast<float>(metrics.height);
-            viewManager->activeView()->mapWindowToView(x / static_cast<float>(metrics.width),
-                                                       y / static_cast<float>(metrics.height),
-                                                       pickX, pickY);
-            pickX *= aspectRatio;
-            if (isViewportEffectUsed)
-                viewportEffect->distortXY(pickX, pickY);
-
-            Vector3f pickRay = renderer->getProjectionMode()->getPickRay(pickX, pickY, viewManager->activeView()->getObserver()->getZoom());
+            Vector3f pickRay = getPickRay(x, y, viewManager->activeView());
 
             Selection oldSel = sim->getSelection();
             Selection newSel = sim->pickObject(pickRay, renderer->getRenderFlags(), obsPickTolerance);
@@ -475,16 +487,7 @@ void CelestiaCore::mouseButtonUp(float x, float y, int button)
         }
         else if (button == RightButton)
         {
-            float pickX, pickY;
-            float aspectRatio = static_cast<float>(metrics.width) / static_cast<float>(metrics.height);
-            viewManager->activeView()->mapWindowToView(x / static_cast<float>(metrics.width),
-                                                       y / static_cast<float>(metrics.height),
-                                                       pickX, pickY);
-            pickX *= aspectRatio;
-            if (isViewportEffectUsed)
-                viewportEffect->distortXY(pickX, pickY);
-
-            Vector3f pickRay = renderer->getProjectionMode()->getPickRay(pickX, pickY, viewManager->activeView()->getObserver()->getZoom());
+            Eigen::Vector3f pickRay = getPickRay(x, y, viewManager->activeView());
 
             Selection sel = sim->pickObject(pickRay, renderer->getRenderFlags(), obsPickTolerance);
             if (!sel.empty())
@@ -560,6 +563,15 @@ void CelestiaCore::mouseMove(float x, float y)
 
 void CelestiaCore::mouseMove(float dx, float dy, int modifiers)
 {
+#ifdef ENABLE_RAY_BASED_DRAGGING
+    auto oldLocation = dragLocation;
+    if (dragLocation.has_value())
+    {
+        dragLocation.value().x() += dx;
+        dragLocation.value().y() += dy;
+    }
+#endif
+
     if (viewManager->resizeViews(metrics, dx, dy))
     {
         setFOVFromZoom();
@@ -632,26 +644,52 @@ void CelestiaCore::mouseMove(float dx, float dy, int modifiers)
             // Mouse zoom control
             float amount = dy / static_cast<float>(metrics.height);
             float minFOV = renderer->getProjectionMode()->getMinimumFOV();
-            float maxFOV = renderer->getProjectionMode()->getMaximumFOV();
-            float fov = sim->getActiveObserver()->getFOV();
+            const View *view = viewManager->activeView();
+            float fov = view->getObserver()->getFOV();
 
             // In order for the zoom to have the right feel, it should be
             // exponential.
             float newFOV = minFOV + (float) exp(log(fov - minFOV) + amount * 4);
-            if (newFOV > maxFOV)
-                newFOV = maxFOV;
-            if (newFOV > minFOV)
-            {
-                sim->getActiveObserver()->setFOV(newFOV);
-                setZoomFromFOV();
-            }
 
-            if ((renderer->getRenderFlags() & Renderer::ShowAutoMag))
+#ifdef ENABLE_FOCUS_ZOOMING
+            updateFOV(newFOV, dragStart, view);
+#else
+            updateFOV(newFOV, std::nullopt, view);
+#endif
+        }
+#ifdef ENABLE_RAY_BASED_DRAGGING
+        else if (oldLocation.has_value() && dragLocation.has_value())
+        {
+            auto view = viewManager->activeView();
+            auto oldPickRay = getPickRay(oldLocation.value().x(), oldLocation.value().y(), view);
+            auto newPickRay = getPickRay(dragLocation.value().x(), dragLocation.value().y(), view);
+            if ((modifiers & RightButton) != 0)
             {
-                setFaintestAutoMag();
-                flash(fmt::sprintf(_("Magnitude limit: %.2f"), sim->getFaintestVisible()));
+                if (bool isDragStartDetermined = dragStartFromSurface.has_value(); !isDragStartDetermined || dragStartFromSurface.value())
+                {
+                    // The drag started from the surface or we are not sure yet, try to perform a surface drag
+                    bool surfaceDrag = sim->orbit(oldPickRay, newPickRay);
+
+                    if (!isDragStartDetermined)
+                        dragStartFromSurface = surfaceDrag;
+                }
+
+                if (!dragStartFromSurface.value())
+                {
+                    // Adjust the rotation rate based on the distance from the reference object.
+                    float coarseness = ComputeRotationCoarseness(*sim);
+
+                    Quaternionf q = math::XRotation(dy / static_cast<float>(metrics.height) * coarseness) *
+                                    math::YRotation(dx / static_cast<float>(metrics.width) * coarseness);
+                    sim->orbit(q);
+                }
+            }
+            else
+            {
+                sim->rotate(Eigen::Quaternionf::FromTwoVectors(oldPickRay, newPickRay));
             }
         }
+#else
         else
         {
             // For a small field of view, rotate the camera more finely
@@ -674,6 +712,7 @@ void CelestiaCore::mouseMove(float dx, float dy, int modifiers)
             else
                 sim->rotate(q.conjugate());
         }
+#endif
 
         mouseMotion += abs(dy) + abs(dx);
     }
@@ -702,6 +741,19 @@ void CelestiaCore::joystickButton(int button, bool down)
 {
     if (button >= 0 && button < JoyButtonCount)
         joyButtonsPressed[button] = down;
+}
+
+
+void CelestiaCore::pinchUpdate(float focusX, float focusY, float scale)
+{
+    viewManager->pickView(sim, metrics, focusX, focusY);
+
+    const View *view = viewManager->activeView();
+    float fov = view->getObserver()->getFOV();
+
+    auto focus = Eigen::Vector2f(focusX, focusY);
+
+    updateFOV(fov / scale, focus, view);
 }
 
 
@@ -1216,35 +1268,13 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
     case ',':
         addToHistory();
         if (observer->getFOV() > renderer->getProjectionMode()->getMinimumFOV())
-        {
-            observer->setFOV(observer->getFOV() / 1.05f);
-            setZoomFromFOV();
-            if((renderer->getRenderFlags() & Renderer::ShowAutoMag))
-            {
-                setFaintestAutoMag();
-                setlocale(LC_NUMERIC, "");
-                string buf = fmt::sprintf(_("Magnitude limit: %.2f"), sim->getFaintestVisible());
-                setlocale(LC_NUMERIC, "C");
-                flash(buf);
-            }
-        }
+            updateFOV(observer->getFOV() / 1.05f, std::nullopt, viewManager->activeView());
         break;
 
     case '.':
         addToHistory();
         if (observer->getFOV() < renderer->getProjectionMode()->getMaximumFOV())
-        {
-            observer->setFOV(observer->getFOV() * 1.05f);
-            setZoomFromFOV();
-            if((renderer->getRenderFlags() & Renderer::ShowAutoMag) != 0)
-            {
-                setFaintestAutoMag();
-                setlocale(LC_NUMERIC, "");
-                string buf = fmt::sprintf(_("Magnitude limit: %.2f"), sim->getFaintestVisible());
-                setlocale(LC_NUMERIC, "C");
-                flash(buf);
-            }
-        }
+            updateFOV(observer->getFOV() * 1.05f, std::nullopt, viewManager->activeView());
         break;
 
     case '+':
@@ -2213,6 +2243,65 @@ void CelestiaCore::renderOverlay()
         m_scriptHook->call("renderoverlay");
 
     hud->renderOverlay(metrics, sim, *viewManager, movieCapture, timeInfo, m_script != nullptr, editMode);
+}
+
+
+Eigen::Vector3f CelestiaCore::getPickRay(float x, float y, const celestia::View *view)
+{
+    float pickX;
+    float pickY;
+    float windowWidth = static_cast<float>(metrics.width);
+    float windowHeight = static_cast<float>(metrics.height);
+
+    float aspectRatio = windowWidth / windowHeight;
+    view->mapWindowToView(x / windowWidth,
+                          y / windowHeight,
+                          pickX, pickY);
+    pickX *= aspectRatio;
+    if (isViewportEffectUsed)
+        viewportEffect->distortXY(pickX, pickY);
+
+    // Pick ray depends on view size, setting the size from the view
+    // and then restore to the size of the window
+    auto projectionMode = renderer->getProjectionMode();
+    projectionMode->setSize(view->width * windowWidth, view->height * windowHeight);
+
+    Eigen::Vector3f pickRay = projectionMode->getPickRay(pickX, pickY, view->getObserver()->getZoom());
+
+    projectionMode->setSize(windowWidth, windowHeight);
+    return pickRay;
+}
+
+void CelestiaCore::updateFOV(float newFOV, std::optional<Eigen::Vector2f> focus, const celestia::View *view)
+{
+    float minFOV = renderer->getProjectionMode()->getMinimumFOV();
+    float maxFOV = renderer->getProjectionMode()->getMaximumFOV();
+    newFOV = std::clamp(newFOV, minFOV, maxFOV);
+
+    // Calculate the rays at the position where the
+    // dragging starts, and rotate the observer so
+    // that the original position's ray stays there
+    std::optional<Eigen::Vector3f> oldPickRay = std::nullopt;
+    if (focus.has_value())
+        oldPickRay = getPickRay(focus.value().x(), focus.value().y(), view);
+
+    Observer *observer = view->getObserver();
+    observer->setFOV(newFOV);
+    setZoomFromFOV();
+
+    if (oldPickRay.has_value())
+    {
+        Eigen::Vector3f newPickRay = getPickRay(focus.value().x(), focus.value().y(), view);
+        observer->rotate(Eigen::Quaternionf::FromTwoVectors(oldPickRay.value(), newPickRay));
+    }
+
+    if ((renderer->getRenderFlags() & Renderer::ShowAutoMag) != 0)
+    {
+        setFaintestAutoMag();
+        setlocale(LC_NUMERIC, "");
+        flash(fmt::sprintf(_("Magnitude limit: %.2f"), sim->getFaintestVisible()));
+        setlocale(LC_NUMERIC, "C");
+    }
 }
 
 
