@@ -29,7 +29,6 @@
 #include <celengine/viewporteffect.h>
 #include <celimage/pixelformat.h>
 #include <celutil/tee.h>
-#include "configfile.h"
 #include "favorites.h"
 #include "destination.h"
 #include "hud.h"
@@ -46,8 +45,8 @@
 #include <celscript/common/scriptmaps.h>
 
 class Url;
-class CelestiaCore;
 class Console;
+class ProgressNotifier;
 
 namespace celestia
 {
@@ -59,15 +58,6 @@ class AudioSession;
 }
 
 typedef Watcher<CelestiaCore> CelestiaWatcher;
-
-class ProgressNotifier
-{
-public:
-    ProgressNotifier() = default;
-    virtual ~ProgressNotifier() = default;
-
-    virtual void update(const std::string&) = 0;
-};
 
 class CelestiaCore // : public Watchable<CelestiaCore>
 {
@@ -222,7 +212,7 @@ public:
     void mouseMove(float, float);
     void joystickAxis(int axis, float amount);
     void joystickButton(int button, bool down);
-    void pinchUpdate(float focusX, float focusY, float scale);
+    void pinchUpdate(float focusX, float focusY, float scale, bool zoomFOV);
     void resize(GLsizei w, GLsizei h);
     void draw();
     void draw(celestia::View*);
@@ -367,7 +357,7 @@ public:
     void setTypedText(const char *);
 
     void setScriptHook(std::unique_ptr<celestia::scripts::IScriptHook> &&hook) { m_scriptHook = std::move(hook); }
-    const std::shared_ptr<celestia::scripts::ScriptMaps>& scriptMaps() const { return m_scriptMaps; }
+    celestia::scripts::ScriptMaps& scriptMaps() { return m_scriptMaps; }
 
     void getCaptureInfo(std::array<int, 4>& viewport, celestia::engine::PixelFormat& format) const;
     bool captureImage(std::uint8_t* buffer, const std::array<int, 4>& viewport, celestia::engine::PixelFormat format) const;
@@ -405,10 +395,9 @@ public:
 private:
     void charEnteredAutoComplete(const char*);
     void updateSelectionFromInput();
-    bool readStars(const CelestiaConfig&, ProgressNotifier*);
     void renderOverlay();
     Eigen::Vector3f getPickRay(float x, float y, const celestia::View *view);
-    void updateFOV(float fov, std::optional<Eigen::Vector2f> focus, const celestia::View *view);
+    void updateFOV(float fov, const std::optional<Eigen::Vector2f> &focus, const celestia::View *view);
 #ifdef CELX
     bool initLuaHook(ProgressNotifier*);
 #endif // CELX
@@ -442,7 +431,8 @@ private:
 #ifdef CELX
     std::unique_ptr<celestia::scripts::LuaScriptPlugin>     m_luaPlugin;
 #endif
-    std::shared_ptr<celestia::scripts::ScriptMaps>          m_scriptMaps;
+
+    celestia::scripts::ScriptMaps m_scriptMaps;
 
     enum ScriptState
     {

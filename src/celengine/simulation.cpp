@@ -272,6 +272,10 @@ void Simulation::changeOrbitDistance(float d)
     activeObserver->changeOrbitDistance(selection, d);
 }
 
+void Simulation::scaleOrbitDistance(float scale, const std::optional<Eigen::Vector3f>& focus)
+{
+    activeObserver->scaleOrbitDistance(selection, scale, focus);
+}
 
 void Simulation::setTargetSpeed(float s)
 {
