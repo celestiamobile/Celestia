@@ -5,6 +5,8 @@ set(CELUTIL_SOURCES
   bytes.h
   color.cpp
   color.h
+  dateformatter.cpp
+  dateformatter.h
   filetype.cpp
   filetype.h
   flag.h
@@ -33,6 +35,7 @@ set(CELUTIL_SOURCES
   tokenizer.h
   tzutil.cpp
   tzutil.h
+  uniquedel.h
   utf8.cpp
   utf8.h
   watcher.h
