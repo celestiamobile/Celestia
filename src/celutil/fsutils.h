@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <optional>
 #include <string_view>
 
 #include <celcompat/filesystem.h>
@@ -20,8 +21,10 @@
 namespace celestia::util
 {
 
+std::optional<fs::path> U8FileName(std::string_view source,
+                                   bool allowWildcardExtension = true);
 fs::path LocaleFilename(const fs::path& filename);
-fs::path PathExp(const fs::path& filename);
+fs::path PathExp(fs::path&& filename);
 fs::path ResolveWildcard(const fs::path& wildcard,
                          array_view<std::string_view> extensions);
 bool IsValidDirectory(const fs::path &dir);
