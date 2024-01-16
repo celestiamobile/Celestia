@@ -30,6 +30,7 @@ using namespace Eigen;
 using namespace std;
 
 namespace astro = celestia::astro;
+namespace engine = celestia::engine;
 namespace math = celestia::math;
 
 Body::Body(PlanetarySystem* _system, const std::string& _name) :
@@ -200,7 +201,7 @@ const ReferenceFrame::SharedConstPtr& Body::getOrbitFrame(double tdb) const
 
 const celestia::ephem::Orbit* Body::getOrbit(double tdb) const
 {
-    return timeline->findPhase(tdb)->orbit();
+    return timeline->findPhase(tdb)->orbit().get();
 }
 
 
@@ -213,7 +214,7 @@ const ReferenceFrame::SharedConstPtr& Body::getBodyFrame(double tdb) const
 const celestia::ephem::RotationModel*
 Body::getRotationModel(double tdb) const
 {
-    return timeline->findPhase(tdb)->rotationModel();
+    return timeline->findPhase(tdb)->rotationModel().get();
 }
 
 
@@ -985,7 +986,7 @@ void Body::computeLocations()
     // No work to do if there's no mesh, or if the mesh cannot be loaded
     if (geometry == InvalidResource)
         return;
-    const Geometry* g = GetGeometryManager()->find(geometry);
+    const Geometry* g = engine::GetGeometryManager()->find(geometry);
     if (g == nullptr)
         return;
 

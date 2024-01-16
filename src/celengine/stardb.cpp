@@ -43,6 +43,7 @@ using celestia::util::GetLogger;
 using celestia::util::IntrusivePtr;
 
 namespace astro = celestia::astro;
+namespace engine = celestia::engine;
 namespace math = celestia::math;
 namespace util = celestia::util;
 
@@ -57,8 +58,8 @@ struct StarDatabaseBuilder::CustomStarDetails
     bool hasCustomDetails{false};
     fs::path modelName;
     fs::path textureName;
-    celestia::ephem::Orbit* orbit{nullptr};
-    celestia::ephem::RotationModel* rm{nullptr};
+    std::shared_ptr<const celestia::ephem::Orbit> orbit;
+    std::shared_ptr<const celestia::ephem::RotationModel> rm;
     std::optional<Eigen::Vector3d> semiAxes{std::nullopt};
     std::optional<float> radius{std::nullopt};
     double temperature{0.0};
@@ -1420,6 +1421,8 @@ StarDatabaseBuilder::applyCustomStarDetails(const Star* star,
 
     if (!customDetails.modelName.empty())
     {
+        using engine::GeometryInfo;
+        using engine::GetGeometryManager;
         ResourceHandle geometryHandle = GetGeometryManager()->getHandle(GeometryInfo(customDetails.modelName,
                                                                                      path,
                                                                                      Eigen::Vector3f::Zero(),
@@ -1530,7 +1533,6 @@ StarDatabaseBuilder::applyOrbit(AstroCatalog::IndexNumber catalogNumber,
                 GetLogger()->error(_("Barycenter {} does not exist.\n"), barycenterCatNo);
             else
                 GetLogger()->error(_("Barycenter {} does not exist.\n"), *barycenterName);
-            delete customDetails.rm;
             return false;
         }
     }
