@@ -522,7 +522,7 @@ void
 displayPlanetInfo(const util::NumberFormatter& formatter,
                   Overlay& overlay,
                   int detail,
-                  Body& body,
+                  const Body& body,
                   double t,
                   const Eigen::Vector3d& viewVec,
                   const HudSettings& hudSettings,
@@ -547,15 +547,22 @@ displayPlanetInfo(const util::NumberFormatter& formatter,
 
     // Find the parent star of the body. This can be slightly complicated if
     // the body orbits a barycenter instead of a star.
-    Selection parent = Selection(&body).parent();
-    while (parent.body() != nullptr)
-        parent = parent.parent();
+    const Star* sun = nullptr;
+    for (const PlanetarySystem* system = body.getSystem(); system != nullptr;)
+    {
+        const Body* primaryBody = system->getPrimaryBody();
+        if (primaryBody == nullptr)
+        {
+            sun = system->getStar();
+            break;
+        }
 
-    if (parent.star() != nullptr)
+        system = primaryBody->getSystem();
+    }
+
+    if (sun != nullptr)
     {
         bool showPhaseAngle = false;
-
-        Star* sun = parent.star();
         if (sun->getVisibility())
         {
             showPhaseAngle = true;
@@ -573,7 +580,7 @@ displayPlanetInfo(const util::NumberFormatter& formatter,
 
         if (showPhaseAngle)
         {
-            Eigen::Vector3d sunVec = Selection(&body).getPosition(t).offsetFromKm(Selection(sun).getPosition(t));
+            Eigen::Vector3d sunVec = body.getPosition(t).offsetFromKm(sun->getPosition(t));
             sunVec.normalize();
             double cosPhaseAngle = std::clamp(sunVec.dot(viewVec.normalized()), -1.0, 1.0);
             double phaseAngle = acos(cosPhaseAngle);
@@ -1162,14 +1169,12 @@ Hud::renderSelectionInfo(const WindowMetrics& metrics,
 
     // Display RA/Dec for the selection, but only when the observer is near
     // the Earth.
-    if (Selection refObject = sim->getFrame()->getRefObject();
-        refObject.body() && refObject.body()->getName() == "Earth")
+    if (const Body* refObject = sim->getFrame()->getRefObject().body();
+        refObject != nullptr && refObject->getName() == "Earth")
     {
-        Body* earth = refObject.body();
-
         UniversalCoord observerPos = sim->getObserver().getPosition();
-        double distToEarthCenter = observerPos.offsetFromKm(refObject.getPosition(sim->getTime())).norm();
-        double altitude = distToEarthCenter - earth->getRadius();
+        double distToEarthCenter = observerPos.offsetFromKm(refObject->getPosition(sim->getTime())).norm();
+        double altitude = distToEarthCenter - refObject->getRadius();
         if (altitude < 1000.0 && (sel.getType() == SelectionType::Star || sel.getType() == SelectionType::DeepSky))
         {
             // Code to show the geocentric RA/Dec
@@ -1177,7 +1182,7 @@ Hud::renderSelectionInfo(const WindowMetrics& metrics,
             // Only show the coordinates for stars and deep sky objects, where
             // the geocentric values will match the apparent values for observers
             // near the Earth.
-            Eigen::Vector3d vEarth = sel.getPosition(sim->getTime()).offsetFromKm(Selection(earth).getPosition(sim->getTime()));
+            Eigen::Vector3d vEarth = sel.getPosition(sim->getTime()).offsetFromKm(refObject->getPosition(sim->getTime()));
             vEarth = math::XRotation(astro::J2000Obliquity) * vEarth;
             displayRADec(*m_overlay, vEarth, loc);
         }

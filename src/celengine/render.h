@@ -20,6 +20,7 @@
 #include <celengine/lightenv.h>
 #include <celengine/universe.h>
 #include <celengine/selection.h>
+#include <celengine/shadermanager.h>
 #include <celengine/starcolors.h>
 #include <celengine/projectionmode.h>
 #include <celengine/rendcontext.h>
@@ -279,7 +280,10 @@ class Renderer
 
     celestia::engine::PixelFormat getPreferredCaptureFormat() const noexcept;
 
-    void drawRectangle(const celestia::Rect& r, int fishEyeOverrideMode, const Eigen::Matrix4f& p, const Eigen::Matrix4f& m = Eigen::Matrix4f::Identity());
+    void drawRectangle(const celestia::Rect& r,
+                       FisheyeOverrideMode fishEyeOverrideMode,
+                       const Eigen::Matrix4f& p,
+                       const Eigen::Matrix4f& m = Eigen::Matrix4f::Identity()) const;
     void setRenderRegion(int x, int y, int width, int height, bool withScissor = true);
 
     ColorTableType getStarColorTable() const;
@@ -782,6 +786,7 @@ class Renderer
     std::unique_ptr<celestia::render::LineRenderer> m_hollowMarkerRenderer;
     std::unique_ptr<celestia::render::NebulaRenderer> m_nebulaRenderer;
     std::unique_ptr<celestia::render::OpenClusterRenderer> m_openClusterRenderer;
+    std::unique_ptr<celestia::render::RingRenderer> m_ringRenderer;
 
     // Location markers
  public:

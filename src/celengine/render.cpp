@@ -24,7 +24,6 @@
 #include "dsorenderer.h"
 #include "asterism.h"
 #include "glshader.h"
-#include "shadermanager.h"
 #include "spheremesh.h"
 #include "lodspheremesh.h"
 #include "geometry.h"
@@ -67,6 +66,7 @@
 #include <celrender/globularrenderer.h>
 #include <celrender/nebularenderer.h>
 #include <celrender/openclusterrenderer.h>
+#include <celrender/ringrenderer.h>
 #include <celrender/gl/buffer.h>
 #include <celrender/gl/vertexobject.h>
 #include <celutil/arrayvector.h>
@@ -260,8 +260,8 @@ Renderer::Renderer() :
     m_largeStarRenderer(std::make_unique<LargeStarRenderer>(*this)),
     m_hollowMarkerRenderer(std::make_unique<LineRenderer>(*this, 1.0f, LineRenderer::PrimType::Lines, LineRenderer::StorageType::Static)),
     m_nebulaRenderer(std::make_unique<NebulaRenderer>(*this)),
-    m_openClusterRenderer(std::make_unique<OpenClusterRenderer>(*this))
-
+    m_openClusterRenderer(std::make_unique<OpenClusterRenderer>(*this)),
+    m_ringRenderer(std::make_unique<RingRenderer>(*this))
 {
     pointStarVertexBuffer = new PointStarVertexBuffer(*this, 2048);
     glareVertexBuffer = new PointStarVertexBuffer(*this, 2048);
@@ -1810,22 +1810,22 @@ static void renderSphereUnlit(const RenderInfo& ri,
     celestia::util::ArrayVector<Texture*, LODSphereMesh::MAX_SPHERE_MESH_TEXTURES> textures;
 
     ShaderProperties shadprop;
-    shadprop.texUsage = ShaderProperties::TextureCoordTransform;
+    shadprop.texUsage = TexUsage::TextureCoordTransform;
 
     // Set up the textures used by this object
     if (ri.baseTex != nullptr)
     {
-        shadprop.texUsage |= ShaderProperties::DiffuseTexture;
+        shadprop.texUsage |= TexUsage::DiffuseTexture;
         textures.try_push_back(ri.baseTex);
     }
     if (ri.nightTex != nullptr)
     {
-        shadprop.texUsage |= ShaderProperties::NightTexture;
+        shadprop.texUsage |= TexUsage::NightTexture;
         textures.try_push_back(ri.nightTex);
     }
     if (ri.overlayTex != nullptr)
     {
-        shadprop.texUsage |= ShaderProperties::OverlayTexture;
+        shadprop.texUsage |= TexUsage::OverlayTexture;
         textures.try_push_back(ri.overlayTex);
     }
 
@@ -1858,8 +1858,8 @@ static void renderCloudsUnlit(const RenderInfo& ri,
                               Renderer *r)
 {
     ShaderProperties shadprop;
-    shadprop.texUsage = ShaderProperties::DiffuseTexture | ShaderProperties::TextureCoordTransform;
-    shadprop.lightModel = ShaderProperties::UnlitModel;
+    shadprop.texUsage = TexUsage::DiffuseTexture | TexUsage::TextureCoordTransform;
+    shadprop.lightModel = LightingModel::UnlitModel;
 
     // Get a shader for the current rendering configuration
     auto* prog = r->getShaderManager().getShader(shadprop);
@@ -2433,12 +2433,11 @@ void Renderer::renderObject(const Vector3f& pos,
         segmentSizeInPixels = 2.0f * obj.rings->outerRadius / (max(nearPlaneDistance, altitude) * pixelSize);
         if (distance <= obj.rings->innerRadius)
         {
-            renderRings_GLSL(*obj.rings, ri, ls,
-                             radius, 1.0f - obj.semiAxes.y(),
-                             textureResolution,
-                             (renderFlags & ShowRingShadows) != 0 && lit,
-                             segmentSizeInPixels,
-                             ringsMVP, true, this);
+            m_ringRenderer->renderRings(*obj.rings, ri, ls,
+                                        radius, 1.0f - obj.semiAxes.y(),
+                                        (renderFlags & ShowRingShadows) != 0 && lit,
+                                        segmentSizeInPixels,
+                                        ringsMVP, true);
         }
     }
 
@@ -2554,12 +2553,11 @@ void Renderer::renderObject(const Vector3f& pos,
 
         if (distance > obj.rings->innerRadius)
         {
-            renderRings_GLSL(*obj.rings, ri, ls,
-                             radius, 1.0f - obj.semiAxes.y(),
-                             textureResolution,
-                             (renderFlags & ShowRingShadows) != 0 && lit,
-                             segmentSizeInPixels,
-                             ringsMVP, false, this);
+            m_ringRenderer->renderRings(*obj.rings, ri, ls,
+                                        radius, 1.0f - obj.semiAxes.y(),
+                                        (renderFlags & ShowRingShadows) != 0 && lit,
+                                        segmentSizeInPixels,
+                                        ringsMVP, false);
         }
     }
 }
@@ -3658,10 +3656,10 @@ void Renderer::buildLabelLists(const math::Frustum& viewFrustum,
             continue;
 
         const TimelinePhase* phase = body->getTimeline()->findPhase(now).get();
-        Body* primary = phase->orbitFrame()->getCenter().body();
+        const Body* primary = phase->orbitFrame()->getCenter().body();
         if (primary != nullptr && (primary->getClassification() & Body::Invisible) != 0)
         {
-            Body* parent = phase->orbitFrame()->getCenter().body();
+            const Body* parent = phase->orbitFrame()->getCenter().body();
             if (parent != nullptr)
                 primary = parent;
         }
@@ -4578,12 +4576,12 @@ bool Renderer::captureFrame(int x, int y, int w, int h, PixelFormat format, unsi
 
 static void draw_rectangle_border(const Renderer &renderer,
                                   const celestia::Rect &rect,
-                                  int fishEyeOverrideMode,
+                                  FisheyeOverrideMode fishEyeOverrideMode,
                                   const Eigen::Matrix4f& p,
                                   const Eigen::Matrix4f& m)
 {
     LineRenderer lr(renderer, rect.lw, LineRenderer::PrimType::LineStrip);
-    if (fishEyeOverrideMode == ShaderProperties::FisheyeOverrideModeDisabled)
+    if (fishEyeOverrideMode == FisheyeOverrideMode::Disabled)
         lr.setHints(LineRenderer::DISABLE_FISHEYE_TRANFORMATION);
     lr.startUpdate();
     lr.addVertex(rect.x,          rect.y);
@@ -4597,16 +4595,16 @@ static void draw_rectangle_border(const Renderer &renderer,
 
 static void draw_rectangle_solid(const Renderer &renderer,
                                  const celestia::Rect &r,
-                                 int fishEyeOverrideMode,
+                                 FisheyeOverrideMode fishEyeOverrideMode,
                                  const Eigen::Matrix4f& p,
                                  const Eigen::Matrix4f& m)
 {
     ShaderProperties shadprop;
-    shadprop.lightModel = ShaderProperties::UnlitModel;
+    shadprop.lightModel = LightingModel::UnlitModel;
     if (r.hasColors)
-        shadprop.texUsage |= ShaderProperties::VertexColors;
+        shadprop.texUsage |= TexUsage::VertexColors;
     if (r.tex != nullptr)
-        shadprop.texUsage |= ShaderProperties::DiffuseTexture;
+        shadprop.texUsage |= TexUsage::DiffuseTexture;
 
     shadprop.fishEyeOverride = fishEyeOverrideMode;
 
@@ -4671,7 +4669,10 @@ static void draw_rectangle_solid(const Renderer &renderer,
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
-void Renderer::drawRectangle(const celestia::Rect &r, int fishEyeOverrideMode, const Eigen::Matrix4f& p, const Eigen::Matrix4f& m)
+void Renderer::drawRectangle(const celestia::Rect &r,
+                             FisheyeOverrideMode fishEyeOverrideMode,
+                             const Eigen::Matrix4f& p,
+                             const Eigen::Matrix4f& m) const
 {
     if(r.type == celestia::Rect::Type::BorderOnly)
         draw_rectangle_border(*this, r, fishEyeOverrideMode, p, m);
