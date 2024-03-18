@@ -2281,6 +2281,17 @@ void CelestiaCore::updateFOV(float newFOV, const std::optional<Eigen::Vector2f> 
     }
 }
 
+void CelestiaCore::initLocale()
+{
+    /* try to set locale, fallback to "classic" */
+    if (setlocale(LC_ALL, ""))
+        loc = std::locale("");
+    else
+        fmt::print("Could not find locale, falling back to classic.\n");
+
+    /* Force number displays into C locale. */
+    setlocale(LC_NUMERIC, "C");
+}
 
 bool CelestiaCore::initSimulation(const fs::path& configFileName,
                                   const vector<fs::path>& extrasDirs,

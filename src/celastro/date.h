@@ -71,7 +71,7 @@ public:
         FormatCount     = 4,
     };
 
-    std::string toString(Format format = Locale) const;
+    std::string toString(const std::locale& loc, Format format = Locale) const;
 
     operator double() const;
 

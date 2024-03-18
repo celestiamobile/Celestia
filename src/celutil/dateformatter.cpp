@@ -16,6 +16,13 @@ namespace astro = celestia::astro;
 namespace celestia::engine
 {
 
+#ifndef USE_ICU
+DateFormatter::DateFormatter(const std::locale& loc) :
+    loc(loc)
+{
+}
+#endif
+
 std::string DateFormatter::formatDate(double tdb, bool local, astro::Date::Format format)
 {
 #ifdef USE_ICU
@@ -55,7 +62,7 @@ std::string DateFormatter::formatDate(double tdb, bool local, astro::Date::Forma
     return utf8FormattedDate;
 #else
     astro::Date d = local ? astro::TDBtoLocal(tdb) : astro::TDBtoUTC(tdb);
-    return d.toString(format);
+    return d.toString(loc, format);
 #endif
 }
 

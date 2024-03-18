@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <locale>
 #ifdef USE_ICU
 #include <celutil/includeicu.h>
 #include <array>
@@ -25,7 +26,11 @@ namespace celestia::engine
 class DateFormatter
 {
 public:
+#ifdef USE_ICU
     DateFormatter() = default;
+#else
+    DateFormatter(const std::locale& loc) : loc(loc) {};
+#endif
     ~DateFormatter() = default;
     DateFormatter(const DateFormatter &) = delete;
     DateFormatter(DateFormatter &&) noexcept = default;
@@ -34,8 +39,8 @@ public:
 
     std::string formatDate(double tdb, bool local, astro::Date::Format format);
 
-#ifdef USE_ICU
 private:
+#ifdef USE_ICU
     using UniqueDateFormat = util::UniquePtrDel<UDateFormat, udat_close>;
 
     static constexpr auto FormatCount = static_cast<std::size_t>(astro::Date::FormatCount);
@@ -44,6 +49,8 @@ private:
     std::array<UniqueDateFormat, FormatCount> utcFormatters;
 
     UDateFormat *getFormatter(bool local, astro::Date::Format format);
+#else
+    std::locale loc;
 #endif
 };
 
