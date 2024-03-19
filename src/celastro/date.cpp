@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <ctime>
 #include <locale>
+#include <memory>
 #include <string_view>
 
 #include <fmt/format.h>
@@ -85,16 +86,15 @@ celestia::util::array_view<LeapSecondRecord> g_leapSeconds = LeapSeconds; //NOSO
 class MonthAbbreviations
 {
 public:
-    MonthAbbreviations();
+    explicit MonthAbbreviations(const std::locale& loc);
     std::string_view operator[](int i) const { return abbreviations[static_cast<std::size_t>(i)]; }
 
 private:
     std::array<std::string, 12> abbreviations;
 };
 
-MonthAbbreviations::MonthAbbreviations()
+MonthAbbreviations::MonthAbbreviations(const std::locale& loc)
 {
-    auto loc = std::locale();
     for (int i = 0; i < 12; ++i)
     {
         std::tm tm;
@@ -105,8 +105,6 @@ MonthAbbreviations::MonthAbbreviations()
         abbreviations[i] = util::WideToUTF8(stream.str());
     }
 }
-
-const MonthAbbreviations monthAbbreviations;
 #endif
 
 inline bool
@@ -183,7 +181,7 @@ Date::Date(double jd)
 }
 
 std::string
-Date::toString(Format format) const
+Date::toString(const std::locale& loc, Format format) const
 {
     if (format == ISO8601)
     {
@@ -213,26 +211,29 @@ Date::toString(Format format) const
     switch(format)
     {
     case Locale:
-        return fmt::format(std::locale(), "{:%c}"sv, cal_time);
+        return fmt::format(loc, "{:%c}"sv, cal_time);
     case TZName:
-        return fmt::format(std::locale(), "{:%Y %b %d %H:%M:%S %Z}"sv, cal_time);
+        return fmt::format(loc, "{:%Y %b %d %H:%M:%S %Z}"sv, cal_time);
     default:
-        return fmt::format(std::locale(), "{:%Y %b %d %H:%M:%S %z}"sv, cal_time);
+        return fmt::format(loc, "{:%Y %b %d %H:%M:%S %z}"sv, cal_time);
     }
 #else
+    static const MonthAbbreviations* monthAbbreviations = nullptr;
+    if (monthAbbreviations == nullptr)
+        monthAbbreviations = std::make_unique<MonthAbbreviations>(loc).release(); //NOSONAR
     switch(format)
     {
     case Locale:
     case TZName:
         return fmt::format("{:04} {} {:02} {:02}:{:02}:{:02} {}"sv,
-                           year, monthAbbreviations[month - 1], day,
+                           year, (*monthAbbreviations)[month - 1], day,
                            hour, minute, static_cast<int>(seconds), tzname);
     default:
         {
             char sign = utc_offset < 0 ? '-' : '+';
             auto offsets = std::div(std::abs(utc_offset), 3600);
             return fmt::format("{:04} {} {:02} {:02}:{:02}:{:02} {}{:02}{:02}"sv,
-                               year, monthAbbreviations[month - 1], day,
+                               year, (*monthAbbreviations)[month - 1], day,
                                hour, minute, static_cast<int>(seconds),
                                sign, offsets.quot, offsets.rem / 60);
         }
