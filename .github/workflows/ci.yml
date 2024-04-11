@@ -30,7 +30,7 @@ jobs:
     - name: Update vcpkg
       shell: pwsh
       run: |
-        $vcpkgCommit = '72d66da23b4332533c82d797bf2f82b8d6d1bf8a'
+        $vcpkgCommit = 'a13163bfa5d7b4c814d8c929443874f676c4482c'
         pushd "$env:VCPKG_INSTALLATION_ROOT"
         git cat-file -e "${vcpkgCommit}^{commit}" 2> $null
         if (!$?) {
@@ -62,6 +62,8 @@ jobs:
       shell: pwsh
       run: |
         $packages = @(
+          'boost-container',
+          'boost-smart-ptr',
           'cspice',
           'eigen3',
           'ffmpeg[x264]',
@@ -176,7 +178,8 @@ jobs:
     - name: 'Install dependencies'
       run: |
         sudo apt-get update
-        sudo apt-get install -y libeigen3-dev \
+        sudo apt-get install -y libboost-dev \
+                                libeigen3-dev \
                                 libepoxy-dev \
                                 libavcodec-dev \
                                 libavformat-dev \
@@ -277,6 +280,7 @@ jobs:
                      ninja \
                      eigen \
                      ffmpeg \
+                     boost \
                      cspice \
                      fmt \
                      jpeg \
@@ -332,6 +336,7 @@ jobs:
                             libepoxy-devel \
                             libpng-devel \
                             libjpeg-turbo-devel \
+                            boost-devel \
                             freetype-devel \
                             SDL2-devel \
                             lua-devel \

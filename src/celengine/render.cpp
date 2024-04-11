@@ -14,6 +14,7 @@
 
 #include <Eigen/Geometry>
 
+#include <boost/container/static_vector.hpp>
 #include <fmt/format.h>
 
 #include "atmosphere.h"
@@ -66,9 +67,9 @@
 #include <celrender/nebularenderer.h>
 #include <celrender/openclusterrenderer.h>
 #include <celrender/ringrenderer.h>
+#include <celrender/skygridrenderer.h>
 #include <celrender/gl/buffer.h>
 #include <celrender/gl/vertexobject.h>
-#include <celutil/arrayvector.h>
 #include <celutil/logger.h>
 #include <celutil/utf8.h>
 #include <celutil/timer.h>
@@ -259,7 +260,8 @@ Renderer::Renderer() :
     m_hollowMarkerRenderer(std::make_unique<LineRenderer>(*this, 1.0f, LineRenderer::PrimType::Lines, LineRenderer::StorageType::Static)),
     m_nebulaRenderer(std::make_unique<NebulaRenderer>(*this)),
     m_openClusterRenderer(std::make_unique<OpenClusterRenderer>(*this)),
-    m_ringRenderer(std::make_unique<RingRenderer>(*this))
+    m_ringRenderer(std::make_unique<RingRenderer>(*this)),
+    m_skyGridRenderer(std::make_unique<SkyGridRenderer>(*this))
 {
     pointStarVertexBuffer = new PointStarVertexBuffer(*this, 2048);
     glareVertexBuffer = new PointStarVertexBuffer(*this, 2048);
@@ -282,7 +284,6 @@ Renderer::~Renderer()
     m_cometRenderer->deinitGL();
     CurvePlot::deinit();
     PlanetographicGrid::deinit();
-    SkyGrid::deinit();
 }
 
 
@@ -1805,7 +1806,7 @@ static void renderSphereUnlit(const RenderInfo& ri,
                               const Matrices &m,
                               Renderer *r)
 {
-    celestia::util::ArrayVector<Texture*, LODSphereMesh::MAX_SPHERE_MESH_TEXTURES> textures;
+    boost::container::static_vector<Texture*, LODSphereMesh::MAX_SPHERE_MESH_TEXTURES> textures;
 
     ShaderProperties shadprop;
     shadprop.texUsage = TexUsage::TextureCoordTransform;
@@ -1814,17 +1815,17 @@ static void renderSphereUnlit(const RenderInfo& ri,
     if (ri.baseTex != nullptr)
     {
         shadprop.texUsage |= TexUsage::DiffuseTexture;
-        textures.try_push_back(ri.baseTex);
+        textures.push_back(ri.baseTex);
     }
     if (ri.nightTex != nullptr)
     {
         shadprop.texUsage |= TexUsage::NightTexture;
-        textures.try_push_back(ri.nightTex);
+        textures.push_back(ri.nightTex);
     }
     if (ri.overlayTex != nullptr)
     {
         shadprop.texUsage |= TexUsage::OverlayTexture;
-        textures.try_push_back(ri.overlayTex);
+        textures.push_back(ri.overlayTex);
     }
 
     // Get a shader for the current rendering configuration
@@ -3940,33 +3941,34 @@ static Vector3d toStandardCoords(const Vector3d& v)
 
 void Renderer::renderSkyGrids(const Observer& observer)
 {
+    using engine::SkyGrid;
     if ((renderFlags & ShowCelestialSphere) != 0)
     {
         SkyGrid grid;
-        grid.setOrientation(Quaterniond(AngleAxis<double>(astro::J2000Obliquity, Vector3d::UnitX())));
-        grid.setLineColor(EquatorialGridColor);
-        grid.setLabelColor(EquatorialGridLabelColor);
-        grid.render(*this, observer, windowWidth, windowHeight);
+        grid.orientation = Quaterniond(AngleAxis<double>(astro::J2000Obliquity, Vector3d::UnitX()));
+        grid.lineColor = EquatorialGridColor;
+        grid.labelColor = EquatorialGridLabelColor;
+        m_skyGridRenderer->render(grid, observer.getZoom());
     }
 
     if ((renderFlags & ShowGalacticGrid) != 0)
     {
         SkyGrid galacticGrid;
-        galacticGrid.setOrientation((astro::eclipticToEquatorial() * astro::equatorialToGalactic()).conjugate());
-        galacticGrid.setLineColor(GalacticGridColor);
-        galacticGrid.setLabelColor(GalacticGridLabelColor);
-        galacticGrid.setLongitudeUnits(SkyGrid::LongitudeDegrees);
-        galacticGrid.render(*this, observer, windowWidth, windowHeight);
+        galacticGrid.orientation = (astro::eclipticToEquatorial() * astro::equatorialToGalactic()).conjugate();
+        galacticGrid.lineColor = GalacticGridColor;
+        galacticGrid.labelColor = GalacticGridLabelColor;
+        galacticGrid.longitudeUnits = SkyGrid::LongitudeDegrees;
+        m_skyGridRenderer->render(galacticGrid, observer.getZoom());
     }
 
     if ((renderFlags & ShowEclipticGrid) != 0)
     {
         SkyGrid grid;
-        grid.setOrientation(Quaterniond::Identity());
-        grid.setLineColor(EclipticGridColor);
-        grid.setLabelColor(EclipticGridLabelColor);
-        grid.setLongitudeUnits(SkyGrid::LongitudeDegrees);
-        grid.render(*this, observer, windowWidth, windowHeight);
+        grid.orientation = Quaterniond::Identity();
+        grid.lineColor = EclipticGridColor;
+        grid.labelColor = EclipticGridLabelColor;
+        grid.longitudeUnits = SkyGrid::LongitudeDegrees;
+        m_skyGridRenderer->render(grid, observer.getZoom());
     }
 
     if ((renderFlags & ShowHorizonGrid) != 0)
@@ -3978,10 +3980,10 @@ void Renderer::renderSkyGrids(const Observer& observer)
         if (body != nullptr)
         {
             SkyGrid grid;
-            grid.setLineColor(HorizonGridColor);
-            grid.setLabelColor(HorizonGridLabelColor);
-            grid.setLongitudeUnits(SkyGrid::LongitudeDegrees);
-            grid.setLongitudeDirection(SkyGrid::IncreasingClockwise);
+            grid.lineColor = HorizonGridColor;
+            grid.labelColor = HorizonGridLabelColor;
+            grid.longitudeUnits = SkyGrid::LongitudeDegrees;
+            grid.longitudeDirection = SkyGrid::IncreasingClockwise;
 
             Vector3d zenithDirection = observer.getPosition().offsetFromKm(body->getPosition(tdb)).normalized();
 
@@ -4003,9 +4005,9 @@ void Renderer::renderSkyGrids(const Observer& observer)
                 m.row(0) = u;
                 m.row(1) = v;
                 m.row(2) = zenithDirection;
-                grid.setOrientation(Quaterniond(m));
+                grid.orientation = Quaterniond(m);
 
-                grid.render(*this, observer, windowWidth, windowHeight);
+                m_skyGridRenderer->render(grid, observer.getZoom());
             }
         }
     }
