@@ -77,11 +77,6 @@ constexpr inline std::string_view HDCatalogPrefix        = "HD "sv;
 constexpr inline std::string_view HIPPARCOSCatalogPrefix = "HIP "sv;
 constexpr inline std::string_view TychoCatalogPrefix     = "TYC "sv;
 constexpr inline std::string_view SAOCatalogPrefix       = "SAO "sv;
-#if 0
-constexpr inline std::string_view GlieseCatalogPrefix    = "Gliese "sv;
-constexpr inline std::string_view RossCatalogPrefix      = "Ross "sv;
-constexpr inline std::string_view LacailleCatalogPrefix  = "Lacaille "sv;
-#endif
 
 // The size of the root star octree node is also the maximum distance
 // distance from the Sun at which any star may be located. The current
@@ -429,13 +424,6 @@ parseCustomStarDetails(const Hash* starData,
 } // end unnamed namespace
 
 
-
-StarDatabase::StarDatabase()
-{
-    crossIndexes.resize(static_cast<std::size_t>(StarCatalog::MaxCatalog));
-}
-
-
 StarDatabase::~StarDatabase() = default;
 
 
@@ -498,10 +486,10 @@ AstroCatalog::IndexNumber
 StarDatabase::crossIndex(StarCatalog catalog, AstroCatalog::IndexNumber celCatalogNumber) const
 {
     auto catalogIndex = static_cast<std::size_t>(catalog);
-    if (catalogIndex >= crossIndexes.size())
+    if (catalogIndex >= crossIndices.size())
         return AstroCatalog::InvalidIndex;
 
-    const CrossIndex& xindex = crossIndexes[catalogIndex];
+    const CrossIndex& xindex = crossIndices[catalogIndex];
 
     // A simple linear search.  We could store cross indices sorted by
     // both catalog numbers and trade memory for speed
@@ -519,10 +507,10 @@ AstroCatalog::IndexNumber
 StarDatabase::searchCrossIndexForCatalogNumber(StarCatalog catalog, AstroCatalog::IndexNumber number) const
 {
     auto catalogIndex = static_cast<std::size_t>(catalog);
-    if (catalogIndex >= crossIndexes.size())
+    if (catalogIndex >= crossIndices.size())
         return AstroCatalog::InvalidIndex;
 
-    const CrossIndex& xindex = crossIndexes[catalogIndex];
+    const CrossIndex& xindex = crossIndices[catalogIndex];
     auto iter = std::lower_bound(xindex.begin(), xindex.end(), number,
                                  [](const CrossIndexEntry& ent, AstroCatalog::IndexNumber n) { return ent.catalogNumber < n; });
     return iter == xindex.end() || iter->catalogNumber != number
@@ -565,23 +553,23 @@ StarDatabase::getCompletion(std::vector<std::string>& completion, std::string_vi
 // of a memory allocation (though no explcit deallocation is
 // required as it's all wrapped in the string class.)
 std::string
-StarDatabase::getStarName(const Star& star, bool i18n) const
+StarDatabase::getStarName(const Star& star, [[maybe_unused]] bool i18n) const
 {
     AstroCatalog::IndexNumber catalogNumber = star.getIndex();
+    if (namesDB == nullptr)
+        return catalogNumberToString(catalogNumber);
 
-    if (namesDB != nullptr)
+    if (auto iter = namesDB->getFirstNameIter(catalogNumber); iter != namesDB->getFinalNameIter())
     {
-        StarNameDatabase::NumberIndex::const_iterator iter = namesDB->getFirstNameIter(catalogNumber);
-        if (iter != namesDB->getFinalNameIter() && iter->first == catalogNumber)
+#ifdef ENABLE_NLS
+        if (i18n)
         {
-            if (i18n)
-            {
-                const char * local = D_(iter->second.c_str());
-                if (iter->second != local)
-                    return local;
-            }
-            return iter->second;
+            const char * local = D_(iter->second.c_str());
+            if (iter->second != local)
+                return local;
         }
+#endif
+        return iter->second;
     }
 
     /*
@@ -617,8 +605,7 @@ StarDatabase::getStarNameList(const Star& star, const unsigned int maxNames) con
 
     if (namesDB != nullptr)
     {
-        StarNameDatabase::NumberIndex::const_iterator iter = namesDB->getFirstNameIter(catalogNumber);
-
+        auto iter = namesDB->getFirstNameIter(catalogNumber);
         while (iter != namesDB->getFinalNameIter() && iter->first == catalogNumber && nameSet.size() < maxNames)
         {
             append(D_(iter->second.c_str()));
@@ -1066,7 +1053,7 @@ StarDatabaseBuilder::loadCrossIndex(StarCatalog catalog, std::istream& in)
     Timer timer{};
 
     auto catalogIndex = static_cast<std::size_t>(catalog);
-    if (catalogIndex >= starDB->crossIndexes.size())
+    if (catalogIndex >= starDB->crossIndices.size())
         return false;
 
     // Verify that the cross index file has a correct header
@@ -1091,7 +1078,7 @@ StarDatabaseBuilder::loadCrossIndex(StarCatalog catalog, std::istream& in)
         }
     }
 
-    StarDatabase::CrossIndex& xindex = starDB->crossIndexes[catalogIndex];
+    StarDatabase::CrossIndex& xindex = starDB->crossIndices[catalogIndex];
     xindex = {};
 
     constexpr std::uint32_t BUFFER_RECORDS = UINT32_C(4096) / sizeof(CrossIndexRecord);
