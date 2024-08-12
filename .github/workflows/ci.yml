@@ -30,7 +30,7 @@ jobs:
     - name: Update vcpkg
       shell: pwsh
       run: |
-        $vcpkgCommit = 'f7423ee180c4b7f40d43402c2feb3859161ef625'
+        $vcpkgCommit = 'a2367ceec5f092d8777606ca110426cadd7ed7db'
         pushd "$env:VCPKG_INSTALLATION_ROOT"
         git cat-file -e "${vcpkgCommit}^{commit}" 2> $null
         if (!$?) {

@@ -21,6 +21,7 @@
 using namespace std::string_view_literals;
 
 namespace compat = celestia::compat;
+namespace engine = celestia::engine;
 
 namespace
 {
@@ -54,14 +55,13 @@ StarDatabase::find(AstroCatalog::IndexNumber catalogNumber) const
                                catalogNumber,
                                [this](std::uint32_t idx, AstroCatalog::IndexNumber catNum)
                                {
-                                   return stars.get()[idx].getIndex() < catNum;
+                                   return (*octreeRoot)[idx].getIndex() < catNum;
                                });
 
     if (it == catalogNumberIndex.end())
         return nullptr;
 
-    // False positive in cppcheck: stars.get() does NOT return a void pointer
-    Star* star = stars.get() + *it; // cppcheck-suppress arithOperationsOnVoidPointer
+    Star* star = &(*octreeRoot)[*it];
     return star->getIndex() == catalogNumber
         ? star
         : nullptr;
@@ -197,7 +197,7 @@ StarDatabase::getStarNameList(const Star& star, unsigned int maxNames) const
 }
 
 void
-StarDatabase::findVisibleStars(StarHandler& starHandler,
+StarDatabase::findVisibleStars(engine::StarHandler& starHandler,
                                const Eigen::Vector3f& position,
                                const Eigen::Quaternionf& orientation,
                                float fovY,
@@ -224,22 +224,24 @@ StarDatabase::findVisibleStars(StarHandler& starHandler,
         frustumPlanes[i] = Eigen::Hyperplane<float, 3>(planeNormals[i], position);
     }
 
-    octreeRoot->processVisibleObjects(starHandler,
-                                      position,
-                                      frustumPlanes.data(),
-                                      limitingMag,
-                                      STAR_OCTREE_ROOT_SIZE);
+    engine::StarOctreeVisibleObjectsProcessor processor(&starHandler,
+                                                        position,
+                                                        frustumPlanes,
+                                                        limitingMag);
+
+    octreeRoot->processDepthFirst(processor);
 }
 
 void
-StarDatabase::findCloseStars(StarHandler& starHandler,
+StarDatabase::findCloseStars(engine::StarHandler& starHandler,
                              const Eigen::Vector3f& position,
                              float radius) const
 {
-    octreeRoot->processCloseObjects(starHandler,
-                                    position,
-                                    radius,
-                                    STAR_OCTREE_ROOT_SIZE);
+    engine::StarOctreeCloseObjectsProcessor processor(&starHandler,
+                                                      position,
+                                                      radius);
+
+    octreeRoot->processDepthFirst(processor);
 }
 
 const StarNameDatabase*
