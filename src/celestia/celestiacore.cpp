@@ -1,7 +1,7 @@
 // celestiacore.cpp
 //
 // Platform-independent UI handling and initialization for Celestia.
-// winmain, gtkmain, and qtmain are thin, platform-specific modules
+// winmain, sdlmain and qtmain are thin, platform-specific modules
 // that sit directly on top of CelestiaCore and feed it mouse and
 // keyboard events.  CelestiaCore then turns those events into calls
 // to Renderer and Simulation.
@@ -854,8 +854,8 @@ void CelestiaCore::keyDown(int key, int modifiers)
 void CelestiaCore::keyUp(int key, int)
 {
     KeyAccel = 1.0;
-    if (std::islower(key))
-        key = std::toupper(key);
+    if (std::islower(static_cast<unsigned char>(key)))
+        key = std::toupper(static_cast<unsigned char>(key));
     keysPressed[key] = false;
     shiftKeysPressed[key] = false;
 }
