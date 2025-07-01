@@ -15,6 +15,7 @@
 #include <cmath>
 #include <numeric>
 
+#include <celastro/astro.h>
 #include <celephem/orbit.h>
 #include <celmath/geomutil.h>
 #include <celmath/intersect.h>

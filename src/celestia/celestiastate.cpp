@@ -11,6 +11,7 @@
 #include "celestiacore.h"
 #include "celestiastate.h"
 #include "url.h"
+#include <celmath/mathlib.h>
 
 namespace math = celestia::math;
 

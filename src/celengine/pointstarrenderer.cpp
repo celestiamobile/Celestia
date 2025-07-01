@@ -10,6 +10,7 @@
 
 #include "pointstarrenderer.h"
 
+#include <celastro/astro.h>
 #include <celengine/starcolors.h>
 #include <celengine/star.h>
 #include <celengine/univcoord.h>

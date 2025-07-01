@@ -14,6 +14,7 @@
 
 #include <fmt/format.h>
 
+#include <celastro/astro.h>
 #include <celengine/star.h>
 #include <celengine/body.h>
 #include <celengine/location.h>

@@ -16,7 +16,6 @@
 
 #include <Eigen/Core>
 
-#include <celastro/astro.h>
 #include <celutil/r128.h>
 #include <celutil/r128util.h>
 
@@ -47,11 +46,7 @@ class UniversalCoord
     /** Compute a universal coordinate that is the sum of this coordinate and
       * an offset in kilometers.
       */
-    UniversalCoord offsetKm(const Eigen::Vector3d& v) const
-    {
-        Eigen::Vector3d vUly = v * celestia::astro::kilometersToMicroLightYears(1.0);
-        return *this + UniversalCoord(vUly);
-    }
+    UniversalCoord offsetKm(const Eigen::Vector3d& v) const;
 
     /** Compute a universal coordinate that is the sum of this coordinate and
       * an offset in micro-light years.
@@ -69,12 +64,7 @@ class UniversalCoord
       * The result is double precision, calculated as (this - uc) * scale, where
       * scale is a factor that converts from Celestia's internal units to kilometers.
       */
-    Eigen::Vector3d offsetFromKm(const UniversalCoord& uc) const
-    {
-        return Eigen::Vector3d(static_cast<double>(x - uc.x),
-                               static_cast<double>(y - uc.y),
-                               static_cast<double>(z - uc.z)) * celestia::astro::microLightYearsToKilometers(1.0);
-    }
+    Eigen::Vector3d offsetFromKm(const UniversalCoord& uc) const;
 
     /** Get the offset in light years of this coordinate from a point (also with
       * units of light years.) The difference is calculated at high precision and
@@ -119,10 +109,7 @@ class UniversalCoord
         return offsetFromKm(uc).norm();
     }
 
-    double distanceFromLy(const UniversalCoord& uc) const
-    {
-        return celestia::astro::kilometersToLightYears(offsetFromKm(uc).norm());
-    }
+    double distanceFromLy(const UniversalCoord& uc) const;
 
     static UniversalCoord Zero()
     {
@@ -133,11 +120,7 @@ class UniversalCoord
     /** Convert double precision coordinates in kilometers to high precision
       * universal coordinates.
       */
-    static UniversalCoord CreateKm(const Eigen::Vector3d& v)
-    {
-        Eigen::Vector3d vUly = v * celestia::astro::microLightYearsToKilometers(1.0);
-        return UniversalCoord(vUly.x(), vUly.y(), vUly.z());
-    }
+    static UniversalCoord CreateKm(const Eigen::Vector3d& v);
 
     /** Convert double precision coordinates in light years to high precision
       * universal coordinates.

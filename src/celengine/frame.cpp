@@ -16,6 +16,7 @@
 #include <cassert>
 #include <cmath>
 
+#include <celastro/astro.h>
 #include <celastro/date.h>
 #include <celephem/rotation.h>
 #include <celmath/geomutil.h>

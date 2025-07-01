@@ -22,6 +22,7 @@
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
+#include <celmath/mathlib.h>
 #include <celcompat/charconv.h>
 #include <celutil/r128util.h>
 #include <celengine/body.h>

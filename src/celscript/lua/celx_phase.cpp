@@ -13,6 +13,7 @@
 #include "celx.h"
 #include "celx_internal.h"
 #include "celx_phase.h"
+#include <celastro/astro.h>
 #include <celengine/timelinephase.h>
 #include <celephem/orbit.h>
 #include <celephem/rotation.h>

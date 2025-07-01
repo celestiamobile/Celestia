@@ -14,6 +14,7 @@
 #include <memory>
 #include <sstream>
 
+#include <celastro/astro.h>
 #include <celengine/asterism.h>
 #include <celengine/body.h>
 #include <celengine/dsodb.h>

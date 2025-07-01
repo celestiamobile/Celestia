@@ -146,6 +146,7 @@ set(CELENGINE_SOURCES
   timelinephase.h
   trajmanager.cpp
   trajmanager.h
+  univcoord.cpp
   univcoord.h
   universe.cpp
   universe.h

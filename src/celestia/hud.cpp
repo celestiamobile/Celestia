@@ -25,6 +25,7 @@
 #include <fmt/format.h>
 #endif
 
+#include <celastro/astro.h>
 #include <celcompat/numbers.h>
 #include <celengine/body.h>
 #include <celengine/location.h>

@@ -16,6 +16,7 @@
 
 #include <fmt/printf.h>
 
+#include <celastro/astro.h>
 #include <celengine/render.h>
 #include <celmath/ellipsoid.h>
 #include <celmath/intersect.h>

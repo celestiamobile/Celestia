@@ -3,6 +3,8 @@ set(CELASTRO_SOURCES
   astro.h
   date.cpp
   date.h
+  keplerelements.cpp
+  keplerelements.h
   units.cpp
   units.h)
 

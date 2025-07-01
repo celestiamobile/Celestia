@@ -10,6 +10,7 @@
 
 #include "dsorenderer.h"
 
+#include <celastro/astro.h>
 #include <celrender/galaxyrenderer.h>
 #include <celrender/globularrenderer.h>
 #include <celrender/nebularenderer.h>

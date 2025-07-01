@@ -13,6 +13,7 @@
 
 #include <Eigen/Geometry>
 
+#include <celastro/astro.h>
 #include <celestia/celestiacore.h>
 #include <celscript/common/scriptmaps.h>
 #include <celutil/logger.h>

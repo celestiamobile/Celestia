@@ -20,6 +20,7 @@
 #include <cassert>
 #include <cmath>
 
+#include <celastro/astro.h>
 #include "star.h"
 #include "stardb.h"
 #include "univcoord.h"

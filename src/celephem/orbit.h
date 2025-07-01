@@ -13,7 +13,7 @@
 
 #include <Eigen/Core>
 
-#include <celastro/astro.h>
+#include <celastro/keplerelements.h>
 
 class Body;
 

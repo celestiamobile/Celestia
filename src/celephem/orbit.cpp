@@ -16,6 +16,7 @@
 #include <functional>
 #include <utility>
 
+#include <celastro/astro.h>
 #include <celcompat/numbers.h>
 #include <celengine/body.h>
 #include <celmath/mathlib.h>
