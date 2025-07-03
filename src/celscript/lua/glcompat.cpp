@@ -13,11 +13,15 @@
 #include <cassert>
 #include <cstring>                      // memcpy
 #include <memory>
+
 #include <Eigen/Core>
 #include <fmt/format.h>
+
 #include <celengine/glsupport.h>
 #include <celengine/shadermanager.h>    // CelestiaGLProgram::*Index
 #include <celmath/vecgl.h>              // math::translate
+#include <celrender/gl/vertexobject.h>
+
 #include "glcompat.h"
 
 namespace math = celestia::math;
@@ -167,6 +171,8 @@ struct Vertex
 };
 
 std::array<Vertex, 16> vertices {};
+celestia::gl::VertexObject vo{ celestia::util::NoCreateT() };
+celestia::gl::Buffer bo{ celestia::util::NoCreateT() };
 
 GLProgram BuildProgram(const std::string &vertex, const std::string &fragment)
 {
@@ -219,42 +225,52 @@ void Draw()
     bool hasColors          = gColorCounter == gVertexCounter;
     ShaderAttributes type   = hasTexCoords ? SHADER_TEXCOORD : SHADER_COLOR;
 
-    glEnableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
-    glVertexAttribPointer(
-        CelestiaGLProgram::VertexCoordAttributeIndex,
-        2, GL_FLOAT, false, sizeof(Vertex), &vertices[0].x
-    );
-
-    if (hasTexCoords)
+    if (vo.id() == 0)
     {
-        glEnableVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex);
-        glVertexAttribPointer(
+        bo = celestia::gl::Buffer(celestia::gl::Buffer::TargetHint::Array);
+        vo = celestia::gl::VertexObject();
+        vo.addVertexBuffer(
+            bo,
+            CelestiaGLProgram::VertexCoordAttributeIndex,
+            2,
+            celestia::gl::VertexObject::DataType::Float,
+            false,
+            sizeof(Vertex),
+            offsetof(Vertex, x));
+        vo.addVertexBuffer(
+            bo,
             CelestiaGLProgram::TextureCoord0AttributeIndex,
-            2, GL_FLOAT, false, sizeof(Vertex), &vertices[0].u
-        );
-    }
-
-    if (hasColors)
-    {
-        glEnableVertexAttribArray(CelestiaGLProgram::ColorAttributeIndex);
-        glVertexAttribPointer(
+            2,
+            celestia::gl::VertexObject::DataType::Float,
+            false,
+            sizeof(Vertex),
+            offsetof(Vertex, u),
+            hasTexCoords);
+        vo.addVertexBuffer(
+            bo,
             CelestiaGLProgram::ColorAttributeIndex,
-            4, GL_FLOAT, false, sizeof(Vertex), &vertices[0].r
-        );
+            4,
+            celestia::gl::VertexObject::DataType::Float,
+            false,
+            sizeof(Vertex),
+            offsetof(Vertex, r),
+            hasColors);
+    }
+    else
+    {
+        vo.setVertexAttributeEnabled(CelestiaGLProgram::TextureCoord0AttributeIndex, hasTexCoords);
+        vo.setVertexAttributeEnabled(CelestiaGLProgram::ColorAttributeIndex, hasColors);
+        bo.invalidateData();
     }
 
     if (auto *prog = FindGLProgram(type); prog != nullptr)
     {
         prog->use();
         prog->setMVPMatrix(g_projectionStack[g_projectionPosition] * g_modelViewStack[g_modelViewPosition]);
-        glDrawArrays(gPrimitive, 0, gVertexCounter);
-    }
 
-    glDisableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
-    if (hasTexCoords)
-        glDisableVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex);
-    if (hasColors)
-        glDisableVertexAttribArray(CelestiaGLProgram::ColorAttributeIndex);
+        bo.setData(vertices);
+        vo.draw(static_cast<celestia::gl::VertexObject::Primitive>(gPrimitive), gVertexCounter);
+    }
 
     // reset state
     gVertexCounter = 0;
