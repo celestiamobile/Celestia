@@ -14,6 +14,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iterator>
@@ -27,7 +28,6 @@
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
-#include <celcompat/filesystem.h>
 #include <celutil/flag.h>
 #include <celutil/logger.h>
 #include "atmosphere.h"
@@ -186,11 +186,7 @@ uniform vec2 texCoordDelta3;
 std::string
 LightProperty(unsigned int i, std::string_view property)
 {
-#ifdef USE_GLSL_STRUCTS
-    return fmt::format("lights[{}].{}", i, property);
-#else
     return fmt::format("light{}_{}", i, property);
-#endif
 }
 
 std::string
@@ -356,18 +352,6 @@ DeclareLights(const ShaderProperties& props)
         return {};
 
     std::string source;
-#ifdef USE_GLSL_STRUCTS
-    source += "uniform struct {\n";
-    source += "   vec3 direction;\n";
-    source += "   vec3 diffuse;\n";
-    source += "   vec3 specular;\n";
-    source += "   vec3 halfVector;\n";
-    if (props.lightModel == LightingModel::AtmosphereModel || props.hasScattering())
-        source += "   vec3 color;\n";
-    if (util::is_set(props.texUsage, TexUsage::NightTexture))
-        source += "   float brightness;\n";
-    fmt::format_to(std::back_inserter(source), "}} lights [{}];\n", props.nLights);
-#else
     for (unsigned int i = 0; i < props.nLights; i++)
     {
         source += DeclareUniform(fmt::format("light{}_direction", i), Shader_Vector3);
@@ -382,7 +366,6 @@ DeclareLights(const ShaderProperties& props)
         if (util::is_set(props.texUsage, TexUsage::NightTexture))
             source += DeclareUniform(fmt::format("light{}_brightness", i), Shader_Float);
     }
-#endif
 
     return source;
 }
@@ -1053,10 +1036,10 @@ BindAttribLocations(const GLProgramBuilder& prog)
 }
 
 std::optional<std::string>
-ReadShaderFile(const fs::path &path)
+ReadShaderFile(const std::filesystem::path &path)
 {
     std::error_code ec;
-    std::uintmax_t size = fs::file_size(path, ec);
+    std::uintmax_t size = std::filesystem::file_size(path, ec);
     if (ec)
     {
         GetLogger()->error("Failed to get file size of {}.\n", path);
@@ -2043,11 +2026,7 @@ buildEmissiveVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
     // models, the material color is premultiplied with the light color.
     // Emissive shaders interoperate better with other shaders if they also
     // take the color from light source 0.
-#ifdef USE_GLSL_STRUCTS
-    source += std::string("uniform struct {\n   vec3 diffuse;\n} lights[1];\n");
-#else
     source += DeclareUniform("light0_diffuse", Shader_Vector3);
-#endif
 
     if (props.usePointSize())
         source += PointSizeDeclaration();
@@ -2711,9 +2690,9 @@ ShaderManager::getShader(std::string_view name)
     auto iter = staticShaders.lower_bound(name);
     if (iter == staticShaders.end() || iter->first != name)
     {
-        fs::path dir("shaders");
-        auto vsName = dir / fs::u8path(fmt::format("{}_vert.glsl", name));
-        auto fsName = dir / fs::u8path(fmt::format("{}_frag.glsl", name));
+        std::filesystem::path dir("shaders");
+        auto vsName = dir / std::filesystem::u8path(fmt::format("{}_vert.glsl", name));
+        auto fsName = dir / std::filesystem::u8path(fmt::format("{}_frag.glsl", name));
 
         auto vs = ReadShaderFile(vsName);
         if (!vs.has_value())
@@ -2736,9 +2715,9 @@ ShaderManager::getShaderGL3(std::string_view name, const GeomShaderParams* param
     auto iter = staticShaders.lower_bound(name);
     if (iter == staticShaders.end() || iter->first != name)
     {
-        fs::path dir("shaders");
-        auto vsName = dir / fs::u8path(fmt::format("{}_vert.glsl", name));
-        auto fsName = dir / fs::u8path(fmt::format("{}_frag.glsl", name));
+        std::filesystem::path dir("shaders");
+        auto vsName = dir / std::filesystem::u8path(fmt::format("{}_vert.glsl", name));
+        auto fsName = dir / std::filesystem::u8path(fmt::format("{}_frag.glsl", name));
 
         auto vs = ReadShaderFile(vsName);
         if (!vs.has_value())
@@ -2749,7 +2728,7 @@ ShaderManager::getShaderGL3(std::string_view name, const GeomShaderParams* param
 
         std::unique_ptr<CelestiaGLProgram> prog;
         // Geometric shader is optional
-        if (auto gsName = dir / fmt::format("{}_geom.glsl", name); fs::exists(gsName))
+        if (auto gsName = dir / fmt::format("{}_geom.glsl", name); std::filesystem::exists(gsName))
         {
             if (auto gs = ReadShaderFile(gsName); gs.has_value())
                 prog = buildProgramGL3(*vs, *gs, *fs, params, fisheyeEnabled);
