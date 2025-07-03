@@ -284,13 +284,6 @@ createVertices(std::vector<float>& vertices,
 } // end unnamed namespace
 
 
-LODSphereMesh::~LODSphereMesh()
-{
-    glDeleteBuffers(vertexBuffers.size(), vertexBuffers.data());
-    glDeleteBuffers(1, &indexBuffer);
-}
-
-
 void
 LODSphereMesh::render(const math::Frustum& frustum,
                       float pixWidth,
@@ -398,38 +391,18 @@ void LODSphereMesh::render(unsigned int attributes,
 
     if (!vertexBuffersInitialized)
     {
-        // TODO: assumes that the same context is used every time we
-        // render.  Valid now, but not necessarily in the future.  Still,
-        // would only cause problems if we rendered in two different contexts
-        // and only one had vertex buffer objects.
-        while(glGetError() != GL_NO_ERROR);
-        glGenBuffers(vertexBuffers.size(), vertexBuffers.data());
-        if (glGetError() != GL_NO_ERROR)
-            return;
-        vertexBuffersInitialized = true;
-        for (auto vertexBuffer : vertexBuffers)
+        for (auto &vertexBuffer : vertexBuffers)
         {
-            glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-            glBufferData(GL_ARRAY_BUFFER,
-                         maxVertices * MaxVertexSize * sizeof(float),
-                         nullptr,
-                         GL_STREAM_DRAW);
+            vertexBuffer = std::make_unique<celestia::gl::Buffer>(celestia::gl::Buffer::TargetHint::Array);
         }
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-        glGenBuffers(1, &indexBuffer);
-        if (glGetError() != GL_NO_ERROR)
-            return;
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                     nIndices * sizeof(unsigned short),
-                     nullptr,
-                     GL_DYNAMIC_DRAW);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        indexBuffer = celestia::gl::Buffer(celestia::gl::Buffer::TargetHint::ElementArray);
+        vo = celestia::gl::VertexObject(celestia::gl::VertexObject::Primitive::TriangleStrip);
+        vo.setIndexBuffer(indexBuffer, 0, celestia::gl::VertexObject::IndexType::UnsignedShort);
+        vertexBuffersInitialized = true;
     }
 
     currentVB = 0;
-    glBindBuffer(GL_ARRAY_BUFFER, vertexBuffers[currentVB]);
 
     // Set up the mesh vertices
     int nRings = phiExtent / ri.step;
@@ -457,11 +430,7 @@ void LODSphereMesh::render(unsigned int attributes,
 
     assert(expectedIndices == indices.size());
 
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                 indices.size() * sizeof(unsigned short),
-                 indices.data(),
-                 GL_DYNAMIC_DRAW);
+    indexBuffer.invalidateData().setData(indices, celestia::gl::Buffer::BufferUsage::DynamicDraw);
 
     // Compute the size of a vertex
     vertexSize = 3;
@@ -469,18 +438,6 @@ void LODSphereMesh::render(unsigned int attributes,
         vertexSize += 3;
     if (nTextures > 0)
         vertexSize += 2;
-
-    glEnableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
-    if ((attributes & Normals) != 0)
-        glEnableVertexAttribArray(CelestiaGLProgram::NormalAttributeIndex);
-
-    for (int i = 0; i < nTextures; i++)
-    {
-        glEnableVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex + i);
-    }
-
-    if ((attributes & Tangents) != 0)
-        glEnableVertexAttribArray(CelestiaGLProgram::TangentAttributeIndex);
 
     if (split == 1)
     {
@@ -528,26 +485,15 @@ void LODSphereMesh::render(unsigned int attributes,
         }
     }
 
-    glDisableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
-    if ((attributes & Normals) != 0)
-        glDisableVertexAttribArray(CelestiaGLProgram::NormalAttributeIndex);
-
-    if ((attributes & Tangents) != 0)
-        glDisableVertexAttribArray(CelestiaGLProgram::TangentAttributeIndex);
-
     for (int i = 0; i < nTextures; i++)
     {
         tex[i]->endUsage();
-        glDisableVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex + i);
     }
 
     if (nTextures > 1)
     {
         glActiveTexture(GL_TEXTURE0);
     }
-
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 }
 
 
@@ -639,29 +585,51 @@ LODSphereMesh::renderSection(int phi0, int theta0, int extent,
 {
     auto stride = static_cast<GLsizei>(vertexSize * sizeof(float));
     int texCoordOffset = ((ri.attributes & Tangents) != 0) ? 6 : 3;
+    auto& bo = *vertexBuffers[currentVB];
 
-    glVertexAttribPointer(CelestiaGLProgram::VertexCoordAttributeIndex,
-                          3, GL_FLOAT, GL_FALSE,
-                          stride, PTR(0));
+    vo.clearVertexAttributes();
+    vo.addVertexBuffer(
+        bo,
+        CelestiaGLProgram::VertexCoordAttributeIndex,
+        3,
+        celestia::gl::VertexObject::DataType::Float,
+        false,
+        stride,
+        0);
     if ((ri.attributes & Normals) != 0)
     {
-        glVertexAttribPointer(CelestiaGLProgram::NormalAttributeIndex,
-                              3, GL_FLOAT, GL_FALSE,
-                              stride, PTR(0));
+        vo.addVertexBuffer(
+            bo,
+            CelestiaGLProgram::NormalAttributeIndex,
+            3,
+            celestia::gl::VertexObject::DataType::Float,
+            false,
+            stride,
+            0);
     }
 
     for (int tc = 0; tc < nTexturesUsed; tc++)
     {
-        glVertexAttribPointer(CelestiaGLProgram::TextureCoord0AttributeIndex + tc,
-                              2, GL_FLOAT, GL_FALSE,
-                              stride, PTR(texCoordOffset * sizeof(float)));
+        vo.addVertexBuffer(
+            bo,
+            CelestiaGLProgram::TextureCoord0AttributeIndex + tc,
+            2,
+            celestia::gl::VertexObject::DataType::Float,
+            false,
+            stride,
+            texCoordOffset * sizeof(float));
     }
 
     if ((ri.attributes & Tangents) != 0)
     {
-        glVertexAttribPointer(CelestiaGLProgram::TangentAttributeIndex,
-                              3, GL_FLOAT, GL_FALSE,
-                              stride, PTR(3 * sizeof(float))); // 3 == tangentOffset
+        vo.addVertexBuffer(
+            bo,
+            CelestiaGLProgram::TangentAttributeIndex,
+            3,
+            celestia::gl::VertexObject::DataType::Float,
+            false,
+            stride,
+            3 * sizeof(float)); // 3 == tangentOffset
     }
 
     // assert(ri.step >= minStep);
@@ -744,19 +712,14 @@ LODSphereMesh::renderSection(int phi0, int theta0, int extent,
 
     assert(expectedVertices == vertices.size());
 
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), nullptr, GL_STREAM_DRAW);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STREAM_DRAW);
+    bo.invalidateData().setData(vertices, celestia::gl::Buffer::BufferUsage::StreamDraw);
 
     int nRings = phiExtent / ri.step;
     int nSlices = thetaExtent / ri.step;
-    glDrawElements(GL_TRIANGLE_STRIP,
-                   nRings * (nSlices + 2) * 2 - 2,
-                   GL_UNSIGNED_SHORT,
-                   nullptr);
+    vo.draw(nRings * (nSlices + 2) * 2 - 2);
 
     // Cycle through the vertex buffers
     currentVB++;
     if (currentVB == NUM_SPHERE_VERTEX_BUFFERS)
         currentVB = 0;
-    glBindBuffer(GL_ARRAY_BUFFER, vertexBuffers[currentVB]);
 }

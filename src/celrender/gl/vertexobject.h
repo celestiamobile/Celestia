@@ -252,6 +252,13 @@ public:
      */
     VertexObject& setVertexAttributeEnabled(int location, bool enabled);
 
+    /**
+     * @brief Remove all the vertex attributes.
+     *
+     * @return Reference to self.
+     */
+    VertexObject& clearVertexAttributes();
+
 private:
     //! Reset object to initial state
     void clear();

@@ -17,6 +17,7 @@
 #include <Eigen/Core>
 
 #include <celengine/glsupport.h>
+#include <celrender/gl/vertexobject.h>
 
 class Texture;
 
@@ -34,7 +35,6 @@ public:
     static constexpr std::size_t NUM_SPHERE_VERTEX_BUFFERS = 2;
 
     LODSphereMesh() = default;
-    ~LODSphereMesh();
 
     LODSphereMesh(const LODSphereMesh&) = delete;
     LODSphereMesh& operator=(const LODSphereMesh&) = delete;
@@ -92,6 +92,7 @@ public:
 
     bool vertexBuffersInitialized{ false };
     GLuint currentVB{ 0 };
-    std::array<GLuint, NUM_SPHERE_VERTEX_BUFFERS> vertexBuffers{};
-    GLuint indexBuffer{ 0 };
+    std::array<std::unique_ptr<celestia::gl::Buffer>, NUM_SPHERE_VERTEX_BUFFERS> vertexBuffers;
+    celestia::gl::Buffer indexBuffer{ celestia::util::NoCreateT() };
+    celestia::gl::VertexObject vo{ celestia::util::NoCreateT() };
 };

@@ -172,6 +172,13 @@ VertexObject::setVertexAttributeEnabled(int location, bool enabled)
 }
 
 VertexObject&
+VertexObject::clearVertexAttributes()
+{
+    m_bufferDesc.clear();
+    return *this;
+}
+
+VertexObject&
 VertexObject::draw()
 {
     return draw(m_primitive, m_count, 0);
