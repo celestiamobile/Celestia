@@ -439,6 +439,7 @@ bool LuaState::charEntered(const char* c_p)
             openLuaLibrary(costate, LUA_LOADLIBNAME, luaopen_package);
             openLuaLibrary(costate, LUA_IOLIBNAME, luaopen_io);
             openLuaLibrary(costate, LUA_OSLIBNAME, luaopen_os);
+            openLuaLibrary(costate, LUA_FFILIBNAME, luaopen_ffi);
             ioMode = IOMode::Allowed;
         }
         else
@@ -845,6 +846,7 @@ void LuaState::requestIO()
             openLuaLibrary(costate, LUA_LOADLIBNAME, luaopen_package);
             openLuaLibrary(costate, LUA_IOLIBNAME, luaopen_io);
             openLuaLibrary(costate, LUA_OSLIBNAME, luaopen_os);
+            openLuaLibrary(costate, LUA_FFILIBNAME, luaopen_ffi);
             ioMode = IOMode::Allowed;
             break;
         case CelestiaCore::ScriptSystemAccessPolicy::Deny:
@@ -1157,6 +1159,7 @@ void LuaState::allowSystemAccess()
     openLuaLibrary(state, LUA_LOADLIBNAME, luaopen_package);
     openLuaLibrary(state, LUA_IOLIBNAME, luaopen_io);
     openLuaLibrary(state, LUA_OSLIBNAME, luaopen_os);
+    openLuaLibrary(state, LUA_FFILIBNAME, luaopen_ffi);
     ioMode = IOMode::Allowed;
 }
 
