@@ -109,6 +109,14 @@ struct RingSystem
         { };
 };
 
+struct Cockpit
+{
+    Eigen::Vector3f position;
+    Eigen::Quaternionf orientation;
+
+    Cockpit(Eigen::Vector3f position, Eigen::Quaternionf orientation) : position(position), orientation(orientation) {}
+};
+
 // Object class enumeration:
 // All of these values must be powers of two so that they can
 // be used in an object type bit mask.
@@ -395,6 +403,8 @@ private:
     bool clickable{ true };
     VisibilityPolicy orbitVisibility : 3;
 
+    std::optional<Cockpit> cockpit{ std::nullopt };
+
     friend class BodyFeaturesManager;
 };
 
@@ -420,6 +430,10 @@ public:
 
     Atmosphere* getAtmosphere(const Body*) const;
     void setAtmosphere(Body*, std::unique_ptr<Atmosphere>&&);
+
+    bool canBeUsedAsCockpit(const Body*) const;
+    std::optional<Cockpit> getCockpit(const Body*) const;
+    void setCockpit(Body*, const std::optional<Cockpit>&);
 
     RingSystem* getRings(const Body*) const;
     void setRings(Body*, std::unique_ptr<RingSystem>&&);

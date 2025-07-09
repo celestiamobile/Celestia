@@ -667,6 +667,19 @@ bool CreateTimeline(Body* body,
 }
 
 void
+ReadCockpit(const AssociativeArray& planetData, Body& body)
+{
+    if (const Value* cockpitValue = planetData.getValue("Cockpit"); cockpitValue != nullptr)
+    {
+        const AssociativeArray* cockpitData = cockpitValue->getHash();
+        auto position = cockpitData->getVector3<float>("Position"sv).value_or(Eigen::Vector3f::Zero());
+        auto orientation = cockpitData->getRotation("Orientation"sv).value_or(Eigen::Quaternionf::Identity());
+        auto bodyFeaturesManager = GetBodyFeaturesManager();
+        bodyFeaturesManager->setCockpit(&body, Cockpit(position, orientation));
+    }
+}
+
+void
 ReadMesh(const AssociativeArray& planetData, Body& body, const std::filesystem::path& path)
 {
     using engine::GeometryInfo;
@@ -1022,6 +1035,7 @@ Body* CreateBody(const std::string& name,
     body->setSurface(surface);
 
     ReadMesh(*planetData, *body, path);
+    ReadCockpit(*planetData, *body);
 
     // Read the atmosphere
     if (const Value* atmosDataValue = planetData->getValue("Atmosphere"); atmosDataValue != nullptr)

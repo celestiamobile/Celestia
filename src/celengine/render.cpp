@@ -1356,6 +1356,7 @@ void Renderer::renderItem(const RenderListEntry& rle,
                      rle.position,
                      rle.distance,
                      rle.appMag,
+                     rle.orientation,
                      observer,
                      nearPlaneDistance, farPlaneDistance,
                      m);
@@ -1457,6 +1458,27 @@ void Renderer::render(const Observer& observer,
     if (util::is_set(renderFlags, RenderFlags::ShowSolarSystemObjects | RenderFlags::ShowOrbits))
     {
         buildNearSystemsLists(universe, observer, xfrustum, now);
+    }
+
+    if (auto cockpitObject = observer.getCockpit(); !cockpitObject.empty())
+    {
+        Body *body = cockpitObject.body();
+        const auto& cockpitDefinition = GetBodyFeaturesManager()->getCockpit(body);
+        if (cockpitDefinition.has_value())
+        {
+            const auto& cockpit = cockpitDefinition.value();
+            RenderListEntry rle;
+
+            Quaternionf originalOrientation = (Quaterniond(m_cameraTransform) * observer.getUntransformedOrientation()).cast<float>();
+            Vector3f position = originalOrientation.conjugate() * cockpit.position * body->getRadius();
+            rle.position = position;
+            rle.distance = position.norm();
+            rle.centerZ  = position.dot(originalOrientation.toRotationMatrix().row(2));
+            rle.discSizeInPixels = body->getRadius() / (rle.distance * pixelSize);
+            rle.orientation = cockpit.orientation;
+
+            addRenderListEntries(rle, *body, false);
+        }
     }
 
     setupSecondaryLightSources(secondaryIlluminators, lightSourceList);
@@ -2631,6 +2653,7 @@ void Renderer::renderPlanet(Body& body,
                             const Vector3f& pos,
                             float distance,
                             float appMag,
+                            const std::optional<Quaternionf>& orientation,
                             const Observer& observer,
                             float nearPlaneDistance,
                             float farPlaneDistance,
@@ -2667,7 +2690,10 @@ void Renderer::renderPlanet(Body& body,
         Quaterniond q = body.getRotationModel(now)->spin(now) *
                         body.getEclipticToEquatorial(now);
 
-        rp.orientation = body.getGeometryOrientation() * q.cast<float>();
+        if (orientation.has_value())
+            rp.orientation = orientation.value() * observer.getUntransformedOrientation().cast<float>();
+        else
+            rp.orientation = body.getGeometryOrientation() * q.cast<float>();
 
         if (util::is_set(labelMode, RenderLabels::LocationLabels))
             bodyFeaturesManager->computeLocations(&body);

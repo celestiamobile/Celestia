@@ -546,6 +546,12 @@ Observer::getOrientationf() const
     return getOrientation().cast<float>();
 }
 
+Eigen::Quaterniond
+Observer::getUntransformedOrientation() const
+{
+    return originalOrientationUniv;
+}
+
 /*! Reduced precision version of `setOrientation`
  */
 void
@@ -1290,6 +1296,32 @@ Observer::startTraveling()
 {
     journey.orientationTransformInverse = devicePoseQuaternion.inverse() * eulerDrivenOrientation.inverse();
     observerMode = ObserverMode::Travelling;
+}
+
+void
+Observer::setCockpit(const Selection &sel)
+{
+    if (sel.empty())
+    {
+        cockpit = sel;
+        return;
+    }
+
+    if (sel.getType() != SelectionType::Body)
+        return;
+
+    Body *body = sel.body();
+
+    if (!GetBodyFeaturesManager()->canBeUsedAsCockpit(body))
+        return;
+
+    cockpit = sel;
+}
+
+Selection
+Observer::getCockpit() const
+{
+    return cockpit;
 }
 
 void

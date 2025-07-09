@@ -153,6 +153,7 @@ public:
 
     Eigen::Quaterniond getOrientation() const;
     Eigen::Quaternionf getOrientationf() const;
+    Eigen::Quaterniond getUntransformedOrientation() const;
     void               setOrientation(const Eigen::Quaternionf&);
     void               setOrientation(const Eigen::Quaterniond&);
 
@@ -292,6 +293,9 @@ public:
 
     void gotoJourney(const JourneyParams&);
 
+    void setCockpit(const Selection &sel);
+    Selection getCockpit() const;
+
 private:
     void computeGotoParameters(const Selection &sel,
                                JourneyParams &jparams,
@@ -370,4 +374,6 @@ private:
 
     std::uint64_t locationFilter{ DefaultLocationFilter };
     std::string displayedSurface;
+
+    Selection cockpit;
 };

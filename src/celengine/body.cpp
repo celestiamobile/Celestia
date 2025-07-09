@@ -103,6 +103,7 @@ Body::setDefaultProperties()
     manager->unsetCometTailColor(this);
     orbitVisibility = UseClassVisibility;
     recomputeCullingRadius();
+    cockpit = std::nullopt;
 }
 
 /*! Return the list of all names (non-localized) by which this
@@ -1248,6 +1249,26 @@ BodyFeaturesManager::setAtmosphere(Body* body, std::unique_ptr<Atmosphere>&& atm
     }
 
     body->recomputeCullingRadius();
+}
+
+bool
+BodyFeaturesManager::canBeUsedAsCockpit(const Body* body) const
+{
+    if (body->getClassification() != BodyClassification::Spacecraft || body->getGeometry() == InvalidResource || !body->cockpit.has_value())
+        return false;
+    return true;
+}
+
+std::optional<Cockpit>
+BodyFeaturesManager::getCockpit(const Body* body) const
+{
+    return body->cockpit;
+}
+
+void
+BodyFeaturesManager::setCockpit(Body* body, const std::optional<Cockpit>& cockpit)
+{
+    body->cockpit = cockpit;
 }
 
 Surface*

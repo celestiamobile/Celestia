@@ -10,7 +10,10 @@
 
 #pragma once
 
+#include <optional>
+
 #include <Eigen/Core>
+#include <Eigen/Geometry>
 
 class Star;
 class Body;
@@ -44,4 +47,5 @@ struct RenderListEntry
     float appMag;
     RenderableType renderableType;
     bool isOpaque;
+    std::optional<Eigen::Quaternionf> orientation;
 };
