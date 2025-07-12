@@ -99,53 +99,35 @@ using celestia::util::GetLogger;
 
 namespace util = celestia::util;
 
-static const int REF_DISTANCE_TO_SCREEN  = 400; //[mm]
+static constexpr int REF_DISTANCE_TO_SCREEN  = 400; //[mm]
 
 // Contribution from planetshine beyond this distance (in units of object radius)
 // is considered insignificant.
-static const float PLANETSHINE_DISTANCE_LIMIT_FACTOR = 100.0f;
+static constexpr float PLANETSHINE_DISTANCE_LIMIT_FACTOR = 100.0f;
 
 // Planetshine from objects less than this pixel size is treated as insignificant
 // and will be ignored.
-static const float PLANETSHINE_PIXEL_SIZE_LIMIT      =   0.1f;
+static constexpr float PLANETSHINE_PIXEL_SIZE_LIMIT      =   0.1f;
 
 // Fractional pixel offset used when rendering text as texture mapped
 // quads to ensure consistent mapping of texels to pixels.
-static const float PixelOffset = 0.125f;
+static constexpr float PixelOffset = 0.125f;
 
 // These two values constrain the near and far planes of the view frustum
 // when rendering planet and object meshes.  The near plane will never be
 // closer than MinNearPlaneDistance, and the far plane is set so that far/near
 // will not exceed MaxFarNearRatio.
-static const float MinNearPlaneDistance = 0.0001f; // km
-static const float MaxFarNearRatio      = 2000000.0f;
+static constexpr float MinNearPlaneDistance = 0.0001f; // km
+static constexpr float MaxFarNearRatio      = 2000000.0f;
 
-static const float MinRelativeOccluderRadius = 0.005f;
+static constexpr float MinRelativeOccluderRadius = 0.005f;
 
-// The minimum apparent size of an objects orbit in pixels before we display
-// a label for it.  This minimizes label clutter.
-static const float MinOrbitSizeForLabel = 20.0f;
-
-// The minimum apparent size of a surface feature in pixels before we display
-// a label for it.
-static const float MinFeatureSizeForLabel = 20.0f;
-
-// Static meshes and textures used by all instances of Simulation
-
-static bool commonDataInitialized = false;
-
-
-LODSphereMesh* g_lodSphere = nullptr;
-
-static Texture* gaussianDiscTex = nullptr;
-static Texture* gaussianGlareTex = nullptr;
-
-static const float CoronaHeight = 0.2f;
+static constexpr float CoronaHeight = 0.2f;
 
 // Size at which the orbit cache will be flushed of old orbit paths
-static const unsigned int OrbitCacheCullThreshold = 200;
+static constexpr unsigned int OrbitCacheCullThreshold = 200;
 // Age in frames at which unused orbit paths may be eliminated from the cache
-static const uint32_t OrbitCacheRetireAge = 16;
+static constexpr std::uint32_t OrbitCacheRetireAge = 16;
 
 Color Renderer::StarLabelColor          (0.471f, 0.356f, 0.682f);
 Color Renderer::PlanetLabelColor        (0.407f, 0.333f, 0.964f);
@@ -219,28 +201,11 @@ inline void glVertexAttrib(GLuint index, const Color &color)
 }
 
 Renderer::Renderer() :
-    windowWidth(0),
-    windowHeight(0),
-    fov(standardFOV),
-    screenDpi(96),
-    corrFac(1.12f),
-    faintestAutoMag45deg(8.0f), //def. 7.0f
 #ifndef GL_ES
     renderMode(GL_FILL),
 #endif
-    brightnessBias(0.0f),
-    saturationMagNight(1.0f),
-    saturationMag(1.0f),
-    pointStarVertexBuffer(nullptr),
-    glareVertexBuffer(nullptr),
-    frameCount(0),
-    lastOrbitCacheFlush(0),
-    minOrbitSize(MinOrbitSizeForLabel),
-    distanceLimit(1.0e6f),
-    minFeatureSize(MinFeatureSizeForLabel),
-    locationFilter(~0ull),
-    settingsChanged(true),
-    objectAnnotationSetOpen(false),
+    pointStarVertexBuffer(std::make_unique<PointStarVertexBuffer>(*this, 2048)),
+    glareVertexBuffer(std::make_unique<PointStarVertexBuffer>(*this, 2048)),
     m_atmosphereRenderer(std::make_unique<AtmosphereRenderer>(*this)),
     m_cometRenderer(std::make_unique<CometRenderer>(*this)),
     m_eclipticLineRenderer(std::make_unique<EclipticLineRenderer>(*this)),
@@ -253,25 +218,11 @@ Renderer::Renderer() :
     m_ringRenderer(std::make_unique<RingRenderer>(*this)),
     m_skyGridRenderer(std::make_unique<SkyGridRenderer>(*this))
 {
-    pointStarVertexBuffer = new PointStarVertexBuffer(*this, 2048);
-    glareVertexBuffer = new PointStarVertexBuffer(*this, 2048);
-
-    for (int i = 0; i < (int) FontCount; i++)
-    {
-        fonts[i] = nullptr;
-    }
-    shaderManager = new ShaderManager();
 }
 
 
 Renderer::~Renderer()
 {
-    delete pointStarVertexBuffer;
-    delete glareVertexBuffer;
-    delete shaderManager;
-
-    m_atmosphereRenderer->deinitGL();
-    m_cometRenderer->deinitGL();
     CurvePlot::deinit();
     PlanetographicGrid::deinit();
 }
@@ -336,7 +287,7 @@ static void BuildGaussianDiscMipLevel(unsigned char* mipPixels,
                                       float fwhm,
                                       float power)
 {
-    unsigned int size = 1 << log2size;
+    unsigned int size = 1U << log2size;
     float sigma = fwhm / 2.3548f;
     float isig2 = 1.0f / (2.0f * sigma * sigma);
     // Store 1/sqrt(2*pi) in constexpr sfactor
@@ -363,7 +314,7 @@ static void BuildGlareMipLevel(unsigned char* mipPixels,
                                float scale,
                                float base)
 {
-    unsigned int size = 1 << log2size;
+    unsigned int size = 1U << log2size;
 
     for (unsigned int i = 0; i < size; i++)
     {
@@ -407,10 +358,11 @@ static void BuildGlareMipLevel2(unsigned char* mipPixels,
 #endif
 
 
-static Texture* BuildGaussianDiscTexture(unsigned int log2size)
+static std::unique_ptr<Texture>
+BuildGaussianDiscTexture(unsigned int log2size)
 {
-    unsigned int size = 1 << log2size;
-    Image* img = new Image(PixelFormat::Luminance, size, size, log2size + 1);
+    unsigned int size = 1U << log2size;
+    auto img = std::make_unique<Image>(PixelFormat::Luminance, size, size, log2size + 1);
 
     for (unsigned int mipLevel = 0; mipLevel <= log2size; mipLevel++)
     {
@@ -421,20 +373,16 @@ static Texture* BuildGaussianDiscTexture(unsigned int log2size)
                                   std::pow(2.0f, (float) (log2size - mipLevel)));
     }
 
-    ImageTexture* texture = new ImageTexture(*img,
-                                             Texture::EdgeClamp,
-                                             Texture::DefaultMipMaps);
-
-    delete img;
-
-    return texture;
+    return std::make_unique<ImageTexture>(*img,
+                                          Texture::EdgeClamp,
+                                          Texture::DefaultMipMaps);
 }
 
-
-static Texture* BuildGaussianGlareTexture(unsigned int log2size)
+static std::unique_ptr<Texture>
+BuildGaussianGlareTexture(unsigned int log2size)
 {
-    unsigned int size = 1 << log2size;
-    Image* img = new Image(PixelFormat::Luminance, size, size, log2size + 1);
+    unsigned int size = 1U << log2size;
+    auto img = std::make_unique<Image>(PixelFormat::Luminance, size, size, log2size + 1);
 
     for (unsigned int mipLevel = 0; mipLevel <= log2size; mipLevel++)
     {
@@ -458,13 +406,9 @@ static Texture* BuildGaussianGlareTexture(unsigned int log2size)
         */
     }
 
-    ImageTexture* texture = new ImageTexture(*img,
-                                             Texture::EdgeClamp,
-                                             Texture::DefaultMipMaps);
-
-    delete img;
-
-    return texture;
+    return std::make_unique<ImageTexture>(*img,
+                                          Texture::EdgeClamp,
+                                          Texture::DefaultMipMaps);
 }
 
 
@@ -492,14 +436,6 @@ translateLabelModeToClassMask(RenderLabels labelMode)
 }
 
 
-// Depth comparison function for render list entries
-bool operator<(const RenderListEntry& a, const RenderListEntry& b)
-{
-    // Operation is reversed because -z axis points into the screen
-    return a.centerZ - a.radius > b.centerZ - b.radius;
-}
-
-
 // Depth comparison for labels
 // Note that it's essential to declare this operator as a member
 // function of Renderer::Label; if it's not a class member, C++'s
@@ -512,7 +448,7 @@ bool Renderer::Annotation::operator<(const Annotation& a) const
 }
 
 // Depth comparison for orbit paths
-bool Renderer::OrbitPathListEntry::operator<(const Renderer::OrbitPathListEntry& o) const
+bool Renderer::OrbitPathListEntry::operator<(const OrbitPathListEntry& o) const
 {
     // Operation is reversed because -z axis points into the screen
     return centerZ - radius > o.centerZ - o.radius;
@@ -530,16 +466,10 @@ bool Renderer::init(int winWidth, int winHeight, const DetailOptions& _detailOpt
     m_markerVO = std::make_unique<celestia::gl::VertexObject>();
     m_markerBO = std::make_unique<celestia::gl::Buffer>();
 
-    // Initialize static meshes and textures common to all instances of Renderer
-    if (!commonDataInitialized)
-    {
-        g_lodSphere = new LODSphereMesh();
+    m_lodSphere = std::make_unique<LODSphereMesh>();
 
-        gaussianDiscTex = BuildGaussianDiscTexture(8);
-        gaussianGlareTex = BuildGaussianGlareTexture(9);
-
-        commonDataInitialized = true;
-    }
+    m_gaussianDiscTex = BuildGaussianDiscTexture(8);
+    m_gaussianGlareTex = BuildGaussianGlareTexture(9);
 
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
@@ -714,7 +644,7 @@ shared_ptr<celestia::engine::ProjectionMode> Renderer::getProjectionMode() const
 void Renderer::setProjectionMode(shared_ptr<celestia::engine::ProjectionMode> _projectionMode)
 {
     projectionMode = _projectionMode;
-    projectionMode->configureShaderManager(shaderManager);
+    projectionMode->configureShaderManager(shaderManager.get());
     markSettingsChanged();
 }
 
@@ -1753,7 +1683,7 @@ void Renderer::renderObjectAsPoint(const Vector3f& position,
         setPipelineState(ps);
 
         if (starStyle != StarStyle::PointStars)
-            gaussianDiscTex->bind();
+            m_gaussianDiscTex->bind();
 
         if (pointSize > gl::maxPointSize)
             m_largeStarRenderer->render(position, {color, alpha}, pointSize, mvp);
@@ -1769,7 +1699,7 @@ void Renderer::renderObjectAsPoint(const Vector3f& position,
         if (useHalos && glareAlpha > 0.0f)
         {
             Eigen::Vector3f center = calculateQuadCenter(getCameraOrientationf(), position, radius);
-            gaussianGlareTex->bind();
+            m_gaussianGlareTex->bind();
             if (glareSize > gl::maxPointSize)
                 m_largeStarRenderer->render(center, {color, glareAlpha}, glareSize, mvp);
             else
@@ -1782,7 +1712,8 @@ void Renderer::renderObjectAsPoint(const Vector3f& position,
 static void renderSphereUnlit(const RenderInfo& ri,
                               const math::Frustum& frustum,
                               const Matrices &m,
-                              Renderer *r)
+                              Renderer *r,
+                              LODSphereMesh *lodSphere)
 {
     boost::container::static_vector<Texture*, LODSphereMesh::MAX_SPHERE_MESH_TEXTURES> textures;
 
@@ -1822,8 +1753,8 @@ static void renderSphereUnlit(const RenderInfo& ri,
     ps.depthTest = true;
     r->setPipelineState(ps);
 
-    g_lodSphere->render(frustum, ri.pixWidth,
-                        textures.data(), static_cast<int>(textures.size()), prog);
+    lodSphere->render(frustum, ri.pixWidth,
+                      textures.data(), static_cast<int>(textures.size()), prog);
 }
 
 
@@ -1832,7 +1763,8 @@ static void renderCloudsUnlit(const RenderInfo& ri,
                               Texture *cloudTex,
                               float cloudTexOffset,
                               const Matrices &m,
-                              Renderer *r)
+                              Renderer *r,
+                              LODSphereMesh *lodSphere)
 {
     ShaderProperties shadprop;
     shadprop.texUsage = TexUsage::DiffuseTexture | TexUsage::TextureCoordTransform;
@@ -1852,7 +1784,7 @@ static void renderCloudsUnlit(const RenderInfo& ri,
     ps.depthTest = true;
     r->setPipelineState(ps);
 
-    g_lodSphere->render(frustum, ri.pixWidth, &cloudTex, 1, prog);
+    lodSphere->render(frustum, ri.pixWidth, &cloudTex, 1, prog);
 }
 
 void
@@ -2362,11 +2294,13 @@ void Renderer::renderObject(const Vector3f& pos,
                                  renderFlags,
                                  obj.orientation,
                                  viewFrustum,
-                                 planetMVP, this);
+                                 planetMVP,
+                                 this,
+                                 m_lodSphere.get());
         }
         else
         {
-            renderSphereUnlit(ri, viewFrustum, planetMVP, this);
+            renderSphereUnlit(ri, viewFrustum, planetMVP, this, m_lodSphere.get());
         }
     }
     else
@@ -2507,11 +2441,13 @@ void Renderer::renderObject(const Vector3f& pos,
                                   renderFlags,
                                   obj.orientation,
                                   viewFrustum,
-                                  mvp, this);
+                                  mvp,
+                                  this,
+                                  m_lodSphere.get());
             }
             else
             {
-                renderCloudsUnlit(ri,viewFrustum, cloudTex, cloudTexOffset, mvp, this);
+                renderCloudsUnlit(ri,viewFrustum, cloudTex, cloudTexOffset, mvp, this, m_lodSphere.get());
             }
 
             glDisable(GL_POLYGON_OFFSET_FILL);
@@ -3803,8 +3739,8 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     starRenderer.obsPos            = obsPos;
     starRenderer.viewNormal        = getCameraOrientationf().conjugate() * -Vector3f::UnitZ();
     starRenderer.renderList        = &renderList;
-    starRenderer.starVertexBuffer  = pointStarVertexBuffer;
-    starRenderer.glareVertexBuffer = glareVertexBuffer;
+    starRenderer.starVertexBuffer  = pointStarVertexBuffer.get();
+    starRenderer.glareVertexBuffer = glareVertexBuffer.get();
     starRenderer.cosFOV            = std::cos(math::degToRad(calcMaxFOV(fov, getAspectRatio())) / 2.0f);
 
     starRenderer.pixelSize         = pixelSize;
@@ -3819,10 +3755,10 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
 
     starRenderer.colorTemp = &starColors;
 
-    gaussianDiscTex->bind();
-    starRenderer.starVertexBuffer->setTexture(gaussianDiscTex);
+    m_gaussianDiscTex->bind();
+    starRenderer.starVertexBuffer->setTexture(m_gaussianDiscTex.get());
     starRenderer.starVertexBuffer->setPointScale(screenDpi / 96.0f);
-    starRenderer.glareVertexBuffer->setTexture(gaussianGlareTex);
+    starRenderer.glareVertexBuffer->setTexture(m_gaussianGlareTex.get());
     starRenderer.glareVertexBuffer->setPointScale(screenDpi / 96.0f);
 
     PointStarVertexBuffer::enable();
@@ -4921,7 +4857,12 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
     // ideal for performance; should render opaque objects front to
     // back, then translucent objects back to front. However, the
     // amount of overdraw in Celestia is typically low.)
-    sort(renderList.begin(), renderList.end());
+    std::sort(renderList.begin(), renderList.end(),
+              [](const RenderListEntry& a, const RenderListEntry& b)
+              {
+                  // Operation is reversed because -z axis points into the screen
+                  return a.centerZ - a.radius > b.centerZ - b.radius;
+              });
 }
 
 bool

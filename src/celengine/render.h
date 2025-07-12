@@ -35,6 +35,7 @@
 
 class RendererWatcher;
 class FrameTree;
+class LODSphereMesh;
 class ReferenceMark;
 class CurvePlot;
 class PointStarVertexBuffer;
@@ -587,19 +588,19 @@ class Renderer
     void createShadowFBO();
 
  private:
-    ShaderManager* shaderManager{ nullptr };
+    std::unique_ptr<ShaderManager> shaderManager{ std::make_unique<ShaderManager>() };
 
-    int windowWidth;
-    int windowHeight;
-    float fov;
+    int windowWidth{ 0 };
+    int windowHeight{ 0 };
+    float fov{ celestia::engine::standardFOV };
     double cosViewConeAngle{ 0.0 };
-    int screenDpi;
-    float corrFac;
+    int screenDpi{ 96 };
+    float corrFac{ 1.12f };
     float pixelSize{ 1.0f };
-    float faintestAutoMag45deg;
+    float faintestAutoMag45deg{ 8.0f };
     std::vector<std::shared_ptr<TextureFont>> fonts{FontCount, nullptr};
 
-    std::shared_ptr<celestia::engine::ProjectionMode> projectionMode{ nullptr };
+    std::shared_ptr<celestia::engine::ProjectionMode> projectionMode;
     int renderMode;
     RenderLabels labelMode{ RenderLabels::NoLabels };
     bool rtl{ false };
@@ -609,13 +610,13 @@ class Renderer
     BodyClassification orbitMask{ BodyClassification::Planet | BodyClassification::Moon | BodyClassification::Stellar };
     float ambientLightLevel{ 0.1f };
     float tintSaturation{ 0.5f };
-    float brightnessBias;
+    float brightnessBias{ 0.0f };
 
     float brightnessScale{ 1.0f };
     float faintestMag{ 0.0f };
     float faintestPlanetMag{ 0.0f };
-    float saturationMagNight;
-    float saturationMag;
+    float saturationMagNight{ 1.0f };
+    float saturationMag{ 1.0f };
     StarStyle starStyle{ StarStyle::FuzzyPointStars };
 
     Color ambientColor;
@@ -623,8 +624,8 @@ class Renderer
 
     Eigen::Quaterniond m_cameraOrientation;
     Eigen::Matrix3d m_cameraTransform{ Eigen::Matrix3d::Identity() };
-    PointStarVertexBuffer* pointStarVertexBuffer;
-    PointStarVertexBuffer* glareVertexBuffer;
+    std::unique_ptr<PointStarVertexBuffer> pointStarVertexBuffer;
+    std::unique_ptr<PointStarVertexBuffer> glareVertexBuffer;
     std::vector<RenderListEntry> renderList;
     std::vector<SecondaryIlluminator> secondaryIlluminators;
     std::vector<DepthBufferPartition> depthPartitions;
@@ -649,7 +650,7 @@ class Renderer
     TextureResolution textureResolution{ TextureResolution::medres };
     DetailOptions detailOptions;
 
-    uint32_t frameCount;
+    std::uint32_t frameCount{ 0 };
 
     int currentIntervalIndex{ 0 };
 
@@ -659,22 +660,26 @@ class Renderer
 
     using OrbitCache = std::map<const celestia::ephem::Orbit*, std::unique_ptr<CurvePlot>>;
     OrbitCache orbitCache;
-    uint32_t lastOrbitCacheFlush;
+    std::uint32_t lastOrbitCacheFlush{ 0 };
 
-    float minOrbitSize;
-    float distanceLimit;
-    float minFeatureSize;
-    uint64_t locationFilter;
+    // The minimum apparent size of an objects orbit in pixels before we display
+    // a label for it.  This minimizes label clutter.
+    float minOrbitSize{ 20.0f };
+    float distanceLimit{ 1.0e6f };
+    // The minimum apparent size of a surface feature in pixels before we display
+    // a label for it.
+    float minFeatureSize{ 20.0f };
+    std::uint64_t locationFilter{ ~UINT64_C(0) };
 
     ColorTemperatureTable starColors{ ColorTableType::Blackbody_D65 };
     ColorTemperatureTable tintColors{ ColorTableType::SunWhite };
 
     Selection highlightObject;
 
-    bool settingsChanged;
+    bool settingsChanged{ true };
 
     // True if we're in between a begin/endObjectAnnotations
-    bool objectAnnotationSetOpen;
+    bool objectAnnotationSetOpen{ false };
 
     double realTime{ true };
 
@@ -693,6 +698,10 @@ class Renderer
 
     // Saturation magnitude used to calculate a point star size
     float satPoint;
+
+    std::unique_ptr<LODSphereMesh> m_lodSphere;
+    std::unique_ptr<Texture> m_gaussianDiscTex;
+    std::unique_ptr<Texture> m_gaussianGlareTex;
 
     std::unique_ptr<celestia::render::AsterismRenderer> m_asterismRenderer;
     std::unique_ptr<celestia::render::BoundariesRenderer> m_boundariesRenderer;
@@ -765,6 +774,7 @@ class Renderer
 
     static Color SelectionCursorColor;
 
+    friend class celestia::render::AtmosphereRenderer;
     friend class PointStarRenderer;
 };
 
