@@ -479,7 +479,7 @@ class Renderer
                              float distance,
                              double now,
                              float nearPlaneDistance,
-                             const Matrices&);
+                             const Matrices&) const;
 
     void renderCometTail(const Body& body,
                          const Eigen::Vector3f& pos,
@@ -714,6 +714,7 @@ class Renderer
     std::unique_ptr<celestia::render::LineRenderer> m_hollowMarkerRenderer;
     std::unique_ptr<celestia::render::NebulaRenderer> m_nebulaRenderer;
     std::unique_ptr<celestia::render::OpenClusterRenderer> m_openClusterRenderer;
+    std::unique_ptr<celestia::render::ReferenceMarkRenderer> m_referenceMarkRenderer;
     std::unique_ptr<celestia::render::RingRenderer> m_ringRenderer;
     std::unique_ptr<celestia::render::SkyGridRenderer> m_skyGridRenderer;
 
