@@ -70,22 +70,28 @@ target_link_libraries(celestia-sdl PRIVATE imgui celestia)
 
 set_target_properties(celestia-sdl PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
-if(TARGET SDL2::SDL2main AND TARGET SDL2::SDL2)
-  if(MINGW)
-    target_compile_definitions(celestia-sdl PRIVATE SDL_MAIN_HANDLED)
-  endif()
-  target_link_libraries(celestia-sdl PRIVATE SDL2::SDL2main SDL2::SDL2)
-  target_link_libraries(imgui PUBLIC SDL2::SDL2)
-else()
-  target_include_directories(celestia-sdl PRIVATE ${SDL2_INCLUDE_DIRS})
-  target_link_libraries(celestia-sdl PRIVATE ${SDL2_LIBRARIES})
-  target_link_libraries(imgui PUBLIC ${SDL2_LIBRARIES})
+if(MINGW)
+  target_compile_definitions(celestia-sdl PRIVATE SDL_MAIN_HANDLED)
 endif()
+target_link_libraries(celestia-sdl PRIVATE SDL2::SDL2main SDL2::SDL2)
+target_link_libraries(imgui PUBLIC SDL2::SDL2)
 
-install(
-  TARGETS celestia-sdl
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-  COMPONENT sdlgui
-)
+if(WIN32)
+  install(
+    TARGETS celestia-sdl
+    RUNTIME_DEPENDENCIES
+      PRE_EXCLUDE_REGEXES "^api-ms" "^ext-ms-"
+      POST_EXCLUDE_REGEXES ".*system32/.*\\.dll$"
+      DIRECTORIES $<TARGET_FILE_DIR:celestia> $<TARGET_FILE_DIR:SDL2::SDL2>
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT sdlgui
+  )
+else()
+  install(
+    TARGETS celestia-sdl
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT sdlgui
+  )
+endif()
 
 add_subdirectory(data)

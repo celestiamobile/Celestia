@@ -228,25 +228,6 @@ Renderer::~Renderer()
     CurvePlot::deinit();
 }
 
-
-Renderer::DetailOptions::DetailOptions() :
-    orbitPathSamplePoints(100),
-    shadowTextureSize(256),
-    eclipseTextureSize(128),
-    orbitWindowEnd(0.5),
-    orbitPeriodsShown(1.0),
-    linearFadeFraction(0.0),
-
-    renderAsterismsFadeStartDist(600.0f),
-    renderAsterismsFadeEndDist(6.52e4f),
-    renderBoundariesFadeStartDist(6.0f),
-    renderBoundariesFadeEndDist(20.0f),
-    labelConstellationsFadeStartDist(6.0f),
-    labelConstellationsFadeEndDist(20.0f)
-{
-}
-
-
 #if 0
 // Not used yet.
 
@@ -3607,11 +3588,11 @@ void Renderer::buildLabelLists(const math::InfiniteFrustum& viewFrustum,
         if (body->getName().empty())
             continue;
 
-        const TimelinePhase* phase = body->getTimeline()->findPhase(now).get();
-        const Body* primary = phase->orbitFrame()->getCenter().body();
+        const TimelinePhase& phase = body->getTimeline()->findPhase(now);
+        const Body* primary = phase.orbitFrame()->getCenter().body();
         if (primary != nullptr && util::is_set(primary->getClassification(), BodyClassification::Invisible))
         {
-            const Body* parent = phase->orbitFrame()->getCenter().body();
+            const Body* parent = phase.orbitFrame()->getCenter().body();
             if (parent != nullptr)
                 primary = parent;
         }
@@ -3643,8 +3624,8 @@ void Renderer::buildLabelLists(const math::InfiniteFrustum& viewFrustum,
             // position.
             if (primary != lastPrimary)
             {
-                Vector3d p = phase->orbitFrame()->getOrientation(now).conjugate() *
-                             phase->orbit()->positionAtTime(now);
+                Vector3d p = phase.orbitFrame()->getOrientation(now).conjugate() *
+                             phase.orbit()->positionAtTime(now);
                 Vector3d v = ri.position.cast<double>() - p;
 
                 primarySphere = math::Sphered(v, primary->getRadius());
