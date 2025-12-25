@@ -1257,7 +1257,7 @@ BodyFeaturesManager::setAtmosphere(Body* body, std::unique_ptr<Atmosphere>&& atm
 bool
 BodyFeaturesManager::canBeUsedAsCockpit(const Body* body) const
 {
-    if (body->getClassification() != BodyClassification::Spacecraft || body->getGeometry() == InvalidResource || !body->cockpit.has_value())
+    if (body->getClassification() != BodyClassification::Spacecraft || body->getGeometry() == ResourceHandle::InvalidResource || !body->cockpit.has_value())
         return false;
     return true;
 }
