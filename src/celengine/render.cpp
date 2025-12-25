@@ -2133,17 +2133,17 @@ void Renderer::renderObject(const Vector3f& pos,
     // Get the object's geometry; nullptr indicates that object is an
     // ellipsoid.
     Geometry* geometry = nullptr;
-    if (obj.geometry != InvalidResource)
+    if (obj.geometry != ResourceHandle::InvalidResource)
     {
         // This is a model loaded from a file
         geometry = engine::GetGeometryManager()->find(obj.geometry);
     }
 
     // Get the textures . . .
-    if (obj.surface->baseTexture.texture(textureResolution) != InvalidResource)
+    if (obj.surface->baseTexture.texture(textureResolution) != ResourceHandle::InvalidResource)
         ri.baseTex = obj.surface->baseTexture.find(textureResolution);
     if ((obj.surface->appearanceFlags & Surface::ApplyBumpMap) != 0 &&
-        obj.surface->bumpTexture.texture(textureResolution) != InvalidResource)
+        obj.surface->bumpTexture.texture(textureResolution) != ResourceHandle::InvalidResource)
         ri.bumpTex = obj.surface->bumpTexture.find(textureResolution);
     if ((obj.surface->appearanceFlags & Surface::ApplyNightMap) != 0 &&
         util::is_set(renderFlags, RenderFlags::ShowNightMaps))
@@ -2225,7 +2225,7 @@ void Renderer::renderObject(const Vector3f& pos,
     // be seen, make the far plane of the frustum as close to the viewer
     // as possible.
     float frustumFarPlane = farPlaneDistance;
-    if (obj.geometry == InvalidResource)
+    if (obj.geometry == ResourceHandle::InvalidResource)
     {
         // Only adjust the far plane for ellipsoidal objects
         float d = pos.norm();
@@ -2247,7 +2247,7 @@ void Renderer::renderObject(const Vector3f& pos,
         if (obj.atmosphere != nullptr)
         {
             float atmosphereHeight = max(obj.atmosphere->cloudHeight,
-                                         obj.atmosphere->mieScaleHeight * -log(AtmosphereExtinctionThreshold));
+                                         obj.atmosphere->mieScaleHeight * -LogAtmosphereExtinctionThreshold);
             if (atmosphereHeight > 0.0f)
             {
                 // If there's an atmosphere, we need to move the far plane
@@ -2277,16 +2277,16 @@ void Renderer::renderObject(const Vector3f& pos,
     {
         if (util::is_set(renderFlags, RenderFlags::ShowCloudMaps))
         {
-            if (atmosphere->cloudTexture.texture(textureResolution) != InvalidResource)
+            if (atmosphere->cloudTexture.texture(textureResolution) != ResourceHandle::InvalidResource)
                 cloudTex = atmosphere->cloudTexture.find(textureResolution);
-            if (atmosphere->cloudNormalMap.texture(textureResolution) != InvalidResource)
+            if (atmosphere->cloudNormalMap.texture(textureResolution) != ResourceHandle::InvalidResource)
                 cloudNormalMap = atmosphere->cloudNormalMap.find(textureResolution);
         }
         if (atmosphere->cloudSpeed != 0.0f)
             cloudTexOffset = (float) (-math::pfmod(now * atmosphere->cloudSpeed * 0.5 * celestia::numbers::inv_pi, 1.0));
     }
 
-    if (obj.geometry == InvalidResource)
+    if (obj.geometry == ResourceHandle::InvalidResource)
     {
         // A null model indicates that this body is a sphere
         if (lit)
@@ -2331,9 +2331,6 @@ void Renderer::renderObject(const Vector3f& pos,
                 renderGeometry_GLSL_Unlit(geometry,
                                           ri,
                                           texOverride,
-                                          geometryScale,
-                                          renderFlags,
-                                          obj.orientation,
                                           astro::daysToSecs(now - astro::J2000),
                                           planetMVP, this);
             }
@@ -2682,7 +2679,7 @@ void Renderer::renderPlanet(Body& body,
         Vector3f scaleFactors;
         bool isNormalized = false;
         const Geometry* geometry = nullptr;
-        if (rp.geometry != InvalidResource)
+        if (rp.geometry != ResourceHandle::InvalidResource)
             geometry = engine::GetGeometryManager()->find(rp.geometry);
         if (geometry == nullptr || geometry->isNormalized())
         {
@@ -2924,7 +2921,7 @@ void Renderer::renderStar(const Star& star,
 
         surface.color = color;
 
-        if (MultiResTexture mtex = star.getTexture(); mtex.texture(textureResolution) != InvalidResource)
+        if (MultiResTexture mtex = star.getTexture(); mtex.texture(textureResolution) != ResourceHandle::InvalidResource)
             surface.baseTexture = mtex;
         else
             surface.baseTexture = MultiResTexture();
@@ -2940,7 +2937,7 @@ void Renderer::renderStar(const Star& star,
         Atmosphere atmosphere;
 
         // Use atmosphere effect to give stars a fuzzy fringe
-        if (star.hasCorona() && rp.geometry == InvalidResource)
+        if (star.hasCorona() && rp.geometry == ResourceHandle::InvalidResource)
         {
             Color atmColor(color.red() * 0.5f, color.green() * 0.5f, color.blue() * 0.5f);
             atmosphere.height = radius * CoronaHeight;
@@ -3162,7 +3159,7 @@ void Renderer::addRenderListEntries(RenderListEntry& rle,
         rle.renderableType = RenderListEntry::RenderableBody;
         rle.body = &body;
 
-        if (body.getGeometry() != InvalidResource && rle.discSizeInPixels > 1)
+        if (body.getGeometry() != ResourceHandle::InvalidResource && rle.discSizeInPixels > 1)
         {
             const Geometry* geometry = engine::GetGeometryManager()->find(body.getGeometry());
             if (geometry == nullptr)
@@ -4262,33 +4259,33 @@ void Renderer::loadTextures(Body* body)
 {
     Surface& surface = body->getSurface();
 
-    if (surface.baseTexture.texture(textureResolution) != InvalidResource)
+    if (surface.baseTexture.texture(textureResolution) != ResourceHandle::InvalidResource)
         surface.baseTexture.find(textureResolution);
     if ((surface.appearanceFlags & Surface::ApplyBumpMap) != 0 &&
-        surface.bumpTexture.texture(textureResolution) != InvalidResource)
+        surface.bumpTexture.texture(textureResolution) != ResourceHandle::InvalidResource)
         surface.bumpTexture.find(textureResolution);
     if ((surface.appearanceFlags & Surface::ApplyNightMap) != 0 &&
         util::is_set(renderFlags, RenderFlags::ShowNightMaps))
         surface.nightTexture.find(textureResolution);
     if ((surface.appearanceFlags & Surface::SeparateSpecularMap) != 0 &&
-        surface.specularTexture.texture(textureResolution) != InvalidResource)
+        surface.specularTexture.texture(textureResolution) != ResourceHandle::InvalidResource)
         surface.specularTexture.find(textureResolution);
 
     const BodyFeaturesManager* bodyFeaturesManager = GetBodyFeaturesManager();
     if (util::is_set(renderFlags, RenderFlags::ShowCloudMaps))
     {
         Atmosphere* atmosphere = bodyFeaturesManager->getAtmosphere(body);
-        if (atmosphere != nullptr && atmosphere->cloudTexture.texture(textureResolution) != InvalidResource)
+        if (atmosphere != nullptr && atmosphere->cloudTexture.texture(textureResolution) != ResourceHandle::InvalidResource)
             atmosphere->cloudTexture.find(textureResolution);
     }
 
     if (auto rings = bodyFeaturesManager->getRings(body);
-        rings != nullptr && rings->texture.texture(textureResolution) != InvalidResource)
+        rings != nullptr && rings->texture.texture(textureResolution) != ResourceHandle::InvalidResource)
     {
         rings->texture.find(textureResolution);
     }
 
-    if (body->getGeometry() != InvalidResource)
+    if (body->getGeometry() != ResourceHandle::InvalidResource)
     {
         Geometry* geometry = engine::GetGeometryManager()->find(body->getGeometry());
         if (geometry != nullptr)
@@ -4791,7 +4788,7 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
             {
                 cullRadius += atmosphere->height;
                 cloudHeight = max(atmosphere->cloudHeight,
-                                  atmosphere->mieScaleHeight * -log(AtmosphereExtinctionThreshold));
+                                  atmosphere->mieScaleHeight * -LogAtmosphereExtinctionThreshold);
             }
             break;
 

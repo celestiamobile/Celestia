@@ -21,7 +21,7 @@
 #include "multitexture.h"
 #include "renderflags.h"
 
-class Atmosphere;
+struct Atmosphere;
 class Geometry;
 class LightingState;
 class LODSphereMesh;
@@ -78,9 +78,6 @@ void renderClouds_GLSL(const RenderInfo& ri,
 void renderGeometry_GLSL_Unlit(Geometry* geometry,
                                const RenderInfo& ri,
                                ResourceHandle texOverride,
-                               float geometryScale,
-                               RenderFlags renderFlags,
-                               const Eigen::Quaternionf& planetOrientation,
                                double tsec,
                                const Matrices &m,
                                Renderer* renderer);

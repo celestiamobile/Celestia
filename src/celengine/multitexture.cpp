@@ -11,8 +11,6 @@
 
 #include <cassert>
 
-#include "texmanager.h"
-
 namespace
 {
 constexpr auto loresIndex = static_cast<std::size_t>(TextureResolution::lores);
@@ -23,9 +21,7 @@ constexpr auto hiresIndex = static_cast<std::size_t>(TextureResolution::hires);
 
 MultiResTexture::MultiResTexture()
 {
-    tex[loresIndex] = InvalidResource;
-    tex[medresIndex] = InvalidResource;
-    tex[hiresIndex] = InvalidResource;
+    tex.fill(ResourceHandle::InvalidResource);
 }
 
 
@@ -38,7 +34,7 @@ MultiResTexture::MultiResTexture(const std::filesystem::path& source,
 
 void MultiResTexture::setTexture(const std::filesystem::path& source,
                                  const std::filesystem::path& path,
-                                 unsigned int flags)
+                                 TextureFlags flags)
 {
     TextureManager* texMan = GetTextureManager();
     tex[loresIndex] = texMan->getHandle(TextureInfo(source, path, flags, TextureResolution::lores));
@@ -50,7 +46,7 @@ void MultiResTexture::setTexture(const std::filesystem::path& source,
 void MultiResTexture::setTexture(const std::filesystem::path& source,
                                  const std::filesystem::path& path,
                                  float bumpHeight,
-                                 unsigned int flags)
+                                 TextureFlags flags)
 {
     TextureManager* texMan = GetTextureManager();
     tex[loresIndex] = texMan->getHandle(TextureInfo(source, path, bumpHeight, flags, TextureResolution::lores));
@@ -102,7 +98,7 @@ Texture* MultiResTexture::find(TextureResolution resolution)
 
 bool MultiResTexture::isValid() const
 {
-    return (tex[loresIndex] != InvalidResource ||
-            tex[medresIndex] != InvalidResource ||
-            tex[hiresIndex] != InvalidResource);
+    return (tex[loresIndex] != ResourceHandle::InvalidResource ||
+            tex[medresIndex] != ResourceHandle::InvalidResource ||
+            tex[hiresIndex] != ResourceHandle::InvalidResource);
 }
