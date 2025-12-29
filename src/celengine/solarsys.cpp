@@ -678,16 +678,16 @@ ReadCockpit(const AssociativeArray& planetData, Body& body)
 }
 
 void
-ReadMesh(const AssociativeArray& planetData, Body& body, const std::filesystem::path& path)
+ReadMesh(const AssociativeArray& planetData,
+         Body& body,
+         const std::filesystem::path& path,
+         engine::GeometryPaths& geometryPaths)
 {
-    using engine::GeometryInfo;
-    using engine::GetGeometryManager;
-
     auto mesh = planetData.getString("Mesh"sv);
     if (mesh == nullptr)
         return;
 
-    ResourceHandle geometryHandle;
+    engine::GeometryHandle geometryHandle;
     float geometryScale = 1.0f;
     if (auto geometry = util::U8FileName(*mesh); geometry.has_value())
     {
@@ -699,14 +699,14 @@ ReadMesh(const AssociativeArray& planetData, Body& body, const std::filesystem::
         if (auto meshScale = planetData.getLength<float>("MeshScale"sv); meshScale.has_value())
             geometryScale = meshScale.value();
 
-        geometryHandle = GetGeometryManager()->getHandle(GeometryInfo(*geometry, path, geometryCenter, 1.0f, isNormalized));
+        geometryHandle = geometryPaths.getHandle(*geometry, path, geometryCenter, isNormalized);
     }
     else
     {
         // Some add-ons appear to be using Mesh "" to switch off the geometry
         if (!mesh->empty())
             GetLogger()->error("Invalid filename in Mesh\n");
-        geometryHandle = GetGeometryManager()->getHandle(GeometryInfo({}));
+        geometryHandle = engine::GeometryHandle::Empty;
     }
 
     body.setGeometry(geometryHandle);
@@ -843,7 +843,8 @@ Body* CreateBody(const std::string& name,
                  const AssociativeArray* planetData,
                  const std::filesystem::path& path,
                  DataDisposition disposition,
-                 BodyType bodyType)
+                 BodyType bodyType,
+                 engine::GeometryPaths& geometryPaths)
 {
     Body* body = nullptr;
 
@@ -1032,8 +1033,8 @@ Body* CreateBody(const std::string& name,
     FillinSurface(planetData, &surface, path);
     body->setSurface(surface);
 
-    ReadMesh(*planetData, *body, path);
     ReadCockpit(*planetData, *body);
+    ReadMesh(*planetData, *body, path, geometryPaths);
 
     // Read the atmosphere
     if (const Value* atmosDataValue = planetData->getValue("Atmosphere"); atmosDataValue != nullptr)
@@ -1134,7 +1135,8 @@ Body* CreateReferencePoint(const std::string& name,
 
 bool LoadSolarSystemObjects(std::istream& in,
                             Universe& universe,
-                            const std::filesystem::path& directory)
+                            const std::filesystem::path& directory,
+                            engine::GeometryPaths& geometryPaths)
 {
     Tokenizer tokenizer(in);
     util::Parser parser(&tokenizer);
@@ -1278,7 +1280,7 @@ bool LoadSolarSystemObjects(std::istream& in,
                 if (bodyType == ReferencePoint)
                     body = CreateReferencePoint(primaryName, parentSystem, universe, existingBody, objectData, directory, disposition);
                 else
-                    body = CreateBody(primaryName, parentSystem, universe, existingBody, objectData, directory, disposition, bodyType);
+                    body = CreateBody(primaryName, parentSystem, universe, existingBody, objectData, directory, disposition, bodyType, geometryPaths);
 
                 if (body != nullptr)
                 {
