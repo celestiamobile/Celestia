@@ -19,7 +19,11 @@ UniqueGLContext::UniqueGLContext(SDL_GLContext context) : m_context(context)
 UniqueGLContext::~UniqueGLContext()
 {
     if (m_context != nullptr)
+#ifdef USE_SDL3
+        SDL_GL_DestroyContext(m_context);
+#else
         SDL_GL_DeleteContext(m_context);
+#endif
 }
 
 UniqueGLContext::UniqueGLContext(UniqueGLContext&& other) noexcept

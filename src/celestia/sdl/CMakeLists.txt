@@ -3,9 +3,24 @@ if(NOT ENABLE_SDL)
   return()
 endif()
 
-find_package(SDL2 CONFIG REQUIRED)
+if(USE_SDL3)
+  find_package(SDL3 CONFIG REQUIRED)
+  add_compile_definitions(USE_SDL3)
+else()
+  find_package(SDL2 CONFIG REQUIRED)
+endif()
 
 set(IMGUI_DIR "${PROJECT_SOURCE_DIR}/thirdparty/imgui")
+
+if(USE_SDL3)
+  set(IMGUI_SDL_BACKEND
+      "${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp"
+      "${IMGUI_DIR}/backends/imgui_impl_sdl3.h")
+else()
+  set(IMGUI_SDL_BACKEND
+      "${IMGUI_DIR}/backends/imgui_impl_sdl2.cpp"
+      "${IMGUI_DIR}/backends/imgui_impl_sdl2.h")
+endif()
 
 set(IMGUI_SOURCES
     "${IMGUI_DIR}/imconfig.h"
@@ -22,8 +37,7 @@ set(IMGUI_SOURCES
     "${IMGUI_DIR}/backends/imgui_impl_opengl3_loader.h"
     "${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp"
     "${IMGUI_DIR}/backends/imgui_impl_opengl3.h"
-    "${IMGUI_DIR}/backends/imgui_impl_sdl2.cpp"
-    "${IMGUI_DIR}/backends/imgui_impl_sdl2.h"
+    ${IMGUI_SDL_BACKEND}
     "${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp"
     "${IMGUI_DIR}/misc/cpp/imgui_stdlib.h")
 
@@ -73,16 +87,27 @@ set_target_properties(celestia-sdl PROPERTIES CXX_VISIBILITY_PRESET hidden)
 if(MINGW)
   target_compile_definitions(celestia-sdl PRIVATE SDL_MAIN_HANDLED)
 endif()
-target_link_libraries(celestia-sdl PRIVATE SDL2::SDL2main SDL2::SDL2)
-target_link_libraries(imgui PUBLIC SDL2::SDL2)
+
+if(USE_SDL3)
+  target_link_libraries(celestia-sdl PRIVATE SDL3::SDL3)
+  target_link_libraries(imgui PUBLIC SDL3::SDL3)
+else()
+  target_link_libraries(celestia-sdl PRIVATE SDL2::SDL2main SDL2::SDL2)
+  target_link_libraries(imgui PUBLIC SDL2::SDL2)
+endif()
 
 if(WIN32)
+  if(USE_SDL3)
+    set(SDL_TARGET SDL3::SDL3)
+  else()
+    set(SDL_TARGET SDL2::SDL2)
+  endif()
   install(
     TARGETS celestia-sdl
     RUNTIME_DEPENDENCIES
       PRE_EXCLUDE_REGEXES "^api-ms" "^ext-ms-"
       POST_EXCLUDE_REGEXES ".*system32/.*\\.dll$"
-      DIRECTORIES $<TARGET_FILE_DIR:celestia> $<TARGET_FILE_DIR:SDL2::SDL2>
+      DIRECTORIES $<TARGET_FILE_DIR:celestia> $<TARGET_FILE_DIR:${SDL_TARGET}>
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT sdlgui
   )

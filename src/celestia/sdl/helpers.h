@@ -15,11 +15,18 @@
 
 #include <fmt/format.h>
 #include <imgui.h>
+
+#ifdef USE_SDL3
+#include <SDL3/SDL_messagebox.h>
+#include <SDL3/SDL_stdinc.h>
+#else
 #include <SDL_messagebox.h>
 #include <SDL_stdinc.h>
+#endif
 
 #include <celutil/flag.h>
 #include <celutil/uniquedel.h>
+#include "sdl_compat.h"
 
 namespace celestia::sdl
 {
@@ -29,11 +36,10 @@ inline void
 fatalErrorImpl(fmt::string_view format, fmt::format_args args)
 {
     auto message = fmt::vformat(format, args);
-    int ret = SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
-                                       "Fatal Error",
-                                       message.c_str(),
-                                       nullptr);
-    if (ret < 0)
+    if (!ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
+                              "Fatal Error",
+                              message.c_str(),
+                              nullptr))
         fmt::print(stderr, "{}\n", message);
 }
 

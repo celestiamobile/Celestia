@@ -15,10 +15,17 @@
 
 #include <celengine/glsupport.h>
 
+#ifdef USE_SDL3
+#include <SDL3/SDL_clipboard.h>
+#include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_keycode.h>
+#include <SDL3/SDL_messagebox.h>
+#else
 #include <SDL_clipboard.h>
 #include <SDL_keyboard.h>
 #include <SDL_keycode.h>
 #include <SDL_messagebox.h>
+#endif
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -29,6 +36,7 @@
 #include <celutil/tzutil.h>
 #include "clipboard.h"
 #include "gui.h"
+#include "sdl_compat.h"
 #include "settings.h"
 
 namespace celestia::sdl
@@ -149,7 +157,7 @@ private:
 void
 AppWindow::Alerter::fatalError(const std::string& msg)
 {
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Fatal Error", msg.c_str(), window);
+    ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Fatal Error", msg.c_str(), window);
 }
 
 AppWindow::AppWindow(Private,
@@ -196,7 +204,7 @@ AppWindow::run(const Settings& settings)
     if (!m_appCore->initSimulation())
         return false;
 
-    if (float screenDpi = 96.0f; SDL_GetDisplayDPI(0, &screenDpi, nullptr, nullptr) == 0)
+    if (float screenDpi = 96.0f; GetDisplayDPI(m_window.get(), 0, &screenDpi))
         m_appCore->setScreenDpi(static_cast<int>(screenDpi));
 
     m_appCore->initRenderer(settings.textureResolution);
@@ -214,7 +222,7 @@ AppWindow::run(const Settings& settings)
     SDL_GL_GetDrawableSize(m_window.get(), &m_width, &m_height);
     m_appCore->resize(m_width, m_height);
 
-    SDL_StartTextInput();
+    StartTextInput(m_window.get());
 
     m_gui = Gui::create(m_window.get(), m_context.get(), m_appCore.get(), *m_environment);
     if (m_gui == nullptr)
@@ -232,7 +240,7 @@ AppWindow::run(const Settings& settings)
     auto saveSettings = Settings::fromApplication(*this, m_appCore.get());
     saveSettings.save(m_environment->getSettingsPath());
 
-    SDL_StopTextInput();
+    StopTextInput(m_window.get());
 
     return true;
 }
@@ -243,38 +251,50 @@ AppWindow::update()
     for (;;)
     {
         SDL_Event event;
-        if (SDL_PollEvent(&event) == 0)
+        if (!PollEvent(&event))
             break;
 
         m_gui->processEvent(event);
         switch (event.type)
         {
-        case SDL_QUIT:
+        case EVENT_QUIT:
             return false;
-        case SDL_TEXTINPUT:
+        case EVENT_TEXT_INPUT:
             handleTextInputEvent(event.text);
             break;
-        case SDL_KEYDOWN:
+        case EVENT_KEYDOWN:
             handleKeyDownEvent(event.key);
             break;
-        case SDL_KEYUP:
+        case EVENT_KEYUP:
             handleKeyUpEvent(event.key);
             break;
-        case SDL_MOUSEBUTTONDOWN:
+        case EVENT_MOUSEBUTTONDOWN:
             handleMouseButtonDownEvent(event.button);
             break;
-        case SDL_MOUSEBUTTONUP:
+        case EVENT_MOUSEBUTTONUP:
             handleMouseButtonUpEvent(event.button);
             break;
-        case SDL_MOUSEWHEEL:
+        case EVENT_MOUSEWHEEL:
             handleMouseWheelEvent(event.wheel);
             break;
-        case SDL_MOUSEMOTION:
+        case EVENT_MOUSEMOTION:
             handleMouseMotionEvent(event.motion);
             break;
-        case SDL_WINDOWEVENT:
+#ifdef USE_SDL3
+        case EVENT_WINDOW_RESIZED:
+        case EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+            handleWindowResizedEvent();
+            break;
+        case EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+            handleDisplayScaleChangedEvent();
+            break;
+        case EVENT_WINDOW_CLOSE_REQUESTED:
+            return false;
+#else
+        case EVENT_WINDOW_RESIZED:
             handleWindowEvent(event.window);
             break;
+#endif
         default:
             break;
         }
@@ -303,13 +323,13 @@ AppWindow::handleKeyDownEvent(const SDL_KeyboardEvent& event)
     if (m_gui->wantCaptureKeyboard())
         return;
 
-    switch (event.keysym.sym)
+    switch (SDL_KEYSYM_SYM(event))
     {
     case SDLK_TAB:
     case SDLK_BACKSPACE:
     case SDLK_DELETE:
     case SDLK_ESCAPE:
-        m_appCore->charEntered(static_cast<char>(event.keysym.sym), 0);
+        m_appCore->charEntered(static_cast<char>(SDL_KEYSYM_SYM(event)), 0);
         [[fallthrough]];
     case SDLK_RETURN:
         return;
@@ -317,12 +337,12 @@ AppWindow::handleKeyDownEvent(const SDL_KeyboardEvent& event)
         break;
     }
 
-    int key = toCelestiaKey(event.keysym.sym);
+    int key = toCelestiaKey(SDL_KEYSYM_SYM(event));
     if (key == -1)
         return;
 
     int mod = 0;
-    if ((event.keysym.mod & KMOD_CTRL) != 0)
+    if ((SDL_KEYSYM_MOD(event) & KMOD_CTRL) != 0)
     {
         mod |= CelestiaCore::ControlKey;
 
@@ -344,7 +364,7 @@ AppWindow::handleKeyDownEvent(const SDL_KeyboardEvent& event)
         }
     }
 
-    if ((event.keysym.mod & KMOD_SHIFT) != 0)
+    if ((SDL_KEYSYM_MOD(event) & KMOD_SHIFT) != 0)
         mod |= CelestiaCore::ShiftKey;
 
     m_appCore->keyDown(key, mod);
@@ -356,21 +376,21 @@ AppWindow::handleKeyUpEvent(const SDL_KeyboardEvent& event)
     if (m_gui->wantCaptureKeyboard())
         return;
 
-    if (event.keysym.sym == SDLK_RETURN)
+    if (SDL_KEYSYM_SYM(event) == SDLK_RETURN)
     {
-        if ((event.keysym.mod & KMOD_ALT) != 0)
+        if ((SDL_KEYSYM_MOD(event) & KMOD_ALT) != 0)
             toggleFullscreen();
         else
             m_appCore->charEntered(SDLK_RETURN, 0);
         return;
     }
 
-    int key = toCelestiaKey(event.keysym.sym);
+    int key = toCelestiaKey(SDL_KEYSYM_SYM(event));
     if (key == -1)
         return;
 
     int mod = 0;
-    if ((event.keysym.mod & KMOD_CTRL) != 0)
+    if ((SDL_KEYSYM_MOD(event) & KMOD_CTRL) != 0)
     {
         mod |= CelestiaCore::ControlKey;
         if (key >= '0' && key <= '9')
@@ -380,7 +400,7 @@ AppWindow::handleKeyUpEvent(const SDL_KeyboardEvent& event)
         }
     }
 
-    if ((event.keysym.mod & KMOD_SHIFT) != 0)
+    if ((SDL_KEYSYM_MOD(event) & KMOD_SHIFT) != 0)
         mod |= CelestiaCore::ShiftKey;
 
     m_appCore->keyUp(key, mod);
@@ -415,9 +435,9 @@ AppWindow::handleMouseButtonUpEvent(const SDL_MouseButtonEvent& event)
         return;
 
     if ((button & (CelestiaCore::LeftButton | CelestiaCore::RightButton)) != 0
-        && SDL_ShowCursor(SDL_QUERY) == SDL_DISABLE)
+        && !IsCursorVisible())
     {
-        SDL_ShowCursor(SDL_ENABLE);
+        ShowCursor(true);
 #ifndef __EMSCRIPTEN__
         // Mouse warping is not supported in browser
         SDL_WarpMouseInWindow(m_window.get(), m_lastX, m_lastY);
@@ -462,9 +482,9 @@ AppWindow::handleMouseMotionEvent(const SDL_MouseMotionEvent& event)
 
     Sint32 dx = event.x - m_lastX;
     Sint32 dy = event.y - m_lastY;
-    if (SDL_ShowCursor(SDL_QUERY) == SDL_ENABLE)
+    if (IsCursorVisible())
     {
-        SDL_ShowCursor(SDL_DISABLE);
+        ShowCursor(false);
         m_lastX = event.x;
         m_lastY = event.y;
     }
@@ -486,11 +506,32 @@ AppWindow::handleMouseMotionEvent(const SDL_MouseMotionEvent& event)
 void
 AppWindow::handleWindowEvent(const SDL_WindowEvent& event)
 {
+#ifndef USE_SDL3
     if (event.event == SDL_WINDOWEVENT_RESIZED)
     {
-        SDL_GL_GetDrawableSize(m_window.get(), &m_width, &m_height);
-        m_appCore->resize(m_width, m_height);
+        handleWindowResizedEvent();
     }
+    else if (event.event == SDL_WINDOWEVENT_DISPLAY_CHANGED)
+    {
+        handleDisplayScaleChangedEvent();
+    }
+#endif
+}
+
+void
+AppWindow::handleWindowResizedEvent()
+{
+    SDL_GL_GetDrawableSize(m_window.get(), &m_width, &m_height);
+    m_appCore->resize(m_width, m_height);
+}
+
+void
+AppWindow::handleDisplayScaleChangedEvent()
+{
+    // Update DPI when display scale changes (e.g., moving window between displays)
+    float screenDpi = 96.0f;
+    if (GetDisplayDPI(m_window.get(), 0, &screenDpi))
+        m_appCore->setScreenDpi(static_cast<int>(screenDpi));
 }
 
 void
@@ -498,12 +539,12 @@ AppWindow::toggleFullscreen()
 {
     if (m_isFullscreen)
     {
-        if (SDL_SetWindowFullscreen(m_window.get(), 0) == 0)
+        if (SetWindowFullscreen(m_window.get(), false))
             m_isFullscreen = false;
         else
             return;
     }
-    else if (SDL_SetWindowFullscreen(m_window.get(), SDL_WINDOW_FULLSCREEN_DESKTOP) == 0)
+    else if (SetWindowFullscreen(m_window.get(), true))
         m_isFullscreen = true;
     else
         return;

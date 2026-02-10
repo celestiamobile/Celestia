@@ -11,14 +11,20 @@
 
 #include <string>
 
+#ifdef USE_SDL3
+#include <SDL3/SDL_clipboard.h>
+#include <SDL3/SDL_stdinc.h>
+#else
 #include <SDL_clipboard.h>
 #include <SDL_stdinc.h>
+#endif
 
 #include <celestia/celestiacore.h>
 #include <celestia/celestiastate.h>
 #include <celestia/hud.h>
 #include <celestia/url.h>
 #include <celutil/gettext.h>
+#include "sdl_compat.h"
 
 namespace celestia::sdl
 {
@@ -29,17 +35,17 @@ doCopy(CelestiaCore& appCore)
     CelestiaState appState(&appCore);
     appState.captureState();
 
-    if (SDL_SetClipboardText(Url(appState).getAsString().c_str()) == 0)
+    if (SetClipboardText(Url(appState).getAsString().c_str()))
         appCore.flash(_("Copied URL"));
 }
 
 void
 doPaste(CelestiaCore& appCore)
 {
-    if (SDL_HasClipboardText() != SDL_TRUE)
+    if (!HasClipboardText())
         return;
 
-    char* str = SDL_GetClipboardText();
+    char* str = GetClipboardText();
     if (str == nullptr)
         return;
 

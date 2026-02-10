@@ -12,9 +12,16 @@
 #include <memory>
 
 #include <celengine/glsupport.h>
+
+#ifdef USE_SDL3
+#include <SDL3/SDL_events.h>
+#include <SDL3/SDL_stdinc.h>
+#include <SDL3/SDL_video.h>
+#else
 #include <SDL_events.h>
 #include <SDL_stdinc.h>
 #include <SDL_video.h>
+#endif
 
 #include <celutil/uniquedel.h>
 #include "environment.h"
@@ -53,6 +60,8 @@ private:
     void handleKeyDownEvent(const SDL_KeyboardEvent&);
     void handleKeyUpEvent(const SDL_KeyboardEvent&);
     void handleWindowEvent(const SDL_WindowEvent&);
+    void handleWindowResizedEvent();
+    void handleDisplayScaleChangedEvent();
     void handleMouseButtonDownEvent(const SDL_MouseButtonEvent&);
     void handleMouseButtonUpEvent(const SDL_MouseButtonEvent&);
     void handleMouseWheelEvent(const SDL_MouseWheelEvent&);

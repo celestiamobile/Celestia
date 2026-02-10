@@ -29,7 +29,12 @@
 #include <imgui.h>
 #include <jpeglib.h>
 #include <png.h>
+
+#ifdef USE_SDL3
+#include <SDL3/SDL_version.h>
+#else
 #include <SDL_version.h>
+#endif
 
 #ifdef CELX
 #include <lua.hpp>
@@ -66,6 +71,7 @@ extern "C"
 #endif
 
 #include <celutil/stringutils.h>
+#include "sdl_compat.h"
 
 namespace celestia::sdl
 {
@@ -92,7 +98,7 @@ std::string
 getSDLVersion()
 {
     SDL_version version;
-    SDL_GetVersion(&version);
+    GetSDLVersion(&version);
     return fmt::format("{}.{}.{}", version.major, version.minor, version.patch);
 }
 

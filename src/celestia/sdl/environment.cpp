@@ -16,11 +16,11 @@
 
 #include <fmt/format.h>
 #include <fmt/ostream.h>
-#include <SDL.h>
 
 #include "appwindow.h"
 #include "gui.h"
 #include "helpers.h"
+#include "sdl_compat.h"
 #include "settings.h"
 
 using namespace std::string_view_literals;
@@ -51,7 +51,7 @@ Environment::init()
     if (auto environment = g_environment.lock(); environment != nullptr)
         return environment;
 
-    if (SDL_Init(SDL_INIT_VIDEO) != 0)
+    if (!InitSDL(SDL_INIT_VIDEO))
     {
         fatalError("Failed to initialize SDL: {}", SDL_GetError());
         return nullptr;
@@ -65,27 +65,27 @@ Environment::init()
 bool
 Environment::setGLAttributes() const
 {
-    if (SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1) != 0)
+    if (!SDL_CheckSuccess(SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1)))
     {
         fatalError("Failed to set double buffering: {}", SDL_GetError());
         return false;
     }
 
-    if (SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24) != 0)
+    if (!SDL_CheckSuccess(SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24)))
     {
         fatalError("Failed to set depth size: {}", SDL_GetError());
         return false;
     }
 
 #ifdef GL_ES
-    if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES) != 0)
+    if (!SDL_CheckSuccess(SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES)))
     {
         fatalError("Failed to set OpenGL context: {}", SDL_GetError());
         return false;
     }
 
-    if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2) != 0
-        || SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0) != 0)
+    if (!SDL_CheckSuccess(SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2))
+        || !SDL_CheckSuccess(SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0)))
     {
         fatalError("Failed to set context version: {}", SDL_GetError());
         return false;
@@ -98,14 +98,14 @@ Environment::setGLAttributes() const
 std::unique_ptr<AppWindow>
 Environment::createAppWindow(const Settings& settings)
 {
-    Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+    SDLWindowFlags flags = WINDOW_OPENGL | WINDOW_RESIZABLE | WINDOW_HIGH_PIXEL_DENSITY;
     if (settings.isFullscreen)
-        flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+        flags |= WINDOW_FULLSCREEN;
 
-    UniqueWindow window{ SDL_CreateWindow("Celestia",
-                                          settings.positionX, settings.positionY,
-                                          settings.width, settings.height,
-                                          flags) };
+    UniqueWindow window{ CreateWindow("Celestia",
+                                      settings.positionX, settings.positionY,
+                                      settings.width, settings.height,
+                                      flags) };
     if (!window)
     {
         fatalError("Could not create Window: {}", SDL_GetError());
@@ -120,8 +120,13 @@ Environment::createAppWindow(const Settings& settings)
     }
 
     // First try to enable adaptive sync and then vsync
+#ifdef USE_SDL3
+    if (!SDL_GL_SetSwapInterval(-1))
+        SDL_GL_SetSwapInterval(1);
+#else
     if (SDL_GL_SetSwapInterval(-1) == -1)
         SDL_GL_SetSwapInterval(1);
+#endif
 
     gl::init();
 #ifndef GL_ES

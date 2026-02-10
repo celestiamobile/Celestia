@@ -17,7 +17,19 @@
 #include <celengine/glsupport.h>
 
 #include <imgui_impl_opengl3.h>
+#ifdef USE_SDL3
+#include <imgui_impl_sdl3.h>
+#define ImGui_ImplSDL_InitForOpenGL ImGui_ImplSDL3_InitForOpenGL
+#define ImGui_ImplSDL_Shutdown ImGui_ImplSDL3_Shutdown
+#define ImGui_ImplSDL_ProcessEvent ImGui_ImplSDL3_ProcessEvent
+#define ImGui_ImplSDL_NewFrame ImGui_ImplSDL3_NewFrame
+#else
 #include <imgui_impl_sdl2.h>
+#define ImGui_ImplSDL_InitForOpenGL ImGui_ImplSDL2_InitForOpenGL
+#define ImGui_ImplSDL_Shutdown ImGui_ImplSDL2_Shutdown
+#define ImGui_ImplSDL_ProcessEvent ImGui_ImplSDL2_ProcessEvent
+#define ImGui_ImplSDL_NewFrame ImGui_ImplSDL2_NewFrame
+#endif
 
 #include <celengine/simulation.h>
 #include <celestia/celestiacore.h>
@@ -55,7 +67,7 @@ Gui::~Gui()
         ImGui::SaveIniSettingsToDisk(m_iniFilename.c_str());
 
     ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplSDL2_Shutdown();
+    ImGui_ImplSDL_Shutdown();
     ImGui::DestroyContext(m_ctx);
 }
 
@@ -85,7 +97,7 @@ Gui::create(SDL_Window* window, SDL_GLContext context, CelestiaCore* appCore, co
 
     ImGui::StyleColorsDark();
 
-    if (!ImGui_ImplSDL2_InitForOpenGL(window, context))
+    if (!ImGui_ImplSDL_InitForOpenGL(window, context))
     {
         ImGui::DestroyContext(ctx);
         return nullptr;
@@ -93,7 +105,7 @@ Gui::create(SDL_Window* window, SDL_GLContext context, CelestiaCore* appCore, co
 
     if (!ImGui_ImplOpenGL3_Init())
     {
-        ImGui_ImplSDL2_Shutdown();
+        ImGui_ImplSDL_Shutdown();
         ImGui::DestroyContext(ctx);
         return nullptr;
     }
@@ -104,14 +116,14 @@ Gui::create(SDL_Window* window, SDL_GLContext context, CelestiaCore* appCore, co
 void
 Gui::processEvent(const SDL_Event& event) const
 {
-    ImGui_ImplSDL2_ProcessEvent(&event);
+    ImGui_ImplSDL_ProcessEvent(&event);
 }
 
 void
 Gui::render()
 {
     ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplSDL2_NewFrame();
+    ImGui_ImplSDL_NewFrame();
     ImGui::NewFrame();
 
     menuBar();
