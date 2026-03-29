@@ -2523,27 +2523,19 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
     {
         bool hwSRGB = false;
 
-        // glGetFramebufferAttachmentParameteriv is available on desktop GL and
-        // GLES 3.0+.  On GLES 2.0 we skip the query and use the software path.
+        // GL_DRAW_FRAMEBUFFER_BINDING / GL_DRAW_FRAMEBUFFER and
+        // glGetFramebufferAttachmentParameteriv are available on desktop GL
+        // and GLES 3.0+; skip on GLES 2.0 and fall through to software path.
 #ifdef GL_ES
-        if (celestia::gl::checkVersion(celestia::gl::GLES_3_0))
+        const bool canQuery = celestia::gl::checkVersion(celestia::gl::GLES_3_0);
+#else
+        constexpr bool canQuery = true;
+#endif
+        if (canQuery)
         {
             // GL_BACK is only valid for the default framebuffer (id 0).
             // When a non-zero FBO is bound (some platforms wrap rendering in
             // their own FBO) the colour attachment is GL_COLOR_ATTACHMENT0.
-            GLint boundFbo = 0;
-            glGetIntegerv(GL_FRAMEBUFFER_BINDING, &boundFbo);
-            GLenum attachment = (boundFbo == 0) ? GL_BACK : GL_COLOR_ATTACHMENT0;
-
-            GLint encoding = GL_LINEAR;
-            glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, attachment,
-                                                  GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING,
-                                                  &encoding);
-            // On GLES an sRGB surface encodes automatically — no glEnable needed.
-            hwSRGB = (encoding == GL_SRGB);
-        }
-#else
-        {
             GLint boundFbo = 0;
             glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &boundFbo);
             GLenum attachment = (boundFbo == 0) ? GL_BACK : GL_COLOR_ATTACHMENT0;
@@ -2554,11 +2546,14 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
                                                   &encoding);
             if (encoding == GL_SRGB)
             {
+#ifndef GL_ES
+                // On GLES an sRGB surface encodes automatically; desktop GL
+                // requires an explicit enable.
                 glEnable(GL_FRAMEBUFFER_SRGB);
+#endif
                 hwSRGB = true;
             }
         }
-#endif
 
         if (!hwSRGB)
             viewportEffects.push_back(std::make_unique<SRGBViewportEffect>());
