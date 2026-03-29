@@ -2510,36 +2510,46 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
 
     // Automatically apply sRGB output correction.
     //
-    // Hardware path: query whether the default framebuffer is an sRGB surface.
-    // On desktop GL, GL_FRAMEBUFFER_SRGB must be enabled so the driver performs
-    // the linear→sRGB conversion on writes.  On GLES 3.0+, if the EGL surface
-    // was created with EGL_GL_COLORSPACE_SRGB_KHR the conversion is implicit
-    // (there is no enable/disable toggle in base GLES).  In both cases the flag
-    // only affects writes to sRGB-encoded framebuffers, so intermediate FBOs
-    // (which are GL_RGB8 / GL_RGBA8, i.e. linear) are unaffected.
+    // Hardware path: query the colour encoding of the currently bound
+    // framebuffer.  On desktop GL, GL_FRAMEBUFFER_SRGB must be enabled so the
+    // driver performs the linear→sRGB conversion on writes.  On GLES 3.0+,
+    // if the EGL surface was created with EGL_GL_COLORSPACE_SRGB_KHR the
+    // conversion is implicit (no enable/disable toggle in base GLES).  Either
+    // way the flag only affects sRGB-encoded framebuffers; our intermediate
+    // FBOs (GL_RGB8 / GL_RGBA8, linear) are unaffected.
     //
-    // Software path: when the default framebuffer is linear (or the query is
+    // Software path: when the bound framebuffer is linear (or the query is
     // unsupported on GLES 2.0), append SRGBViewportEffect as the final step.
     {
         bool hwSRGB = false;
 
         // glGetFramebufferAttachmentParameteriv is available on desktop GL and
-        // GLES 3.0+.  On GLES 2.0 we skip the query and go straight to the
-        // software path.
+        // GLES 3.0+.  On GLES 2.0 we skip the query and use the software path.
 #ifdef GL_ES
         if (celestia::gl::checkVersion(celestia::gl::GLES_3_0))
         {
+            // GL_BACK is only valid for the default framebuffer (id 0).
+            // When a non-zero FBO is bound (some platforms wrap rendering in
+            // their own FBO) the colour attachment is GL_COLOR_ATTACHMENT0.
+            GLint boundFbo = 0;
+            glGetIntegerv(GL_FRAMEBUFFER_BINDING, &boundFbo);
+            GLenum attachment = (boundFbo == 0) ? GL_BACK : GL_COLOR_ATTACHMENT0;
+
             GLint encoding = GL_LINEAR;
-            glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK,
+            glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, attachment,
                                                   GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING,
                                                   &encoding);
-            // On GLES, an sRGB EGL surface encodes automatically — no glEnable needed.
+            // On GLES an sRGB surface encodes automatically — no glEnable needed.
             hwSRGB = (encoding == GL_SRGB);
         }
 #else
         {
+            GLint boundFbo = 0;
+            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &boundFbo);
+            GLenum attachment = (boundFbo == 0) ? GL_BACK : GL_COLOR_ATTACHMENT0;
+
             GLint encoding = GL_LINEAR;
-            glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, GL_BACK,
+            glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, attachment,
                                                   GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING,
                                                   &encoding);
             if (encoding == GL_SRGB)
