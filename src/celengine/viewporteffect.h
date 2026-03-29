@@ -40,13 +40,22 @@ public:
 
     bool render(Renderer*, FramebufferObject*, int width, int height) override;
 
-private:
+protected:
     celestia::gl::VertexObject vo{ celestia::util::NoCreateT{} };
     celestia::gl::Buffer bo{ celestia::util::NoCreateT{} };
 
     void initialize();
 
     bool initialized{ false };
+};
+
+// Applies the sRGB electro-optical transfer function (linear → sRGB gamma)
+// as a post-process step.  Used as the software sRGB path when the default
+// framebuffer is not already an sRGB surface.
+class SRGBViewportEffect : public PassthroughViewportEffect
+{
+public:
+    bool render(Renderer*, FramebufferObject*, int width, int height) override;
 };
 
 class WarpMeshViewportEffect : public ViewportEffect //NOSONAR

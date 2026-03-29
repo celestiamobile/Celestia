@@ -108,6 +108,24 @@ void PassthroughViewportEffect::initialize()
         2 * sizeof(float));
 }
 
+bool SRGBViewportEffect::render(Renderer* renderer, FramebufferObject* fbo, int width, int height)
+{
+    auto *prog = renderer->getShaderManager().getShader("srgb");
+    if (prog == nullptr)
+        return false;
+
+    initialize();
+
+    prog->use();
+    prog->samplerParam("tex") = 0;
+    glBindTexture(GL_TEXTURE_2D, fbo->colorTexture());
+    renderer->setPipelineState(ps);
+    vo.draw();
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    return true;
+}
+
 WarpMeshViewportEffect::WarpMeshViewportEffect(std::unique_ptr<WarpMesh>&& _mesh) :
     mesh(std::move(_mesh))
 {
