@@ -74,6 +74,17 @@ getInternalFormat(PixelFormat format)
     case PixelFormat::DXT3:
     case PixelFormat::DXT5:
         return static_cast<GLenum>(format);
+    case PixelFormat::sRGB:
+    case PixelFormat::sRGB8:
+        // GL_SRGB8 is core in GLES 3.0; fall back to linear on GLES 2.0.
+        return celestia::gl::checkVersion(celestia::gl::GLES_3_0)
+               ? GL_SRGB8
+               : static_cast<GLenum>(PixelFormat::RGB);
+    case PixelFormat::sRGBA:
+    case PixelFormat::sRGBA8:
+        return celestia::gl::checkVersion(celestia::gl::GLES_3_0)
+               ? GL_SRGB8_ALPHA8
+               : static_cast<GLenum>(PixelFormat::RGBA);
     default:
         return GL_NONE;
     }
@@ -108,7 +119,20 @@ GLenum
 getExternalFormat(PixelFormat format)
 {
 #ifdef GL_ES
-    return getInternalFormat(format);
+    // On GLES 3.0+, sRGB internal formats require a non-sRGB external format.
+    // On GLES 2.0 the sRGB cases already fall back to RGB/RGBA in
+    // getInternalFormat(), so this is safe for both versions.
+    switch (format)
+    {
+    case PixelFormat::sRGB:
+    case PixelFormat::sRGB8:
+        return static_cast<GLenum>(PixelFormat::RGB);
+    case PixelFormat::sRGBA:
+    case PixelFormat::sRGBA8:
+        return static_cast<GLenum>(PixelFormat::RGBA);
+    default:
+        return getInternalFormat(format);
+    }
 #else
     switch (format)
     {

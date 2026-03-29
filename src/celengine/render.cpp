@@ -129,47 +129,49 @@ static constexpr unsigned int OrbitCacheCullThreshold = 200;
 // Age in frames at which unused orbit paths may be eliminated from the cache
 static constexpr std::uint32_t OrbitCacheRetireAge = 16;
 
-Color Renderer::StarLabelColor          (0.471f, 0.356f, 0.682f);
-Color Renderer::PlanetLabelColor        (0.407f, 0.333f, 0.964f);
-Color Renderer::DwarfPlanetLabelColor   (0.557f, 0.235f, 0.576f);
-Color Renderer::MoonLabelColor          (0.231f, 0.733f, 0.792f);
-Color Renderer::MinorMoonLabelColor     (0.231f, 0.733f, 0.792f);
-Color Renderer::AsteroidLabelColor      (0.596f, 0.305f, 0.164f);
-Color Renderer::CometLabelColor         (0.768f, 0.607f, 0.227f);
-Color Renderer::SpacecraftLabelColor    (0.93f,  0.93f,  0.93f);
-Color Renderer::LocationLabelColor      (0.24f,  0.89f,  0.43f);
-Color Renderer::GalaxyLabelColor        (0.0f,   0.45f,  0.5f);
-Color Renderer::GlobularLabelColor      (0.8f,   0.45f,  0.5f);
-Color Renderer::NebulaLabelColor        (0.541f, 0.764f, 0.278f);
-Color Renderer::OpenClusterLabelColor   (0.239f, 0.572f, 0.396f);
-Color Renderer::ConstellationLabelColor (0.225f, 0.301f, 0.36f);
-Color Renderer::EquatorialGridLabelColor(0.64f,  0.72f,  0.88f);
-Color Renderer::PlanetographicGridLabelColor(0.8f, 0.8f, 0.8f);
-Color Renderer::GalacticGridLabelColor  (0.88f,  0.72f,  0.64f);
-Color Renderer::EclipticGridLabelColor  (0.72f,  0.64f,  0.88f);
-Color Renderer::HorizonGridLabelColor   (0.72f,  0.72f,  0.72f);
+// All colors below are authored as sRGB values and linearized for the
+// linear-light rendering pipeline (sRGB correction is applied at output).
+Color Renderer::StarLabelColor           = Color(0.471f, 0.356f, 0.682f).linearize();
+Color Renderer::PlanetLabelColor         = Color(0.407f, 0.333f, 0.964f).linearize();
+Color Renderer::DwarfPlanetLabelColor    = Color(0.557f, 0.235f, 0.576f).linearize();
+Color Renderer::MoonLabelColor           = Color(0.231f, 0.733f, 0.792f).linearize();
+Color Renderer::MinorMoonLabelColor      = Color(0.231f, 0.733f, 0.792f).linearize();
+Color Renderer::AsteroidLabelColor       = Color(0.596f, 0.305f, 0.164f).linearize();
+Color Renderer::CometLabelColor          = Color(0.768f, 0.607f, 0.227f).linearize();
+Color Renderer::SpacecraftLabelColor     = Color(0.93f,  0.93f,  0.93f ).linearize();
+Color Renderer::LocationLabelColor       = Color(0.24f,  0.89f,  0.43f ).linearize();
+Color Renderer::GalaxyLabelColor         = Color(0.0f,   0.45f,  0.5f  ).linearize();
+Color Renderer::GlobularLabelColor       = Color(0.8f,   0.45f,  0.5f  ).linearize();
+Color Renderer::NebulaLabelColor         = Color(0.541f, 0.764f, 0.278f).linearize();
+Color Renderer::OpenClusterLabelColor    = Color(0.239f, 0.572f, 0.396f).linearize();
+Color Renderer::ConstellationLabelColor  = Color(0.225f, 0.301f, 0.36f ).linearize();
+Color Renderer::EquatorialGridLabelColor = Color(0.64f,  0.72f,  0.88f ).linearize();
+Color Renderer::PlanetographicGridLabelColor = Color(0.8f, 0.8f, 0.8f  ).linearize();
+Color Renderer::GalacticGridLabelColor   = Color(0.88f,  0.72f,  0.64f ).linearize();
+Color Renderer::EclipticGridLabelColor   = Color(0.72f,  0.64f,  0.88f ).linearize();
+Color Renderer::HorizonGridLabelColor    = Color(0.72f,  0.72f,  0.72f ).linearize();
 
-Color Renderer::StarOrbitColor          (0.5f,   0.5f,   0.8f);
-Color Renderer::PlanetOrbitColor        (0.3f,   0.323f, 0.833f);
-Color Renderer::DwarfPlanetOrbitColor   (0.557f, 0.235f, 0.576f);
-Color Renderer::MoonOrbitColor          (0.08f,  0.407f, 0.392f);
-Color Renderer::MinorMoonOrbitColor     (0.08f,  0.407f, 0.392f);
-Color Renderer::AsteroidOrbitColor      (0.58f,  0.152f, 0.08f);
-Color Renderer::CometOrbitColor         (0.639f, 0.487f, 0.168f);
-Color Renderer::SpacecraftOrbitColor    (0.4f,   0.4f,   0.4f);
-Color Renderer::SelectionOrbitColor     (1.0f,   0.0f,   0.0f);
+Color Renderer::StarOrbitColor           = Color(0.5f,   0.5f,   0.8f  ).linearize();
+Color Renderer::PlanetOrbitColor         = Color(0.3f,   0.323f, 0.833f).linearize();
+Color Renderer::DwarfPlanetOrbitColor    = Color(0.557f, 0.235f, 0.576f).linearize();
+Color Renderer::MoonOrbitColor           = Color(0.08f,  0.407f, 0.392f).linearize();
+Color Renderer::MinorMoonOrbitColor      = Color(0.08f,  0.407f, 0.392f).linearize();
+Color Renderer::AsteroidOrbitColor       = Color(0.58f,  0.152f, 0.08f ).linearize();
+Color Renderer::CometOrbitColor          = Color(0.639f, 0.487f, 0.168f).linearize();
+Color Renderer::SpacecraftOrbitColor     = Color(0.4f,   0.4f,   0.4f  ).linearize();
+Color Renderer::SelectionOrbitColor      = Color(1.0f,   0.0f,   0.0f  ).linearize();
 
-Color Renderer::ConstellationColor      (0.0f,   0.24f,  0.36f);
-Color Renderer::BoundaryColor           (0.24f,  0.10f,  0.12f);
-Color Renderer::EquatorialGridColor     (0.28f,  0.28f,  0.38f);
-Color Renderer::PlanetographicGridColor (0.8f,   0.8f,   0.8f);
-Color Renderer::PlanetEquatorColor      (0.5f,   1.0f,   1.0f);
-Color Renderer::GalacticGridColor       (0.38f,  0.38f,  0.28f);
-Color Renderer::EclipticGridColor       (0.38f,  0.28f,  0.38f);
-Color Renderer::HorizonGridColor        (0.38f,  0.38f,  0.38f);
-Color Renderer::EclipticColor           (0.5f,   0.1f,   0.1f);
+Color Renderer::ConstellationColor       = Color(0.0f,   0.24f,  0.36f ).linearize();
+Color Renderer::BoundaryColor            = Color(0.24f,  0.10f,  0.12f ).linearize();
+Color Renderer::EquatorialGridColor      = Color(0.28f,  0.28f,  0.38f ).linearize();
+Color Renderer::PlanetographicGridColor  = Color(0.8f,   0.8f,   0.8f  ).linearize();
+Color Renderer::PlanetEquatorColor       = Color(0.5f,   1.0f,   1.0f  ).linearize();
+Color Renderer::GalacticGridColor        = Color(0.38f,  0.38f,  0.28f ).linearize();
+Color Renderer::EclipticGridColor        = Color(0.38f,  0.28f,  0.38f ).linearize();
+Color Renderer::HorizonGridColor         = Color(0.38f,  0.38f,  0.38f ).linearize();
+Color Renderer::EclipticColor            = Color(0.5f,   0.1f,   0.1f  ).linearize();
 
-Color Renderer::SelectionCursorColor    (1.0f,   0.0f,   0.0f);
+Color Renderer::SelectionCursorColor     = Color(1.0f,   0.0f,   0.0f  ).linearize();
 
 // Some useful unit conversions
 inline float mmToInches(float mm)
