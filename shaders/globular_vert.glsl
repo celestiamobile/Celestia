@@ -14,6 +14,11 @@ const float clipDistance = 100.0; // observer distance [ly] from globular, where
 
 varying vec4 color;
 
+// Convert a display-calibrated (sRGB) brightness value to linear light.
+float sRGBToLinear(float c) {
+    return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+}
+
 void main(void)
 {
     float starSize = in_TexCoord0.s;
@@ -30,6 +35,8 @@ void main(void)
     float obsDistanceToStarRatio = length(p + offset) / clipDistance;
     gl_PointSize = s * min(obsDistanceToStarRatio, 1.0);
 
-    color = vec4(texture2D(colorTex, vec2(colorIndex, 0.0)).rgb, min(1.0, br * (1.0 - pixelWeight * relStarDensity)));
+    // Brightness alpha is display-calibrated; linearize for the linear-light pipeline.
+    float linearBr = 2.0 * sRGBToLinear(brightness);
+    color = vec4(texture2D(colorTex, vec2(colorIndex, 0.0)).rgb, min(1.0, linearBr * (1.0 - pixelWeight * relStarDensity)));
     set_vp(vec4(p, 1.0));
 }

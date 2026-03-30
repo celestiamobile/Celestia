@@ -15,6 +15,11 @@ uniform float brightness;
 varying vec4 color;
 varying vec2 texCoord;
 
+// Convert a display-calibrated (sRGB) brightness value to linear light.
+float sRGBToLinear(float c) {
+    return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+}
+
 void main(void)
 {
     float s = size * in_Size;
@@ -28,7 +33,7 @@ void main(void)
     }
 
     vec4 v = vec4(viewMat * vec3(in_TexCoord0.s * 2.0 - 1.0, in_TexCoord0.t * 2.0 - 1.0, 0.0) * s, 0.0);
-    float alpha = (0.1 - screenFrac) * in_Brightness * brightness;
+    float alpha = (0.1 - screenFrac) * sRGBToLinear(in_Brightness * brightness);
 
     color = vec4(texture2D(colorTex, vec2(in_ColorIndex, 0.0)).rgb, alpha);
     texCoord = in_TexCoord0;

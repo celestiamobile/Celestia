@@ -107,10 +107,13 @@ void PointStarRenderer::process(const Star& star, float distance, float appMag)
                                          glareSize,
                                          glareAlpha);
 
+            // Star spectral color and brightness alpha are display-calibrated (sRGB);
+            // linearize them for the linear-light rendering pipeline.
+            Color linearStarColor = starColor.linearize();
             if (glareSize != 0.0f)
-                glareVertexBuffer->addStar(relPos, Color(starColor, glareAlpha), glareSize);
+                glareVertexBuffer->addStar(relPos, Color(linearStarColor, Color::linearizeScalar(glareAlpha)), glareSize);
             if (pointSize != 0.0f)
-                starVertexBuffer->addStar(relPos, Color(starColor, alpha), pointSize);
+                starVertexBuffer->addStar(relPos, Color(linearStarColor, Color::linearizeScalar(alpha)), pointSize);
 
             // Place labels for stars brighter than the specified label threshold brightness
             if (util::is_set(labelMode, RenderLabels::StarLabels) && appMag < labelThresholdMag)

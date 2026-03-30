@@ -1697,10 +1697,14 @@ void Renderer::renderObjectAsPoint(const Vector3f& position,
         if (starStyle != StarStyle::PointStars)
             m_gaussianDiscTex->bind();
 
+        // Color and brightness alpha are display-calibrated (sRGB);
+        // linearize them for the linear-light rendering pipeline.
+        Color linearColor = color.linearize();
+        float linearAlpha = Color::linearizeScalar(alpha);
         if (pointSize > gl::maxPointSize)
-            m_largeStarRenderer->render(position, {color, alpha}, pointSize, mvp);
+            m_largeStarRenderer->render(position, {linearColor, linearAlpha}, pointSize, mvp);
         else
-            pointStarVertexBuffer->addStar(position, {color, alpha}, pointSize);
+            pointStarVertexBuffer->addStar(position, {linearColor, linearAlpha}, pointSize);
 
         // If the object is brighter than magnitude 1, add a halo around it to
         // make it appear more brilliant.  This is a hack to compensate for the
@@ -1712,10 +1716,11 @@ void Renderer::renderObjectAsPoint(const Vector3f& position,
         {
             Eigen::Vector3f center = calculateQuadCenter(getCameraOrientationf(), position, radius);
             m_gaussianGlareTex->bind();
+            float linearGlareAlpha = Color::linearizeScalar(glareAlpha);
             if (glareSize > gl::maxPointSize)
-                m_largeStarRenderer->render(center, {color, glareAlpha}, glareSize, mvp);
+                m_largeStarRenderer->render(center, {linearColor, linearGlareAlpha}, glareSize, mvp);
             else
-                glareVertexBuffer->addStar(center, {color, glareAlpha}, glareSize);
+                glareVertexBuffer->addStar(center, {linearColor, linearGlareAlpha}, glareSize);
         }
     }
 }

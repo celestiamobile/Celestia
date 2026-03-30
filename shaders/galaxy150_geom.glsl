@@ -1,3 +1,7 @@
+// Convert a display-calibrated (sRGB) brightness value to linear light.
+float sRGBToLinear(float c) {
+    return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+}
 
 uniform mat4 m;
 uniform mat3 viewMat;
@@ -32,7 +36,7 @@ void main()
             vec4 v1 = vec4(viewMat * vec3(-1.0, -1.0, 0.0) * s, 0.0);
             vec4 v2 = vec4(viewMat * vec3( 1.0,  1.0, 0.0) * s, 0.0);
             vec4 v3 = vec4(viewMat * vec3( 1.0, -1.0, 0.0) * s, 0.0);
-            float alpha = (0.1 - screenFrac) * vertex[0].brightness * brightness;
+            float alpha = (0.1 - screenFrac) * sRGBToLinear(vertex[0].brightness * brightness);
             vec4 color = vec4(vertex[0].color, alpha);
 
             set_vp(p + v0);
