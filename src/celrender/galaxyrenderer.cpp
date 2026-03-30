@@ -37,7 +37,7 @@ void
 galaxyTextureEval(float u, float v, std::uint8_t *pixel)
 {
     float r = std::max(0.0f, 0.9f - std::hypot(u, v));
-    *pixel = static_cast<std::uint8_t>(r * 255.99f);
+    *pixel = static_cast<std::uint8_t>(Color::linearizeScalar(r) * 255.99f);
 }
 
 void

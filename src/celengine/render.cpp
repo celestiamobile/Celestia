@@ -283,7 +283,7 @@ static void BuildGaussianDiscMipLevel(unsigned char* mipPixels,
             float r2 = x * x + y * y;
             float f = s * std::exp(-r2 * isig2) * power;
 
-            mipPixels[i * size + j] = (unsigned char) (255.99f * std::min(f, 1.0f));
+            mipPixels[i * size + j] = (unsigned char) (255.99f * Color::linearizeScalar(std::min(f, 1.0f)));
         }
     }
 }
@@ -304,7 +304,7 @@ static void BuildGlareMipLevel(unsigned char* mipPixels,
             float x = (float) j - size / 2;
             float r = std::sqrt(x * x + y * y);
             float f = std::pow(base, r * scale);
-            mipPixels[i * size + j] = (unsigned char) (255.99f * std::min(f, 1.0f));
+            mipPixels[i * size + j] = (unsigned char) (255.99f * Color::linearizeScalar(std::min(f, 1.0f)));
         }
     }
 }

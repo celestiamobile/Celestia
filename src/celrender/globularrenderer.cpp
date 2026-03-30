@@ -125,7 +125,7 @@ centerCloudTexEval(float u, float v, std::uint8_t *pixel)
     float profile_2d = (1.0f / std::sqrt(rho2) - 1.0f)/c2d + 1.0f;
     profile_2d = profile_2d * profile_2d;
 
-    *pixel = static_cast<std::uint8_t>(relStarDensity(eta) * profile_2d * 255.99f);
+    *pixel = static_cast<std::uint8_t>(Color::linearizeScalar(relStarDensity(eta) * profile_2d) * 255.99f);
 }
 
 void
@@ -356,7 +356,7 @@ globularTextureEval(float u, float v, std::uint8_t *pixel)
     static const float Lumi0 = std::exp(-kLumiShape);
     float lumi = std::max(0.0f, std::exp(-kLumiShape * std::hypot(u, v)) - Lumi0);
 
-    *pixel = static_cast<std::uint8_t>(lumi * 255.99f);
+    *pixel = static_cast<std::uint8_t>(Color::linearizeScalar(lumi) * 255.99f);
 }
 
 float
