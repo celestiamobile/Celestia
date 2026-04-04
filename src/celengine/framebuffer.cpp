@@ -130,11 +130,12 @@ FramebufferObject::generateColorTexture()
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    // Set the texture dimensions
+    // Use half-float precision to avoid color banding in dark regions
+    // when rendering in a linear-light pipeline with software sRGB output.
 #ifdef GL_ES
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, m_width, m_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, m_width, m_height, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
 #else
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, m_width, m_height, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, m_width, m_height, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
 #endif
 
     // Unbind the texture
@@ -290,11 +291,7 @@ FramebufferObject::generateMSAAFbo(unsigned int attachments)
     {
         glGenRenderbuffers(1, &m_colorRboId);
         glBindRenderbuffer(GL_RENDERBUFFER, m_colorRboId);
-#ifdef GL_ES
-        glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_RGBA8, m_width, m_height);
-#else
-        glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_RGB8, m_width, m_height);
-#endif
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_RGBA16F, m_width, m_height);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, m_colorRboId);
     }
 

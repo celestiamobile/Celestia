@@ -107,8 +107,7 @@ void PointStarRenderer::process(const Star& star, float distance, float appMag)
                                          glareSize,
                                          glareAlpha);
 
-            // Star spectral color and brightness alpha are display-calibrated (sRGB);
-            // linearize them for the linear-light rendering pipeline.
+            // Linearize color and brightness alpha for the linear-light pipeline.
             Color linearStarColor = starColor.linearize();
             if (glareSize != 0.0f)
                 glareVertexBuffer->addStar(relPos, Color(linearStarColor, Color::linearizeScalar(glareAlpha)), glareSize);

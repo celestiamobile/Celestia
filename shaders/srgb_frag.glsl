@@ -17,5 +17,8 @@ vec3 linearToSRGB(vec3 c)
 void main(void)
 {
     vec4 color = texture2D(tex, texCoord);
-    gl_FragColor = vec4(linearToSRGB(color.rgb), color.a);
+    // Clamp to [0,1] before conversion — the half-float FBO can accumulate
+    // values above 1.0 from additive blending (e.g. star glow), which must
+    // be saturated before the sRGB transfer function is applied.
+    gl_FragColor = vec4(linearToSRGB(min(color.rgb, vec3(1.0))), color.a);
 }

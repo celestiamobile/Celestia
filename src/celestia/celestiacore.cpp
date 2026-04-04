@@ -2508,56 +2508,12 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
             viewportEffects.push_back(std::move(effect));
     }
 
-    // Automatically apply sRGB output correction.
-    //
-    // Hardware path: query the colour encoding of the currently bound
-    // framebuffer.  On desktop GL, GL_FRAMEBUFFER_SRGB must be enabled so the
-    // driver performs the linear→sRGB conversion on writes.  On GLES 3.0+,
-    // if the EGL surface was created with EGL_GL_COLORSPACE_SRGB_KHR the
-    // conversion is implicit (no enable/disable toggle in base GLES).  Either
-    // way the flag only affects sRGB-encoded framebuffers; our intermediate
-    // FBOs (GL_RGB8 / GL_RGBA8, linear) are unaffected.
-    //
-    // Software path: when the bound framebuffer is linear (or the query is
-    // unsupported on GLES 2.0), append SRGBViewportEffect as the final step.
-    {
-        bool hwSRGB = false;
-
-        // GL_DRAW_FRAMEBUFFER_BINDING / GL_DRAW_FRAMEBUFFER and
-        // glGetFramebufferAttachmentParameteriv are available on desktop GL
-        // and GLES 3.0+; skip on GLES 2.0 and fall through to software path.
-#ifdef GL_ES
-        const bool canQuery = celestia::gl::checkVersion(celestia::gl::GLES_3_0);
-#else
-        constexpr bool canQuery = true;
-#endif
-        if (canQuery)
-        {
-            // GL_BACK is only valid for the default framebuffer (id 0).
-            // When a non-zero FBO is bound (some platforms wrap rendering in
-            // their own FBO) the colour attachment is GL_COLOR_ATTACHMENT0.
-            GLint boundFbo = 0;
-            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &boundFbo);
-            GLenum attachment = (boundFbo == 0) ? GL_BACK : GL_COLOR_ATTACHMENT0;
-
-            GLint encoding = GL_LINEAR;
-            glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, attachment,
-                                                  GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING,
-                                                  &encoding);
-            if (encoding == GL_SRGB)
-            {
-#ifndef GL_ES
-                // On GLES an sRGB surface encodes automatically; desktop GL
-                // requires an explicit enable.
-                glEnable(GL_FRAMEBUFFER_SRGB);
-#endif
-                hwSRGB = true;
-            }
-        }
-
-        if (!hwSRGB)
-            viewportEffects.push_back(std::make_unique<SRGBViewportEffect>());
-    }
+    // Apply sRGB output correction via software post-process.
+    // The SRGBViewportEffect shader performs the linear→sRGB conversion
+    // as the final rendering step, keeping the pipeline consistent across
+    // all GL variants without relying on GL_FRAMEBUFFER_SRGB or
+    // platform-specific sRGB surface negotiation.
+    viewportEffects.push_back(std::make_unique<SRGBViewportEffect>());
 
     if (!config->measurementSystem.empty())
     {

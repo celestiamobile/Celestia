@@ -59,12 +59,13 @@ namespace celestia
 namespace
 {
 
-// HUD text colors — authored as sRGB values, linearized for the linear-light rendering pipeline
-const Color InfoColor       = Color(0.7f, 0.7f, 1.0f, 1.0f).linearize();
-const Color FrameInfoColor  = Color(0.6f, 0.6f, 1.0f, 1.0f).linearize();
-const Color LightTravelColor = Color(0.42f, 1.0f, 1.0f, 1.0f).linearize();
-const Color WarningColor    = Color(1.0f, 0.0f, 0.0f, 1.0f).linearize();
-const Color EditModeColor   = Color(1.0f, 0.0f, 1.0f, 1.0f).linearize();
+// HUD text colors — rendered directly to screen after viewport effects,
+// so they must remain in sRGB space (no linearization).
+const Color InfoColor       = Color(0.7f, 0.7f, 1.0f, 1.0f);
+const Color FrameInfoColor  = Color(0.6f, 0.6f, 1.0f, 1.0f);
+const Color LightTravelColor = Color(0.42f, 1.0f, 1.0f, 1.0f);
+const Color WarningColor    = Color(1.0f, 0.0f, 0.0f, 1.0f);
+const Color EditModeColor   = Color(1.0f, 0.0f, 1.0f, 1.0f);
 
 // Ye olde wolde conſtantes for ye olde wolde units
 constexpr double OneMiInKm = 1.609344;

@@ -30,10 +30,11 @@ namespace celestia
 
 namespace
 {
-// Text input colors — authored as sRGB values, linearized for the linear-light rendering pipeline
-const Color consoleColor       = Color(0.7f, 0.7f, 1.0f, 0.2f).linearize();
-const Color inputTextColor     = Color(0.6f, 0.6f, 1.0f, 1.0f).linearize();
-const Color selectedCompletion = Color(1.0f, 0.6f, 0.6f, 1.0f).linearize();
+// Text input colors — rendered directly to screen after viewport effects,
+// so they must remain in sRGB space (no linearization).
+const Color consoleColor       = Color(0.7f, 0.7f, 1.0f, 0.2f);
+const Color inputTextColor     = Color(0.6f, 0.6f, 1.0f, 1.0f);
+const Color selectedCompletion = Color(1.0f, 0.6f, 0.6f, 1.0f);
 }
 
 std::string_view

@@ -50,8 +50,8 @@ protected:
 };
 
 // Applies the sRGB electro-optical transfer function (linear → sRGB gamma)
-// as a post-process step.  Used as the software sRGB path when the default
-// framebuffer is not already an sRGB surface.
+// as a post-process step.  Always used as the final rendering step to convert
+// the linear-light pipeline output to sRGB for display.
 class SRGBViewportEffect : public PassthroughViewportEffect
 {
 public:

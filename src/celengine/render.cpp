@@ -283,7 +283,7 @@ static void BuildGaussianDiscMipLevel(unsigned char* mipPixels,
             float r2 = x * x + y * y;
             float f = s * std::exp(-r2 * isig2) * power;
 
-            mipPixels[i * size + j] = (unsigned char) (255.99f * Color::linearizeScalar(std::min(f, 1.0f)));
+            mipPixels[i * size + j] = (unsigned char) (255.99f * std::min(f, 1.0f));
         }
     }
 }
@@ -304,7 +304,7 @@ static void BuildGlareMipLevel(unsigned char* mipPixels,
             float x = (float) j - size / 2;
             float r = std::sqrt(x * x + y * y);
             float f = std::pow(base, r * scale);
-            mipPixels[i * size + j] = (unsigned char) (255.99f * Color::linearizeScalar(std::min(f, 1.0f)));
+            mipPixels[i * size + j] = (unsigned char) (255.99f * std::min(f, 1.0f));
         }
     }
 }
@@ -342,7 +342,7 @@ static std::unique_ptr<Texture>
 BuildGaussianDiscTexture(unsigned int log2size)
 {
     unsigned int size = 1U << log2size;
-    auto img = std::make_unique<Image>(PixelFormat::Luminance, size, size, log2size + 1);
+    auto img = std::make_unique<Image>(PixelFormat::sLuminance, size, size, log2size + 1);
 
     for (unsigned int mipLevel = 0; mipLevel <= log2size; mipLevel++)
     {
@@ -362,7 +362,7 @@ static std::unique_ptr<Texture>
 BuildGaussianGlareTexture(unsigned int log2size)
 {
     unsigned int size = 1U << log2size;
-    auto img = std::make_unique<Image>(PixelFormat::Luminance, size, size, log2size + 1);
+    auto img = std::make_unique<Image>(PixelFormat::sLuminance, size, size, log2size + 1);
 
     for (unsigned int mipLevel = 0; mipLevel <= log2size; mipLevel++)
     {
@@ -1697,8 +1697,7 @@ void Renderer::renderObjectAsPoint(const Vector3f& position,
         if (starStyle != StarStyle::PointStars)
             m_gaussianDiscTex->bind();
 
-        // Color and brightness alpha are display-calibrated (sRGB);
-        // linearize them for the linear-light rendering pipeline.
+        // Linearize color and brightness alpha for the linear-light pipeline.
         Color linearColor = color.linearize();
         float linearAlpha = Color::linearizeScalar(alpha);
         if (pointSize > gl::maxPointSize)
