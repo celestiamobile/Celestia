@@ -99,10 +99,9 @@ jobs:
         repository: CelestiaProject/CelestiaContent
         path: 'content'
 
-    - name: Install ImageMagick
+    - name: Find ImageMagick
       shell: pwsh
       run: |
-        choco install imagemagick --force -y
         $magickDir = (Get-ChildItem "C:\Program Files\ImageMagick*" -Directory | Select-Object -First 1).FullName
         echo "ImageMagick dir: $magickDir"
         Get-ChildItem $magickDir -Filter "*.exe" | ForEach-Object { echo $_.Name }
