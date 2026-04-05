@@ -176,6 +176,68 @@ jobs:
         path: |
           ${{github.workspace}}/install-tools/
 
+    - name: Prepare installer directory
+      shell: pwsh
+      run: |
+        cmake --install ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --component core
+        cmake --install ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --component wingui
+        cmake --install ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --component qt6gui
+        Rename-Item -Path "install" -NewName "installer"
+
+    - name: Checkout CelestiaContent
+      uses: actions/checkout@v6
+      with:
+        repository: CelestiaProject/CelestiaContent
+        path: 'content'
+
+    - name: Install CelestiaContent
+      shell: pwsh
+      run: |
+        cmake -B ${{github.workspace}}/content/build -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/installer
+        cmake --build ${{github.workspace}}/content/build --config ${{env.BUILD_TYPE}} --target install
+
+    - name: Copy files for installer
+      shell: pwsh
+      run: |
+        Copy-Item celestia.iss ${{github.workspace}}/installer/
+        Copy-Item win32-installer-image.bmp ${{github.workspace}}/installer/
+        Copy-Item AUTHORS ${{github.workspace}}/installer/
+        Copy-Item ChangeLog ${{github.workspace}}/installer/
+        Copy-Item README ${{github.workspace}}/installer/
+        Copy-Item TRANSLATORS ${{github.workspace}}/installer/
+
+    - name: Run windeployqt for installer
+      shell: pwsh
+      run: |
+        $windeployqt = "$env:VCPKG_INSTALLATION_ROOT/installed/${{matrix.platform}}-windows-release/tools/Qt6/bin/windeployqt.exe"
+        & $windeployqt "${{github.workspace}}/installer/celestia-qt6.exe"
+
+    - name: Download VC++ redistributable
+      shell: pwsh
+      run: |
+        if ('${{matrix.platform}}' -eq 'x86') {
+          $url = 'https://aka.ms/vs/17/release/vc_redist.x86.exe'
+        } else {
+          $url = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
+        }
+        Invoke-WebRequest -Uri $url -OutFile "${{github.workspace}}/installer/vc_redist.exe"
+
+    - name: Create installer
+      shell: cmd
+      run: |
+        set ISCCExtraFlags=/DBuildX64Installer
+        if ${{matrix.platform}}==x86 set ISCCExtraFlags=/DBuildX86Installer
+        iscc ${{github.workspace}}\installer\celestia.iss /O${{github.workspace}}\installer /FCelestiaInstaller %ISCCExtraFlags%
+
+    - name: Upload installer
+      uses: actions/upload-artifact@v5
+      if: success()
+      with:
+        name: celestia-installer-${{matrix.platform}}
+        if-no-files-found: error
+        path: |
+          ${{github.workspace}}/installer/CelestiaInstaller.exe
+
   build-posix:
     name: "${{matrix.config.os}}"
     strategy:
