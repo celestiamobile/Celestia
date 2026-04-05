@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, installer-v2 ]
     paths: [ src/**, test/**, cmake/**, .github/workflows/ci.yml, CMakeLists.txt ]
   pull_request:
     branches: [ master ]
