@@ -191,6 +191,10 @@ jobs:
         repository: CelestiaProject/CelestiaContent
         path: 'content'
 
+    - name: Install ImageMagick
+      shell: pwsh
+      run: choco install imagemagick -y
+
     - name: Install CelestiaContent
       shell: pwsh
       run: |
