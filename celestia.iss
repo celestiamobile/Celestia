@@ -75,37 +75,37 @@ Source: "styles\*";           DestDir: "{app}/styles"; Flags: ignoreversion recu
 Source: "vc_redist.exe"; DestDir: {tmp}
 
 ; Languages
-Source: "locale\*";          DestDir: "{app}/locale"; Flags: ignoreversion recursesubdirs
+Source: "locale\*";          DestDir: "{app}/locale"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
 ; Data
-Source: "data\*";            DestDir: "{app}/data"; Flags: ignoreversion recursesubdirs
+Source: "data\*";            DestDir: "{app}/data"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
 ; Textures
-Source: "textures\*";        DestDir: "{app}/textures"; Flags: ignoreversion recursesubdirs
+Source: "textures\*";        DestDir: "{app}/textures"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
 ; Shaders
-Source: "shaders\*";         DestDir: "{app}/shaders"; Flags: ignoreversion recursesubdirs
+Source: "shaders\*";         DestDir: "{app}/shaders"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
 ; Models
-Source: "models\*";          DestDir: "{app}/models"; Flags: ignoreversion recursesubdirs
+Source: "models\*";          DestDir: "{app}/models"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
 ; Fonts
-Source: "fonts\*";           DestDir: "{app}/fonts"; Flags: ignoreversion recursesubdirs
+Source: "fonts\*";           DestDir: "{app}/fonts"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
 ; Standard extras
-Source: "extras-standard\*"; DestDir: "{app}/extras-standard"; Flags: ignoreversion recursesubdirs
+Source: "extras-standard\*"; DestDir: "{app}/extras-standard"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
 ; Scripts
-Source: "scripts\*";         DestDir: "{app}/scripts"; Flags: ignoreversion recursesubdirs
+Source: "scripts\*";         DestDir: "{app}/scripts"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
 ; Images
-Source: "images\*";          DestDir: "{app}/images"; Flags: ignoreversion recursesubdirs
+Source: "images\*";          DestDir: "{app}/images"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
 ; Warp
-Source: "warp\*";            DestDir: "{app}/warp"; Flags: ignoreversion recursesubdirs
+Source: "warp\*";            DestDir: "{app}/warp"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
 ; Help
-Source: "help\*";            DestDir: "{app}/help"; Flags: ignoreversion recursesubdirs
+Source: "help\*";            DestDir: "{app}/help"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
 [InstallDelete]
 Type: files; Name: "{app}\extras\minormoons.ssc";

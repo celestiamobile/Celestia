@@ -194,10 +194,17 @@ jobs:
     - name: Install CelestiaContent
       shell: pwsh
       run: |
+        if ( '${{matrix.platform}}' -eq 'x86' ) {
+            $GeneratorPlatform = 'Win32'
+        } else {
+            $GeneratorPlatform = '${{matrix.platform}}'
+        }
+
         cmake -B ${{github.workspace}}/content/build `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_OVERLAY_TRIPLETS="${{github.workspace}}/windows/vcpkg-triplets" `
             -DVCPKG_TARGET_TRIPLET=${{matrix.platform}}-windows-release `
+            -DCMAKE_GENERATOR_PLATFORM="$GeneratorPlatform" `
             -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/installer
         cmake --build ${{github.workspace}}/content/build --config ${{env.BUILD_TYPE}} --target install
 
