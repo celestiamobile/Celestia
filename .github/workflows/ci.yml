@@ -199,7 +199,8 @@ jobs:
       shell: pwsh
       run: |
         cmake -S ${{github.workspace}}/content -B ${{github.workspace}}/content/build `
-            -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/installer
+            -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/installer `
+            -DENABLE_NLS=OFF
         cmake --build ${{github.workspace}}/content/build --config ${{env.BUILD_TYPE}} --target install
 
     - name: Copy files for installer
