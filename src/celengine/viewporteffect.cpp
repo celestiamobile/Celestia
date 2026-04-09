@@ -52,7 +52,7 @@ PassthroughViewportEffect::PassthroughViewportEffect() :
 
 bool PassthroughViewportEffect::render(Renderer* renderer, FramebufferObject* fbo, int width, int height)
 {
-    auto *prog = renderer->getShaderManager().getShader("passthrough");
+    auto *prog = renderer->getShaderManager().getShader(shaderName());
     if (prog == nullptr)
         return false;
 

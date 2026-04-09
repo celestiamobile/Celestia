@@ -43,6 +43,9 @@ public:
 
     bool render(Renderer*, FramebufferObject*, int width, int height) override;
 
+protected:
+    virtual const char* shaderName() const { return "passthrough"; }
+
 private:
     celestia::gl::VertexObject vo{ celestia::util::NoCreateT{} };
     celestia::gl::Buffer bo{ celestia::util::NoCreateT{} };
@@ -50,6 +53,18 @@ private:
     void initialize();
 
     bool initialized{ false };
+};
+
+// Applies the sRGB electro-optical transfer function (linear → sRGB gamma)
+// as a post-process step.  Always used as the final rendering step to convert
+// the linear-light pipeline output to sRGB for display.
+class SRGBViewportEffect : public PassthroughViewportEffect
+{
+public:
+    bool needsFloatSource() const override { return true; }
+
+protected:
+    const char* shaderName() const override { return "srgb"; }
 };
 
 class WarpMeshViewportEffect : public ViewportEffect //NOSONAR

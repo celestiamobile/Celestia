@@ -11,6 +11,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <cmath>
+#include <vector>
 
 #include "glsupport.h"
 
@@ -26,6 +27,8 @@ using namespace celestia;
 using celestia::util::GetLogger;
 using celestia::engine::Image;
 using celestia::engine::PixelFormat;
+using celestia::engine::expandLuminanceToRGBA;
+using celestia::engine::expandLuminanceAlphaToRGBA;
 
 namespace
 {
@@ -74,6 +77,17 @@ getInternalFormat(PixelFormat format)
     case PixelFormat::DXT3:
     case PixelFormat::DXT5:
         return static_cast<GLenum>(format);
+    // All sRGB formats use GL_SRGB8_ALPHA8 on GLES, with data expanded
+    // to RGBA at upload time where needed (RGB, Luminance, LuminanceAlpha).
+    case PixelFormat::sRGB:
+    case PixelFormat::sRGB8:
+    case PixelFormat::sRGBA:
+    case PixelFormat::sRGBA8:
+    case PixelFormat::sLuminance:
+    case PixelFormat::sLumAlpha:
+        return celestia::gl::checkVersion(celestia::gl::GLES_3_0)
+               ? GL_SRGB8_ALPHA8
+               : static_cast<GLenum>(PixelFormat::RGBA);
     default:
         return GL_NONE;
     }
@@ -108,7 +122,23 @@ GLenum
 getExternalFormat(PixelFormat format)
 {
 #ifdef GL_ES
-    return getInternalFormat(format);
+    // On GLES 3.0+, sRGB internal formats require a non-sRGB external format.
+    // On GLES 2.0 the sRGB cases already fall back to RGB/RGBA in
+    // getInternalFormat(), so this is safe for both versions.
+    switch (format)
+    {
+    case PixelFormat::sRGB:
+    case PixelFormat::sRGB8:
+    case PixelFormat::sRGBA:
+    case PixelFormat::sRGBA8:
+        // All sRGB color formats use GL_SRGB8_ALPHA8 on GLES.
+        return static_cast<GLenum>(PixelFormat::RGBA);
+    case PixelFormat::sLuminance:
+    case PixelFormat::sLumAlpha:
+        return static_cast<GLenum>(PixelFormat::RGBA);
+    default:
+        return getInternalFormat(format);
+    }
 #else
     switch (format)
     {
@@ -224,6 +254,41 @@ SetBorderColor(Color borderColor, GLenum target)
 #endif
 }
 
+#ifdef GL_ES
+// On GLES, sRGB 3-component textures (sRGB/sRGB8) use GL_SRGB8_ALPHA8
+// because GL_SRGB8 is unsupported on some backends (ANGLE/Metal).
+// This requires expanding RGB data to RGBA at upload time.
+// Similarly, sLuminance/sLumAlpha are not available on GLES; expand to RGBA.
+bool
+needsToRGBAExpansion(PixelFormat format)
+{
+    return format == PixelFormat::sRGB
+        || format == PixelFormat::sRGB8
+        || format == PixelFormat::sLuminance
+        || format == PixelFormat::sLumAlpha;
+}
+
+std::vector<std::uint8_t>
+expandToRGBA(const std::uint8_t* src, int width, int height, PixelFormat format)
+{
+    if (format == PixelFormat::sLuminance)
+        return expandLuminanceToRGBA(src, width, height);
+    if (format == PixelFormat::sLumAlpha)
+        return expandLuminanceAlphaToRGBA(src, width, height);
+
+    // RGB → RGBA
+    std::vector<std::uint8_t> dst(width * height * 4);
+    for (int i = 0; i < width * height; ++i)
+    {
+        dst[i * 4 + 0] = src[i * 3 + 0];
+        dst[i * 4 + 1] = src[i * 3 + 1];
+        dst[i * 4 + 2] = src[i * 3 + 2];
+        dst[i * 4 + 3] = 255;
+    }
+    return dst;
+}
+#endif
+
 // Load a prebuilt set of mipmaps; assumes that the image contains
 // a complete set of mipmap levels.
 void
@@ -251,14 +316,19 @@ LoadMipmapSet(const Image& img, GLenum target)
         }
         else
         {
-            glTexImage2D(target,
-                         mip,
-                         internalFormat,
-                         mipWidth, mipHeight,
-                         0,
-                         getExternalFormat(img.getFormat()),
-                         GL_UNSIGNED_BYTE,
-                         img.getMipLevel(mip));
+#ifdef GL_ES
+            if (needsToRGBAExpansion(img.getFormat()))
+            {
+                auto expanded = expandToRGBA(img.getMipLevel(mip), mipWidth, mipHeight, img.getFormat());
+                glTexImage2D(target, mip, internalFormat, mipWidth, mipHeight, 0,
+                             getExternalFormat(img.getFormat()), GL_UNSIGNED_BYTE, expanded.data());
+            }
+            else
+#endif
+            {
+                glTexImage2D(target, mip, internalFormat, mipWidth, mipHeight, 0,
+                             getExternalFormat(img.getFormat()), GL_UNSIGNED_BYTE, img.getMipLevel(mip));
+            }
         }
     }
 }
@@ -281,14 +351,19 @@ LoadMiplessTexture(const Image& img, GLenum target)
     }
     else
     {
-        glTexImage2D(target,
-                     0,
-                     internalFormat,
-                     img.getWidth(), img.getHeight(),
-                     0,
-                     getExternalFormat(img.getFormat()),
-                     GL_UNSIGNED_BYTE,
-                     img.getMipLevel(0));
+#ifdef GL_ES
+        if (needsToRGBAExpansion(img.getFormat()))
+        {
+            auto expanded = expandToRGBA(img.getMipLevel(0), img.getWidth(), img.getHeight(), img.getFormat());
+            glTexImage2D(target, 0, internalFormat, img.getWidth(), img.getHeight(), 0,
+                         getExternalFormat(img.getFormat()), GL_UNSIGNED_BYTE, expanded.data());
+        }
+        else
+#endif
+        {
+            glTexImage2D(target, 0, internalFormat, img.getWidth(), img.getHeight(), 0,
+                         getExternalFormat(img.getFormat()), GL_UNSIGNED_BYTE, img.getMipLevel(0));
+        }
     }
 }
 

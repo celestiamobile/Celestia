@@ -2516,6 +2516,13 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
             viewportEffects.push_back(std::move(effect));
     }
 
+    // Apply sRGB output correction via software post-process.
+    // The SRGBViewportEffect shader performs the linear→sRGB conversion
+    // as the final rendering step, keeping the pipeline consistent across
+    // all GL variants without relying on GL_FRAMEBUFFER_SRGB or
+    // platform-specific sRGB surface negotiation.
+    viewportEffects.push_back(std::make_unique<SRGBViewportEffect>());
+
     if (!config->measurementSystem.empty())
     {
         if (compareIgnoringCase(config->measurementSystem, "imperial") == 0)
