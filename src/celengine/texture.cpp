@@ -122,17 +122,13 @@ GLenum
 getExternalFormat(PixelFormat format)
 {
 #ifdef GL_ES
-    // On GLES 3.0+, sRGB internal formats require a non-sRGB external format.
-    // On GLES 2.0 the sRGB cases already fall back to RGB/RGBA in
-    // getInternalFormat(), so this is safe for both versions.
+    // All sRGB color formats use GL_SRGB8_ALPHA8 on GLES.
     switch (format)
     {
     case PixelFormat::sRGB:
     case PixelFormat::sRGB8:
     case PixelFormat::sRGBA:
     case PixelFormat::sRGBA8:
-        // All sRGB color formats use GL_SRGB8_ALPHA8 on GLES.
-        return static_cast<GLenum>(PixelFormat::RGBA);
     case PixelFormat::sLuminance:
     case PixelFormat::sLumAlpha:
         return static_cast<GLenum>(PixelFormat::RGBA);

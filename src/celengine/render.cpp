@@ -2063,28 +2063,13 @@ setupObjectLighting(const vector<LightSource>& suns,
     for (i = 0; i < nLights; i++)
         totalIrradiance += ls.lights[i].irradiance;
 
-    // Compute a gamma factor to make dim light sources visible.  This is
-    // intended to approximate what we see with our eyes--for example,
-    // Earth-shine is visible on the night side of the Moon, even though
-    // the amount of reflected light from the Earth is 1/10000 of what
-    // the Moon receives directly from the Sun.
-    //
-    // TODO: Skip this step when high dynamic range rendering to floating point
-    //   buffers is enabled.
-    float minVisibleFraction = 1.0f / 10000.0f;
-    float minDisplayableValue = 1.0f / 255.0f;
-    float gamma = log(minDisplayableValue) / log(minVisibleFraction);
-    float minVisibleIrradiance = minVisibleFraction * totalIrradiance;
-
     Matrix3f m = objOrientation.toRotationMatrix();
 
-    // Gamma scale and normalize the light sources; cull light sources that
-    // aren't bright enough to contribute the final pixels rendered into the
-    // frame buffer.
+    // Normalize light source irradiance so the brightest light is ~1.0.
     ls.nLights = 0;
-    for (i = 0; i < nLights && ls.lights[i].irradiance > minVisibleIrradiance; i++)
+    for (i = 0; i < nLights; i++)
     {
-        ls.lights[i].irradiance = pow(ls.lights[i].irradiance / totalIrradiance, gamma);
+        ls.lights[i].irradiance /= totalIrradiance;
 
         // Compute the direction of the light in object space
         ls.lights[i].direction_obj = m * ls.lights[i].direction_eye;
