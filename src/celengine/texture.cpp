@@ -77,7 +77,8 @@ getInternalFormat(PixelFormat format)
     case PixelFormat::DXT3:
     case PixelFormat::DXT5:
         return static_cast<GLenum>(format);
-    // All sRGB formats use GL_SRGB8_ALPHA8 on GLES, with data expanded
+    // All sRGB formats use GL_SRGB8_ALPHA8 on GLES 3.0+, or
+    // GL_SRGB_ALPHA_EXT on GLES 2.0 with EXT_sRGB. Data is expanded
     // to RGBA at upload time where needed (RGB, Luminance, LuminanceAlpha).
     case PixelFormat::sRGB:
     case PixelFormat::sRGB8:
@@ -85,9 +86,11 @@ getInternalFormat(PixelFormat format)
     case PixelFormat::sRGBA8:
     case PixelFormat::sLuminance:
     case PixelFormat::sLumAlpha:
-        return celestia::gl::checkVersion(celestia::gl::GLES_3_0)
-               ? GL_SRGB8_ALPHA8
-               : static_cast<GLenum>(PixelFormat::RGBA);
+        if (celestia::gl::checkVersion(celestia::gl::GLES_3_0))
+            return GL_SRGB8_ALPHA8;
+        if (celestia::gl::EXT_sRGB)
+            return GL_SRGB_ALPHA_EXT;
+        return static_cast<GLenum>(PixelFormat::RGBA);
     default:
         return GL_NONE;
     }
@@ -122,7 +125,9 @@ GLenum
 getExternalFormat(PixelFormat format)
 {
 #ifdef GL_ES
-    // All sRGB color formats use GL_SRGB8_ALPHA8 on GLES.
+    // On GLES 3.0+, sRGB internal formats use GL_RGBA as external format.
+    // On GLES 2.0 with EXT_sRGB, internalformat must match format, so
+    // use GL_SRGB_ALPHA_EXT for both.
     switch (format)
     {
     case PixelFormat::sRGB:
@@ -131,6 +136,10 @@ getExternalFormat(PixelFormat format)
     case PixelFormat::sRGBA8:
     case PixelFormat::sLuminance:
     case PixelFormat::sLumAlpha:
+        if (celestia::gl::checkVersion(celestia::gl::GLES_3_0))
+            return static_cast<GLenum>(PixelFormat::RGBA);
+        if (celestia::gl::EXT_sRGB)
+            return GL_SRGB_ALPHA_EXT;
         return static_cast<GLenum>(PixelFormat::RGBA);
     default:
         return getInternalFormat(format);
@@ -252,9 +261,9 @@ SetBorderColor(Color borderColor, GLenum target)
 
 #ifdef GL_ES
 // On GLES, sRGB 3-component textures (sRGB/sRGB8) use GL_SRGB8_ALPHA8
-// because GL_SRGB8 is unsupported on some backends (ANGLE/Metal).
-// This requires expanding RGB data to RGBA at upload time.
-// Similarly, sLuminance/sLumAlpha are not available on GLES; expand to RGBA.
+// or GL_SRGB_ALPHA_EXT, which requires expanding RGB data to RGBA at
+// upload time. Similarly, sLuminance/sLumAlpha are not available on
+// GLES; expand to RGBA.
 bool
 needsToRGBAExpansion(PixelFormat format)
 {
@@ -283,7 +292,39 @@ expandToRGBA(const std::uint8_t* src, int width, int height, PixelFormat format)
     }
     return dst;
 }
+
+bool
+isSRGBFormat(PixelFormat format)
+{
+    switch (format)
+    {
+    case PixelFormat::sRGB:
+    case PixelFormat::sRGB8:
+    case PixelFormat::sRGBA:
+    case PixelFormat::sRGBA8:
+    case PixelFormat::sLuminance:
+    case PixelFormat::sLumAlpha:
+    case PixelFormat::DXT1_sRGBA:
+    case PixelFormat::DXT3_sRGBA:
+    case PixelFormat::DXT5_sRGBA:
+        return true;
+    default:
+        return false;
+    }
+}
 #endif
+
+// On GLES 2.0 with EXT_sRGB, glGenerateMipmap does not support sRGB
+// internal formats. Fall back to no mipmaps in this case.
+bool
+canGenerateMipmaps([[maybe_unused]] PixelFormat format)
+{
+#ifdef GL_ES
+    if (!celestia::gl::checkVersion(celestia::gl::GLES_3_0) && celestia::gl::EXT_sRGB && isSRGBFormat(format))
+        return false;
+#endif
+    return true;
+}
 
 // Load a prebuilt set of mipmaps; assumes that the image contains
 // a complete set of mipmap levels.
@@ -488,7 +529,7 @@ ComputeTileMipMaps(const Image& img, Image& tile,
     }
 
     LoadMiplessTexture(tile, GL_TEXTURE_2D);
-    if (mipmap)
+    if (mipmap && canGenerateMipmaps(img.getFormat()))
         glGenerateMipmap(GL_TEXTURE_2D);
 }
 
@@ -595,7 +636,14 @@ ImageTexture::ImageTexture(const Image& img,
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, GetTextureCaps().preferredAnisotropy);
     }
 
-    bool genMipmaps = mipmap && !precomputedMipMaps;
+    bool genMipmaps = mipmap && !precomputedMipMaps && canGenerateMipmaps(img.getFormat());
+
+    // If we wanted mipmaps but can't generate them, fall back to linear filtering.
+    if (mipmap && !precomputedMipMaps && !genMipmaps)
+    {
+        mipmap = false;
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    }
 
     if (mipmap)
     {
@@ -813,7 +861,13 @@ CubeMap::CubeMap(celestia::util::array_view<Image> faces) :
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER,
                     mipmap ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
 
-    bool genMipmaps = mipmap && !precomputedMipMaps;
+    bool genMipmaps = mipmap && !precomputedMipMaps && canGenerateMipmaps(faces[0].getFormat());
+
+    if (mipmap && !precomputedMipMaps && !genMipmaps)
+    {
+        mipmap = false;
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    }
 
     for (int i = 0; i < 6; ++i)
     {

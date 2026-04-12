@@ -49,6 +49,7 @@ extern CELAPI bool OES_texture_border_clamp; //NOSONAR
 extern CELAPI bool OES_geometry_shader; //NOSONAR
 extern CELAPI bool OES_depth24; //NOSONAR
 extern CELAPI bool OES_texture_half_float; //NOSONAR
+extern CELAPI bool EXT_sRGB; //NOSONAR
 #else
 extern CELAPI bool ARB_vertex_array_object; //NOSONAR
 #endif
