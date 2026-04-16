@@ -74,6 +74,31 @@ struct DDSurfaceDesc
     std::uint32_t textureStage;
 };
 
+// DX10 extended header, present when fourCC == "DX10".
+struct DDSHeaderDXT10
+{
+    std::uint32_t dxgiFormat;
+    std::uint32_t resourceDimension;
+    std::uint32_t miscFlag;
+    std::uint32_t arraySize;
+    std::uint32_t miscFlags2;
+};
+
+// Subset of DXGI_FORMAT values relevant to Celestia.
+enum DXGIFormat : std::uint32_t
+{
+    DXGI_FORMAT_R8G8B8A8_UNORM      = 28,
+    DXGI_FORMAT_R8G8B8A8_UNORM_SRGB = 29,
+    DXGI_FORMAT_B8G8R8A8_UNORM      = 87,
+    DXGI_FORMAT_B8G8R8A8_UNORM_SRGB = 91,
+    DXGI_FORMAT_BC1_UNORM           = 71,
+    DXGI_FORMAT_BC1_UNORM_SRGB      = 72,
+    DXGI_FORMAT_BC2_UNORM           = 74,
+    DXGI_FORMAT_BC2_UNORM_SRGB      = 75,
+    DXGI_FORMAT_BC3_UNORM           = 77,
+    DXGI_FORMAT_BC3_UNORM_SRGB      = 78,
+};
+
 constexpr std::size_t DDS_MAX_BLOCK_SIZE = 16;
 
 constexpr std::uint32_t FourCC(const char *s)
@@ -147,6 +172,27 @@ GetUncompressedFormat(const DDSurfaceDesc& ddsd)
 }
 
 PixelFormat
+GetDXT10Format(const DDSHeaderDXT10& dx10)
+{
+    switch (dx10.dxgiFormat)
+    {
+    case DXGI_FORMAT_R8G8B8A8_UNORM:      return PixelFormat::RGBA8;
+    case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: return PixelFormat::sRGBA8;
+    case DXGI_FORMAT_B8G8R8A8_UNORM:      return PixelFormat::BGRA8;
+    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return PixelFormat::sRGBA8; // treat as sRGBA; no sBGRA format
+    case DXGI_FORMAT_BC1_UNORM:           return PixelFormat::DXT1;
+    case DXGI_FORMAT_BC1_UNORM_SRGB:      return PixelFormat::DXT1_sRGBA;
+    case DXGI_FORMAT_BC2_UNORM:           return PixelFormat::DXT3;
+    case DXGI_FORMAT_BC2_UNORM_SRGB:      return PixelFormat::DXT3_sRGBA;
+    case DXGI_FORMAT_BC3_UNORM:           return PixelFormat::DXT5;
+    case DXGI_FORMAT_BC3_UNORM_SRGB:      return PixelFormat::DXT5_sRGBA;
+    default:
+        util::GetLogger()->error("Unsupported DXGI format in DDS DX10 header: {}\n", dx10.dxgiFormat);
+        return PixelFormat::Invalid;
+    }
+}
+
+PixelFormat
 GetFormat(const DDSurfaceDesc& ddsd)
 {
     switch (ddsd.format.fourCC)
@@ -162,6 +208,8 @@ GetFormat(const DDSurfaceDesc& ddsd)
 
     case FourCC("DXT5"):
         return PixelFormat::DXT5;
+
+    // DX10 extended header is handled by the caller before reaching here.
 
     default:
         util::GetLogger()->error("Unknown FourCC in DDS file: {:08x}\n", ddsd.format.fourCC);
@@ -321,7 +369,22 @@ Image* LoadDDSImage(const std::filesystem::path& filename)
         return nullptr;
     }
 
-    PixelFormat format = GetFormat(ddsd);
+    PixelFormat format;
+    if (ddsd.format.fourCC == FourCC("DX10"))
+    {
+        DDSHeaderDXT10 dx10;
+        if (!in.read(reinterpret_cast<char*>(&dx10), sizeof dx10).good()) /* Flawfinder: ignore */
+        {
+            util::GetLogger()->error("DDS file {} has bad DX10 header.\n", filename);
+            return nullptr;
+        }
+        LE_TO_CPU_INT32(dx10.dxgiFormat, dx10.dxgiFormat);
+        format = GetDXT10Format(dx10);
+    }
+    else
+    {
+        format = GetFormat(ddsd);
+    }
 
     if (format == PixelFormat::Invalid)
     {
