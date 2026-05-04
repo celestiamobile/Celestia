@@ -52,8 +52,8 @@ private:
     StaticShader m_shaderName;
     bool m_needsFloatSource;
 
-    celestia::gl::VertexObject vo{ celestia::util::NoCreateT{} };
-    celestia::gl::Buffer bo{ celestia::util::NoCreateT{} };
+    celestia::gl::VertexObject vo;
+    celestia::gl::Buffer bo;
 
     void initialize();
 
@@ -71,8 +71,8 @@ public:
     bool distortXY(float& x, float& y) override;
 
 private:
-    celestia::gl::VertexObject vo{ celestia::util::NoCreateT{} };
-    celestia::gl::Buffer bo{ celestia::util::NoCreateT{} };
+    celestia::gl::VertexObject vo;
+    celestia::gl::Buffer bo;
 
     std::unique_ptr<WarpMesh> mesh;
 
