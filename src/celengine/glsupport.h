@@ -40,6 +40,7 @@ enum Version
 };
 
 extern CELAPI bool ARB_shader_texture_lod; //NOSONAR
+extern CELAPI bool ARB_texture_compression_bptc; //NOSONAR
 extern CELAPI bool EXT_texture_compression_s3tc; //NOSONAR
 extern CELAPI bool EXT_texture_filter_anisotropic; //NOSONAR
 extern CELAPI bool MESA_pack_invert; //NOSONAR
@@ -59,6 +60,7 @@ extern CELAPI GLint maxPointSize; //NOSONAR
 extern CELAPI GLint maxTextureSize; //NOSONAR
 extern CELAPI GLfloat maxLineWidth; //NOSONAR
 extern CELAPI GLint maxTextureAnisotropy; //NOSONAR
+extern CELAPI bool sRGBRendering; //NOSONAR
 
 bool init(util::array_view<std::string> = {}) noexcept;
 bool checkVersion(int) noexcept;
