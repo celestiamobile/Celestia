@@ -2751,13 +2751,13 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
         setFaintestAutoMag();
     }
 
-    auto mainFont = LoadFontHelper(renderer, config->fonts.mainFont, N_("DEFAULT_MAIN_FONT"), "DejaVuSans.ttf,9");
+    auto mainFont = LoadFontHelper(renderer, config->fonts.mainFont, N_("DEFAULT_MAIN_FONT"), "NotoSans-Regular.ttf,9");
     if (mainFont != nullptr)
         hud->font(mainFont);
     else
         std::cout << _("Error loading font; text will not be visible.\n");
 
-    if (auto titleFont = LoadFontHelper(renderer, config->fonts.titleFont, N_("DEFAULT_TITLE_FONT"), "DejaVuSans-Bold.ttf,15");
+    if (auto titleFont = LoadFontHelper(renderer, config->fonts.titleFont, N_("DEFAULT_TITLE_FONT"), "NotoSans-Bold.ttf,15");
         titleFont != nullptr)
     {
         hud->titleFont(titleFont);
@@ -2783,7 +2783,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
     }
     else
     {
-        auto labelFont = LoadFontHelper(renderer, config->fonts.labelFont, N_("DEFAULT_LABEL_FONT"), "DejaVuSans.ttf,9");
+        auto labelFont = LoadFontHelper(renderer, config->fonts.labelFont, N_("DEFAULT_LABEL_FONT"), "NotoSans-Regular.ttf,9");
         renderer->setFont(Renderer::FontStyle::Normal, labelFont == nullptr ? hud->font() : labelFont);
     }
 
