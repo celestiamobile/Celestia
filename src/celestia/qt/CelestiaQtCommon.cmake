@@ -46,6 +46,8 @@ function(GetQtSources _var_name)
     qttimetoolbar.h
     qttourguide.cpp
     qttourguide.h
+    steamintegration.cpp
+    steamintegration.h
     xbel.cpp
     xbel.h
   )

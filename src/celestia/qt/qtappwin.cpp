@@ -97,6 +97,7 @@
 #include "qtsolarsystembrowser.h"
 #include "qttimetoolbar.h"
 #include "qttourguide.h"
+#include "steamintegration.h"
 
 #ifdef _WIN32
 #include <QRect>
@@ -277,8 +278,11 @@ CelestiaAppWindow::init(const CelestiaCommandLineOptions& options)
     if (!options.configFileName.isEmpty())
         configFileName = QStringToPath(options.configFileName);
 
-    // Translate extras directories from QString to std::filesystem::path
-    std::vector<std::filesystem::path> extrasDirectories;
+    // Prepend any Steam Workshop content directories the user has subscribed
+    // to. Putting Workshop dirs ahead of the command-line --extrasdir entries
+    // means user-provided extras take precedence on catalog conflicts, which
+    // limits the blast radius if a Workshop mod redefines stock objects.
+    std::vector<std::filesystem::path> extrasDirectories = getSteamWorkshopAddonDirs();
     for (const auto& dir : options.extrasDirectories)
         extrasDirectories.push_back(QStringToPath(dir));
 
@@ -1742,6 +1746,17 @@ QMenu*
 CelestiaAppWindow::buildScriptsMenu()
 {
     std::vector<ScriptMenuItem> scripts = ScanScriptsDirectory("scripts", false);
+
+    // Append scripts from any subscribed Workshop items whose
+    // description.json declares type == "script".
+    for (const auto& workshopScriptDir : getSteamWorkshopScriptDirs())
+    {
+        auto workshopScripts = ScanScriptsDirectory(workshopScriptDir, false);
+        scripts.insert(scripts.end(),
+                       std::make_move_iterator(workshopScripts.begin()),
+                       std::make_move_iterator(workshopScripts.end()));
+    }
+
     if (scripts.empty())
         return nullptr;
 

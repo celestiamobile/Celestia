@@ -37,6 +37,7 @@
 #include "qtappwin.h"
 #include "qtcommandline.h"
 #include "qtgettext.h"
+#include "steamintegration.h"
 
 #ifdef ENABLE_NLS
 namespace
@@ -59,6 +60,8 @@ bindTextDomainUTF8(const char* domainName, const QString& directory)
 int main(int argc, char *argv[])
 {
     using namespace celestia::qt;
+
+    initializeSteam();
 
 #ifndef GL_ES
     QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
@@ -145,5 +148,6 @@ int main(int argc, char *argv[])
 
     int ret = app.exec();
     QDesktopServices::unsetUrlHandler("cel");
+    shutdownSteam();
     return ret;
 }
