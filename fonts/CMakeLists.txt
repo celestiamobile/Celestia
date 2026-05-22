@@ -1,4 +1,4 @@
-file(GLOB FONTS_SOURCES "*.ttf")
+file(GLOB FONTS_SOURCES "*.ttf" "*.ttc")
 
 install(
   FILES ${FONTS_SOURCES}

@@ -4134,6 +4134,18 @@ msgstr "正在加载数据文件..."
 msgid "LANGUAGE"
 msgstr "zh_CN"
 
+#: ../src/celestia/celestiacore.cpp:2754
+msgid "DEFAULT_MAIN_FONT"
+msgstr "NotoSansCJK-Regular.ttc,2,9"
+
+#: ../src/celestia/celestiacore.cpp:2760
+msgid "DEFAULT_TITLE_FONT"
+msgstr "NotoSansCJK-Bold.ttc,2,15"
+
+#: ../src/celestia/celestiacore.cpp:2786
+msgid "DEFAULT_LABEL_FONT"
+msgstr "NotoSansCJK-Regular.ttc,2,9"
+
 #: ../src/celestia/win32/winmain.cpp:648
 #, c++-format
 msgid "Could not load localized resources: {}\n"
