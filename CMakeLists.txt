@@ -71,6 +71,7 @@ option(ENABLE_FAST_MATH   "Build with unsafe fast-math compiller option (Default
 option(ENABLE_TESTS       "Enable unit tests? (Default: off)" OFF)
 option(ENABLE_GLES        "Build for OpenGL ES 3.0 instead of OpenGL 3.3 core (Default: off)" OFF)
 option(ENABLE_LTO         "Enable link time optimizations (Default: off)" OFF)
+option(ENABLE_STEAM       "Integrate the Steamworks SDK into the Qt6 frontend (Default: off)" OFF)
 option(USE_ICU            "Use ICU for UTF8 decoding for text rendering (Default: off)" OFF)
 option(USE_WIN_ICU        "Use Windows SDK's ICU implementation (Default: off)" OFF)
 option(USE_MESHOPTIMIZER  "Use meshoptimizer (Default: off)" OFF)

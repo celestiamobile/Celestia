@@ -19,6 +19,23 @@ add_executable(celestia-qt6 WIN32 ${CELQT6_SOURCES} ${CELQT6_RC_SRC})
 add_dependencies(celestia-qt6 celestia)
 target_link_libraries(celestia-qt6 PUBLIC Qt6::Widgets Qt6::OpenGLWidgets celestia)
 
+if(ENABLE_STEAM)
+  find_package(Steamworks REQUIRED)
+  target_link_libraries(celestia-qt6 PRIVATE Steamworks::Steamworks)
+  target_compile_definitions(celestia-qt6 PRIVATE USE_STEAM)
+  if(WIN32 AND Steamworks_RUNTIME_LIBRARY)
+    add_custom_command(TARGET celestia-qt6 POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${Steamworks_RUNTIME_LIBRARY}"
+        "$<TARGET_FILE_DIR:celestia-qt6>"
+    )
+    install(FILES "${Steamworks_RUNTIME_LIBRARY}"
+      DESTINATION ${CMAKE_INSTALL_BINDIR}
+      COMPONENT qt6gui
+    )
+  endif()
+endif()
+
 set_target_properties(celestia-qt6 PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
 if(APPLE)
