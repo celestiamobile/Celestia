@@ -20,8 +20,17 @@
 class Renderer;
 class TextureFont;
 
+enum class FontWeight
+{
+    Regular,
+    Bold,
+};
+
 std::shared_ptr<TextureFont>
-LoadTextureFont(const Renderer*, const std::filesystem::path&, std::optional<int> index = std::nullopt, std::optional<int> size = std::nullopt);
+LoadTextureFont(const Renderer*, const std::filesystem::path&,
+                std::optional<int> index = std::nullopt,
+                std::optional<int> size = std::nullopt,
+                FontWeight weight = FontWeight::Regular);
 
 struct TextureFontPrivate;
 class TextureFont
@@ -59,5 +68,6 @@ private:
     std::unique_ptr<TextureFontPrivate> impl;
 
     friend std::shared_ptr<TextureFont>
-    LoadTextureFont(const Renderer*, const std::filesystem::path&, std::optional<int>, std::optional<int>);
+    LoadTextureFont(const Renderer*, const std::filesystem::path&,
+                    std::optional<int>, std::optional<int>, FontWeight);
 };

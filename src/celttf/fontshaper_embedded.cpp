@@ -204,11 +204,15 @@ ftLibrary()
 } // anonymous namespace
 
 std::unique_ptr<PlatformFontEngine>
-createPlatformFontEngine(const std::filesystem::path& primaryFont, int faceIndex)
+createPlatformFontEngine(const std::filesystem::path& primaryFont, int faceIndex, bool /*bold*/)
 {
-    // Embedded backend has no concept of "system default font"; the caller
-    // is expected to chain to a bundled font (DejaVuSans) when we return
-    // nullptr for an empty path.
+    // bold is ignored: the embedded backend has no font discovery and
+    // cannot locate a matching bold face. Caller must pass the explicit
+    // bold font file (e.g. "DejaVuSans-Bold.ttf").
+    //
+    // The embedded backend has no concept of "system default font"; the
+    // caller is expected to chain to a bundled font (DejaVuSans) when we
+    // return nullptr for an empty path.
     if (primaryFont.empty())
         return nullptr;
 

@@ -92,8 +92,16 @@ public:
 // base font from which the platform's fallback cascade extends (CoreText
 // CTFontCreateForString base font, DirectWrite text-format default, or the
 // primary FT_Face on FreeType-only platforms).
+//
+// When bold is true the backend resolves a bold variant: CoreText uses
+// kCTFontUIFontEmphasizedSystem (empty path) or
+// CTFontDescriptorCreateCopyWithSymbolicTraits with kCTFontBoldTrait
+// (file path); DirectWrite will pass DWRITE_FONT_WEIGHT_BOLD; the embedded
+// FreeType backend ignores the flag (caller supplies a bold file directly,
+// e.g. "DejaVuSans-Bold.ttf").
 std::unique_ptr<PlatformFontEngine>
 createPlatformFontEngine(const std::filesystem::path& primaryFont,
-                         int                          faceIndex);
+                         int                          faceIndex,
+                         bool                         bold = false);
 
 } // namespace celestia::text

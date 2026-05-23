@@ -336,7 +336,7 @@ CoreTextFontEngine::metrics(float emSizePx)
 } // anonymous namespace
 
 std::unique_ptr<PlatformFontEngine>
-createPlatformFontEngine(const std::filesystem::path& primaryFont, int faceIndex)
+createPlatformFontEngine(const std::filesystem::path& primaryFont, int faceIndex, bool bold)
 {
     CTFontDescriptorRef descriptor = nullptr;
 
@@ -344,7 +344,9 @@ createPlatformFontEngine(const std::filesystem::path& primaryFont, int faceIndex
     {
         // System UI font; size 0 picks the default and the size is
         // overridden per shape() call via CTFontCreateWithFontDescriptor.
-        CTFontRef systemFont = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, 0.0, nullptr);
+        const CTFontUIFontType uiType = bold ? kCTFontUIFontEmphasizedSystem
+                                             : kCTFontUIFontSystem;
+        CTFontRef systemFont = CTFontCreateUIFontForLanguage(uiType, 0.0, nullptr);
         if (systemFont != nullptr)
         {
             descriptor = CTFontCopyFontDescriptor(systemFont);
@@ -376,6 +378,22 @@ createPlatformFontEngine(const std::filesystem::path& primaryFont, int faceIndex
                     }
                     CFRelease(descriptors);
                 }
+            }
+        }
+
+        // If a bold variant of this family is registered (e.g. asking for
+        // bold of "DejaVuSans" when "DejaVuSans-Bold" is also installed),
+        // CoreText resolves it via the symbolic-traits descriptor copy.
+        // Falls through with the original descriptor if no bold variant
+        // is available — that's preferable to refusing to load the font.
+        if (bold && descriptor != nullptr)
+        {
+            CTFontDescriptorRef boldDesc = CTFontDescriptorCreateCopyWithSymbolicTraits(
+                descriptor, kCTFontBoldTrait, kCTFontBoldTrait);
+            if (boldDesc != nullptr)
+            {
+                CFRelease(descriptor);
+                descriptor = boldDesc;
             }
         }
     }

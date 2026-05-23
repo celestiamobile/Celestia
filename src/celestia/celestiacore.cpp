@@ -2668,7 +2668,8 @@ LoadFontHelper(const Renderer* renderer,
                const std::filesystem::path& configPath,
                const char* defaultKey,
                const std::filesystem::path& defaultPath,
-               int defaultSize = 0)
+               int defaultSize = 0,
+               FontWeight defaultWeight = FontWeight::Regular)
 {
     if (!configPath.empty())
     {
@@ -2687,7 +2688,8 @@ LoadFontHelper(const Renderer* renderer,
     // text engine, so we fall through to the translated/bundled path
     // below.
     if (auto font = LoadTextureFont(renderer, std::filesystem::path{}, std::nullopt,
-                                    defaultSize > 0 ? std::optional<int>{defaultSize} : std::nullopt);
+                                    defaultSize > 0 ? std::optional<int>{defaultSize} : std::nullopt,
+                                    defaultWeight);
         font != nullptr)
         return font;
 
@@ -2768,7 +2770,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
     else
         std::cout << _("Error loading font; text will not be visible.\n");
 
-    if (auto titleFont = LoadFontHelper(renderer, config->fonts.titleFont, N_("DEFAULT_TITLE_FONT"), "DejaVuSans-Bold.ttf,15");
+    if (auto titleFont = LoadFontHelper(renderer, config->fonts.titleFont, N_("DEFAULT_TITLE_FONT"), "DejaVuSans-Bold.ttf,15", 15, FontWeight::Bold);
         titleFont != nullptr)
     {
         hud->titleFont(titleFont);

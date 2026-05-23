@@ -96,6 +96,7 @@ struct FontDescriptor
     float                 scale{1.0f};
     int                   screenDpi{96};
     std::string           locale;
+    FontWeight            weight{FontWeight::Regular};
 };
 
 // Resolve the current UI locale via gettext: _("LANGUAGE") evaluates to the
@@ -159,7 +160,7 @@ struct TextureFontPrivate
     TextureFontPrivate& operator=(const TextureFontPrivate&)   = delete;
     TextureFontPrivate& operator=(TextureFontPrivate&&)        = default;
 
-    bool                       loadFont(const std::filesystem::path& filename, int index, int size);
+    bool                       loadFont(const std::filesystem::path& filename, int index, int size, FontWeight weight);
     std::pair<float, float>    render(std::u16string_view line, float x, float y);
     int                        getWidth(std::u16string_view line);
 
@@ -231,7 +232,7 @@ TextureFontPrivate::TextureFontPrivate(const Renderer* renderer) : m_renderer(re
 }
 
 bool
-TextureFontPrivate::loadFont(const std::filesystem::path& filename, int index, int size)
+TextureFontPrivate::loadFont(const std::filesystem::path& filename, int index, int size, FontWeight weight)
 {
     m_descriptor.path      = filename;
     m_descriptor.index     = index;
@@ -239,10 +240,11 @@ TextureFontPrivate::loadFont(const std::filesystem::path& filename, int index, i
     m_descriptor.scale     = m_renderer->getTextScaleFactor();
     m_descriptor.screenDpi = m_renderer->getScreenDpi();
     m_descriptor.locale    = currentLocale();
+    m_descriptor.weight    = weight;
 
     m_emSizePx = computeEmSizePx(m_descriptor.scale, m_descriptor.pointSize, m_descriptor.screenDpi);
 
-    m_engine = celestia::text::createPlatformFontEngine(filename, index > 0 ? index : 0);
+    m_engine = celestia::text::createPlatformFontEngine(filename, index > 0 ? index : 0, weight == FontWeight::Bold);
     if (m_engine == nullptr)
         return false;
 
@@ -593,7 +595,7 @@ TextureFont::update()
         return false;
 
     auto newImpl = std::make_unique<TextureFontPrivate>(impl->m_renderer);
-    if (newImpl->loadFont(impl->m_descriptor.path, impl->m_descriptor.index, impl->m_descriptor.pointSize))
+    if (newImpl->loadFont(impl->m_descriptor.path, impl->m_descriptor.index, impl->m_descriptor.pointSize, impl->m_descriptor.weight))
     {
         impl = std::move(newImpl);
         return true;
@@ -612,10 +614,14 @@ struct FontCacheKey
     std::filesystem::path filename;
     int                   index;
     int                   size;
+    FontWeight            weight;
 
     bool operator==(const FontCacheKey& other) const
     {
-        return filename == other.filename && index == other.index && size == other.size;
+        return filename == other.filename
+               && index == other.index
+               && size == other.size
+               && weight == other.weight;
     }
 };
 
@@ -623,7 +629,10 @@ template<> struct std::hash<FontCacheKey>
 {
     std::size_t operator()(const FontCacheKey& k) const
     {
-        return std::hash<std::string>()(k.filename.string()) ^ std::hash<int>()(k.index) ^ std::hash<int>()(k.size);
+        return std::hash<std::string>()(k.filename.string())
+               ^ std::hash<int>()(k.index)
+               ^ std::hash<int>()(k.size)
+               ^ std::hash<int>()(static_cast<int>(k.weight));
     }
 };
 
@@ -633,7 +642,8 @@ std::shared_ptr<TextureFont>
 LoadTextureFont(const Renderer*               r,
                 const std::filesystem::path&  filename,
                 std::optional<int>            index,
-                std::optional<int>            size)
+                std::optional<int>            size,
+                FontWeight                    weight)
 {
     static FontCache* fontCache = nullptr;
     if (fontCache == nullptr)
@@ -649,12 +659,12 @@ LoadTextureFont(const Renderer*               r,
     const int finalIndex = index.value_or(parsedIndex);
     const int finalSize  = size.value_or(parsedSize);
 
-    std::weak_ptr<TextureFont>&  font = (*fontCache)[{ path, finalIndex, finalSize }];
+    std::weak_ptr<TextureFont>&  font = (*fontCache)[{ path, finalIndex, finalSize, weight }];
     std::shared_ptr<TextureFont> ret  = font.lock();
     if (ret == nullptr)
     {
         ret = std::make_shared<TextureFont>(r);
-        if (!ret->impl->loadFont(path, finalIndex, finalSize))
+        if (!ret->impl->loadFont(path, finalIndex, finalSize, weight))
         {
             GetLogger()->error("Could not load font at path: {} index: {} size: {}\n", path, finalIndex, finalSize);
             return nullptr;
