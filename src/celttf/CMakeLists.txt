@@ -6,6 +6,8 @@ set(CELTTF_SOURCES
 
 if(APPLE)
   list(APPEND CELTTF_SOURCES fontshaper_apple.mm)
+elseif(ANDROID)
+  list(APPEND CELTTF_SOURCES fontshaper_android.cpp)
 else()
   list(APPEND CELTTF_SOURCES fontshaper_embedded.cpp)
 endif()
@@ -18,4 +20,7 @@ if(APPLE)
     "-framework CoreGraphics"
     "-framework CoreText"
   )
+elseif(ANDROID)
+  # libandroid provides AFontMatcher_* (API 29+) and android_get_device_api_level().
+  target_link_libraries(celttf PUBLIC android)
 endif()
