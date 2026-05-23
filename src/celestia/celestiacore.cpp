@@ -2667,7 +2667,8 @@ static std::shared_ptr<TextureFont>
 LoadFontHelper(const Renderer* renderer,
                const std::filesystem::path& configPath,
                const char* defaultKey,
-               const std::filesystem::path& defaultPath)
+               const std::filesystem::path& defaultPath,
+               int defaultSize = 0)
 {
     if (!configPath.empty())
     {
@@ -2679,6 +2680,16 @@ LoadFontHelper(const Renderer* renderer,
             return font;
         }
     }
+
+    // Try the platform engine's system default (CoreText on Apple,
+    // DirectWrite on Windows, AFontMatcher on Android API >= 29).
+    // LoadTextureFont returns nullptr on platforms without a system
+    // text engine, so we fall through to the translated/bundled path
+    // below.
+    if (auto font = LoadTextureFont(renderer, std::filesystem::path{}, std::nullopt,
+                                    defaultSize > 0 ? std::optional<int>{defaultSize} : std::nullopt);
+        font != nullptr)
+        return font;
 
     // Reading default font as fallback
     const char* translated = _(defaultKey);
@@ -2751,7 +2762,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
         setFaintestAutoMag();
     }
 
-    auto mainFont = LoadFontHelper(renderer, config->fonts.mainFont, N_("DEFAULT_MAIN_FONT"), "DejaVuSans.ttf,9");
+    auto mainFont = LoadFontHelper(renderer, config->fonts.mainFont, N_("DEFAULT_MAIN_FONT"), "DejaVuSans.ttf,9", 9);
     if (mainFont != nullptr)
         hud->font(mainFont);
     else
