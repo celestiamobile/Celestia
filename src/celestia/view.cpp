@@ -276,11 +276,7 @@ View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, in
     if (currentSamples < 1)
         currentSamples = 1;
 
-#ifdef GL_ES
-    int samplesToRequest = celestia::gl::checkVersion(celestia::gl::GLES_3_0) ? currentSamples : 1;
-#else
     int samplesToRequest = currentSamples;
-#endif
 
     if (static_cast<int>(fbos.size()) != count)
         fbos.resize(count);

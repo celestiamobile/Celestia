@@ -137,18 +137,8 @@ FramebufferObject::generateColorTexture()
     // Set the texture dimensions
 #ifdef GL_ES
     GLenum format = GL_RGBA;
-    GLint internalFormat;
-    GLenum type;
-    if (celestia::gl::checkVersion(celestia::gl::GLES_3_0))
-    {
-        internalFormat = m_useFloatColor ? GL_RGBA16F : GL_RGBA8;
-        type = m_useFloatColor ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE;
-    }
-    else
-    {
-        internalFormat = GL_RGBA;
-        type = m_useFloatColor ? GL_HALF_FLOAT_OES : GL_UNSIGNED_BYTE;
-    }
+    GLint internalFormat = m_useFloatColor ? GL_RGBA16F : GL_RGBA8;
+    GLenum type = m_useFloatColor ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE;
 #else
     GLint internalFormat = m_useFloatColor ? GL_RGBA16F : GL_RGB8;
     GLenum format = m_useFloatColor ? GL_RGBA : GL_RGB;
