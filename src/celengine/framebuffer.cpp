@@ -184,18 +184,8 @@ FramebufferObject::generateDepthTexture()
 
     // Set the texture dimensions
 #ifdef GL_ES
-    GLint internalFormat;
-    GLenum type;
-    if (celestia::gl::checkVersion(celestia::gl::GLES_3_0))
-    {
-        internalFormat = GL_DEPTH_COMPONENT24;
-        type = GL_UNSIGNED_INT;
-    }
-    else
-    {
-        internalFormat = GL_DEPTH_COMPONENT;
-        type = celestia::gl::OES_depth24 ? GL_UNSIGNED_INT :  GL_UNSIGNED_SHORT;
-    }
+    GLint internalFormat = GL_DEPTH_COMPONENT24;
+    GLenum type = GL_UNSIGNED_INT;
 #else
     GLint internalFormat = GL_DEPTH_COMPONENT24;
     GLenum type = GL_UNSIGNED_INT;
