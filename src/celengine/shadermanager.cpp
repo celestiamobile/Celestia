@@ -128,7 +128,7 @@ uniform mat4 MVPMatrix;
 invariant gl_Position;
 )glsl"sv;
 
-constexpr std::string_view GeomHeaderGL3 = VertexHeader;
+constexpr std::string_view GeomHeader = VertexHeader;
 
 constexpr std::string_view VPFunctionFishEye = R"glsl(
 vec4 calc_vp(vec4 in_Position)
@@ -2303,12 +2303,6 @@ buildParticleFragmentShader(const ShaderProperties& props)
     return GLFragmentShader{};
 }
 
-enum class GLVersion
-{
-    GL2,
-    GL3,
-};
-
 std::shared_ptr<CelestiaGLProgram>
 buildProgram(const ShaderProperties& props, bool fisheyeEnabled)
 {
@@ -2366,7 +2360,7 @@ buildProgram(const ShaderProperties& props, bool fisheyeEnabled)
 }
 
 std::shared_ptr<CelestiaGLProgram>
-buildProgram(std::string_view vs, std::string_view fs, GLVersion /* glVersion */, bool fisheyeEnabled)
+buildProgram(std::string_view vs, std::string_view fs, bool fisheyeEnabled)
 {
     std::string vsSrc = fmt::format("{}{}{}{}{}\n", VersionHeader, CommonHeader, VertexHeader, VPFunction(fisheyeEnabled), vs);
     std::string fsSrc = fmt::format("{}{}{}{}\n", VersionHeader, CommonHeader, FragmentHeader, fs);
@@ -2402,23 +2396,11 @@ buildProgram(std::string_view vs, std::string_view fs, GLVersion /* glVersion */
 }
 
 std::shared_ptr<CelestiaGLProgram>
-buildProgram(std::string_view vs, std::string_view fs, bool fisheyeEnabled)
-{
-    return ::buildProgram(vs, fs, GLVersion::GL2, fisheyeEnabled);
-}
-
-std::shared_ptr<CelestiaGLProgram>
-buildProgramGL3(std::string_view vs, std::string_view fs, bool fisheyeEnabled)
-{
-    return ::buildProgram(vs, fs, GLVersion::GL3, fisheyeEnabled);
-}
-
-std::shared_ptr<CelestiaGLProgram>
-buildProgramGL3(std::string_view vs,
-                std::string_view gs,
-                std::string_view fs,
-                const ShaderManager::GeomShaderParams* params,
-                bool fisheyeEnabled)
+buildProgramGeom(std::string_view vs,
+                 std::string_view gs,
+                 std::string_view fs,
+                 const ShaderManager::GeomShaderParams* params,
+                 bool fisheyeEnabled)
 {
     std::string layout;
     if (params)
@@ -2430,7 +2412,7 @@ buildProgramGL3(std::string_view vs,
     }
 
     auto vsSrc = fmt::format("{}{}{}{}\n", VersionHeaderGeom, CommonHeader, VertexHeader, vs);
-    auto gsSrc = fmt::format("{}{}{}{}{}{}\n", VersionHeaderGeom, CommonHeader, layout, GeomHeaderGL3, VPFunction(fisheyeEnabled), gs);
+    auto gsSrc = fmt::format("{}{}{}{}{}{}\n", VersionHeaderGeom, CommonHeader, layout, GeomHeader, VPFunction(fisheyeEnabled), gs);
     auto fsSrc = fmt::format("{}{}{}{}\n", VersionHeaderGeom, CommonHeader, FragmentHeader, fs);
 
     DumpVSSource(vsSrc);
@@ -2679,43 +2661,17 @@ ShaderManager::getShader(const ShaderProperties& props)
 }
 
 CelestiaGLProgram*
-ShaderManager::getShader(StaticShader staticShader)
+ShaderManager::getShader(StaticShader staticShader, const GeomShaderParams* gsParams)
 {
     auto& shader = m_staticShaders[static_cast<std::size_t>(staticShader)];
     if (!shader)
-        shader = loadShader(staticShader);
+        shader = loadShader(staticShader, gsParams);
 
     return shader.get();
 }
 
 std::shared_ptr<CelestiaGLProgram>
-ShaderManager::loadShader(StaticShader staticShader)
-{
-    auto name = StaticShaderBaseNames[static_cast<std::size_t>(staticShader)];
-    auto vs = ReadShaderFile(ShaderDirectory / std::filesystem::u8path(fmt::format("{}_vert.glsl", name)));
-    if (vs.empty())
-        return getErrorProgram();
-
-    auto fs = ReadShaderFile(ShaderDirectory / std::filesystem::u8path(fmt::format("{}_frag.glsl", name)));
-    if (fs.empty())
-        return getErrorProgram();
-
-    auto result = buildProgram(vs, fs, m_fisheyeEnabled);
-    return result ? result : getErrorProgram();
-}
-
-CelestiaGLProgram*
-ShaderManager::getShaderGL3(StaticShader staticShader, const GeomShaderParams* gsParams)
-{
-    auto& shader = m_staticShaders[static_cast<std::size_t>(staticShader)];
-    if (!shader)
-        shader = loadShaderGL3(staticShader, gsParams);
-
-    return shader.get();
-}
-
-std::shared_ptr<CelestiaGLProgram>
-ShaderManager::loadShaderGL3(StaticShader staticShader, const GeomShaderParams* gsParams)
+ShaderManager::loadShader(StaticShader staticShader, const GeomShaderParams* gsParams)
 {
     auto name = StaticShaderBaseNames[static_cast<std::size_t>(staticShader)];
     auto vs = ReadShaderFile(ShaderDirectory / std::filesystem::u8path(fmt::format("{}_vert.glsl", name)));
@@ -2733,11 +2689,11 @@ ShaderManager::loadShaderGL3(StaticShader staticShader, const GeomShaderParams* 
         if (gs.empty())
             return getErrorProgram();
 
-        result = buildProgramGL3(vs, gs, fs, gsParams, m_fisheyeEnabled);
+        result = buildProgramGeom(vs, gs, fs, gsParams, m_fisheyeEnabled);
     }
     else
     {
-        result = buildProgramGL3(vs, fs, m_fisheyeEnabled);
+        result = buildProgram(vs, fs, m_fisheyeEnabled);
     }
 
     return result ? result : getErrorProgram();
