@@ -5741,7 +5741,27 @@ Renderer::setPipelineState(const Renderer::PipelineState &ps) noexcept
     }
     if (ps.blending && (ps.blendFunc.src != m_pipelineState.blendFunc.src || ps.blendFunc.dst != m_pipelineState.blendFunc.dst))
     {
-        glBlendFuncSeparate(ps.blendFunc.src, ps.blendFunc.dst, GL_ZERO, GL_ONE);
+        // Alpha-channel handling for compositing:
+        // - In normal opaque rendering the destination alpha is irrelevant
+        //   (framebuffer is presented opaque), so historical behavior is
+        //   (GL_ZERO, GL_ONE): never touch dst.a.
+        // - With mixed immersion (passthrough), the XR compositor uses dst.a
+        //   to blend against the real world, so translucent draws must
+        //   accumulate coverage. For standard alpha-blends we use
+        //   (GL_ONE, GL_ONE_MINUS_SRC_ALPHA). For *additive* blends
+        //   (dst factor == GL_ONE, e.g. star glare billboards, comet tails)
+        //   we deliberately preserve dst.a so we don't paint the rectangular
+        //   billboard footprint into alpha — only RGB is added, so the glare
+        //   correctly shows where something opaque has already been drawn
+        //   (e.g. a planet) and stays invisible against passthrough.
+        GLenum srcAlpha = GL_ZERO;
+        GLenum dstAlpha = GL_ONE;
+        if (mixedImmersion && ps.blendFunc.dst != GL_ONE)
+        {
+            srcAlpha = GL_ONE;
+            dstAlpha = GL_ONE_MINUS_SRC_ALPHA;
+        }
+        glBlendFuncSeparate(ps.blendFunc.src, ps.blendFunc.dst, srcAlpha, dstAlpha);
         m_pipelineState.blendFunc = ps.blendFunc;
     }
     if (ps.depthTest != m_pipelineState.depthTest)
