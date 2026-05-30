@@ -14,7 +14,6 @@
 #include "qtselectionpopup.h"
 #include "qtdateutil.h"
 
-#include <array>
 #include <cassert>
 #include <cmath>
 #include <string>
@@ -28,11 +27,14 @@
 #include <QString>
 
 #include <celengine/body.h>
+#include <celengine/frametree.h>
 #include <celengine/marker.h>
 #include <celengine/render.h>
 #include <celengine/selection.h>
 #include <celengine/simulation.h>
 #include <celengine/solarsys.h>
+#include <celengine/timeline.h>
+#include <celengine/timelinephase.h>
 #include <celestia/celestiacore.h>
 #include <celestia/helper.h>
 #include <celutil/gettext.h>
@@ -240,44 +242,28 @@ SelectionPopup::createMarkMenu()
 {
     using namespace celestia;
 
-    constexpr std::array<MarkerRepresentation::Symbol, 12> MARKER_SYMBOLS{
-        MarkerRepresentation::Diamond,
-        MarkerRepresentation::Triangle,
-        MarkerRepresentation::Square,
-        MarkerRepresentation::FilledSquare,
-        MarkerRepresentation::Plus,
-        MarkerRepresentation::X,
-        MarkerRepresentation::LeftArrow,
-        MarkerRepresentation::RightArrow,
-        MarkerRepresentation::UpArrow,
-        MarkerRepresentation::DownArrow,
-        MarkerRepresentation::Circle,
-        MarkerRepresentation::Disk,
-    };
-
-    const std::array<const char*, 12> MARKER_NAMES{
-        gettext_noop("Diamond"),
-        gettext_noop("Triangle"),
-        gettext_noop("Square"),
-        gettext_noop("Filled Square"),
-        gettext_noop("Plus"),
-        gettext_noop("X"),
-        gettext_noop("Left Arrow"),
-        gettext_noop("Right Arrow"),
-        gettext_noop("Up Arrow"),
-        gettext_noop("Down Arrow"),
-        gettext_noop("Circle"),
-        gettext_noop("Disk"),
-    };
-
     QMenu* markMenu = new QMenu(_("&Mark"));
-    for (int i = 0; i < (int) (sizeof(MARKER_NAMES) / sizeof(MARKER_NAMES[0])); i++)
-    {
-        QAction* act = new QAction(_(MARKER_NAMES[i]), markMenu);
-        act->setData((int) MARKER_SYMBOLS[i]);
+
+    auto addSymbol = [&](const QString& name, MarkerRepresentation::Symbol symbol) {
+        QAction* act = new QAction(name, markMenu);
+        act->setData(static_cast<int>(symbol));
         connect(act, SIGNAL(triggered()), this, SLOT(slotMark()));
         markMenu->addAction(act);
-    }
+    };
+
+    addSymbol(_("Diamond"),       MarkerRepresentation::Diamond);
+    addSymbol(_("Triangle"),      MarkerRepresentation::Triangle);
+    addSymbol(_("Square"),        MarkerRepresentation::Square);
+    addSymbol(_("Filled Square"), MarkerRepresentation::FilledSquare);
+    addSymbol(_("Plus"),          MarkerRepresentation::Plus);
+    addSymbol(_("X"),             MarkerRepresentation::X);
+    addSymbol(_("Left Arrow"),    MarkerRepresentation::LeftArrow);
+    addSymbol(_("Right Arrow"),   MarkerRepresentation::RightArrow);
+    addSymbol(_("Up Arrow"),      MarkerRepresentation::UpArrow);
+    addSymbol(_("Down Arrow"),    MarkerRepresentation::DownArrow);
+    addSymbol(_("Circle"),        MarkerRepresentation::Circle);
+    addSymbol(_("Disk"),          MarkerRepresentation::Disk);
+    addSymbol(_("Crosshair"),     MarkerRepresentation::Crosshair);
 
     return markMenu;
 }
@@ -320,7 +306,7 @@ SelectionPopup::createReferenceVectorMenu()
     connect(spinVectorAction, SIGNAL(triggered()), this, SLOT(slotToggleSpinVector()));
     refVecMenu->addAction(spinVectorAction);
 
-    Selection center = body->getOrbitFrame(appCore->getSimulation()->getTime())->getCenter();
+    Selection center = body->getTimeline()->findPhase(appCore->getSimulation()->getTime()).getFrameTree()->getOwner();
     if (center.body() != nullptr)
     {
         // Only show the frame center menu item if the selection orbits another

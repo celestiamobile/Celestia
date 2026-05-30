@@ -385,12 +385,8 @@ Body::getTemperature(double time) const
     if (temperature > 0)
         return temperature;
 
-    const PlanetarySystem* system = getSystem();
-    if (system == nullptr)
-        return 0;
-
-    const Star* sun = system->getStar();
-    if (sun == nullptr)
+    const Star* sun = timeline->findPhase(time).getFrameTree()->getRoot(time);
+    if (!sun)
         return 0;
 
     float temp = 0.0f;
@@ -590,9 +586,9 @@ Body::getPosition(double tdb) const
         Eigen::Vector3d p = phase.orbit()->positionAtTime(tdb);
         const ReferenceFrame* frame = phase.orbitFrame().get();
         position += frame->getOrientation(tdb).conjugate() * p;
-        if (auto center = frame->getCenter(); center.getType() == SelectionType::Body)
-            body = center.body();
-        else
+        Selection center = phase.getFrameTree()->getOwner();
+        body = center.body();
+        if (!body)
             return center.getPosition(tdb).offsetKm(position);
     }
 }
@@ -616,11 +612,11 @@ Body::getVelocity(double tdb) const
     const ReferenceFrame* orbitFrame = phase.orbitFrame().get();
 
     Eigen::Vector3d v = phase.orbit()->velocityAtTime(tdb);
-    v = orbitFrame->getOrientation(tdb).conjugate() * v + orbitFrame->getCenter().getVelocity(tdb);
+    v = orbitFrame->getOrientation(tdb).conjugate() * v + phase.getFrameTree()->getOwner().getVelocity(tdb);
 
     if (!orbitFrame->isInertial())
     {
-        Eigen::Vector3d r = getPosition(tdb).offsetFromKm(orbitFrame->getCenter().getPosition(tdb));
+        Eigen::Vector3d r = getPosition(tdb).offsetFromKm(phase.getFrameTree()->getOwner().getPosition(tdb));
         v += orbitFrame->getAngularVelocity(tdb).cross(r);
     }
 
@@ -673,7 +669,7 @@ Body::getAstrocentricPosition(double tdb) const
         Eigen::Vector3d p = phase.orbit()->positionAtTime(tdb);
         const ReferenceFrame* frame = phase.orbitFrame().get();
         position += frame->getOrientation(tdb).conjugate() * p;
-        body = frame->getCenter().body();
+        body = phase.getFrameTree()->getOwner().body();
     } while (body);
 
     return position;
