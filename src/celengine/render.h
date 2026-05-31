@@ -273,6 +273,11 @@ class Renderer
         m_projectionPtr = &m_projMatrix;
     }
 
+    const Eigen::Matrix4f& getDefaultProjectionMatrix() const
+    {
+        return m_projMatrix;
+    }
+
     void buildProjectionMatrix(Eigen::Matrix4f &mat, float nearZ, float farZ, float zoom) const;
 
     void setStarStyle(StarStyle);

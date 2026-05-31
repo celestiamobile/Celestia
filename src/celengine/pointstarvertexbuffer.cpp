@@ -78,7 +78,12 @@ void PointStarVertexBuffer::makeCurrent()
     setupVertexArrayObject();
 
     m_prog->use();
-    m_prog->setMVPMatrices(m_renderer.getCurrentProjectionMatrix(), m_renderer.getCurrentModelViewMatrix());
+    // Use the whole-scene projection here.  The per-interval projections set
+    // by renderSolarSystemObjects can have a near plane farther than a close
+    // star (for instance, when comets in the renderList push the partition's
+    // near plane out to 20 AU while Sol is only 8 AU away), which would clip
+    // the star's single center vertex and discard the entire point sprite.
+    m_prog->setMVPMatrices(m_renderer.getDefaultProjectionMatrix(), m_renderer.getCurrentModelViewMatrix());
     if (m_pointSizeFromVertex)
     {
         m_prog->samplerParam("starTex") = 0;
