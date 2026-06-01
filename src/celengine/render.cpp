@@ -2527,12 +2527,16 @@ void Renderer::renderObject(const Vector3f& pos,
                     {
                         GetLogger()->info("Loaded Bruneton atmosphere LUT {}\n",
                                           atmosphere->brunetonLUTFile.string());
+                        std::fprintf(stderr, "[atm] Loaded Bruneton LUT %s\n",
+                                     atmosphere->brunetonLUTFile.string().c_str());
                         atmosphere->brunetonResource = std::move(resource);
                     }
                     else
                     {
                         GetLogger()->error("Failed to upload Bruneton atmosphere LUT {}\n",
                                            atmosphere->brunetonLUTFile.string());
+                        std::fprintf(stderr, "[atm] FAILED upload %s\n",
+                                     atmosphere->brunetonLUTFile.string().c_str());
                         atmosphere->brunetonLUTFile.clear();
                     }
                 }
@@ -2540,6 +2544,8 @@ void Renderer::renderObject(const Vector3f& pos,
                 {
                     GetLogger()->error("Failed to load Bruneton atmosphere LUT {}\n",
                                        atmosphere->brunetonLUTFile.string());
+                    std::fprintf(stderr, "[atm] FAILED load %s\n",
+                                 atmosphere->brunetonLUTFile.string().c_str());
                     atmosphere->brunetonLUTFile.clear();
                 }
             }
@@ -2569,7 +2575,12 @@ void Renderer::renderObject(const Vector3f& pos,
                     fp.camera_km        = ls.eyePos_obj * radius;
                     fp.sun_direction    = ls.lights[0].direction_obj.normalized();
                     fp.white_point      = Eigen::Vector3f::Ones();
-                    fp.exposure         = 10.0f;
+                    // GetSkyLuminance returns values pre-multiplied by
+                    // SKY_SPECTRAL_RADIANCE_TO_LUMINANCE (~10^5), so the
+                    // .atm-baked spectral radiances (~10^-2) come out
+                    // ~10^3 cd/m². Drop exposure accordingly so the
+                    // tone-map (1-exp(-x)) doesn't immediately saturate.
+                    fp.exposure         = 1.0e-4f;
 
                     PipelineState ps;
                     ps.blending  = true;
