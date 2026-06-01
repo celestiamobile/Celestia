@@ -21,6 +21,8 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
+#include <vector>
 
 #include "brunetonatmosphere.h"
 
@@ -113,5 +115,22 @@ static_assert(sizeof(AtmFileHeader) ==
               sizeof(Std140AtmosphereParameters) +
               32 /*two padded vec3s*/,
               "AtmFileHeader layout drift");
+
+// Raw decoded contents of a .atm file. The four LUT vectors hold tightly
+// packed RGBA32F texels in row-major order (x fastest, then y, then z
+// for 3-D). `single_mie_scattering` is empty when the file is combined.
+struct AtmFileData
+{
+    AtmFileHeader      header{};
+    std::vector<float> transmittance;
+    std::vector<float> scattering;
+    std::vector<float> single_mie_scattering;
+    std::vector<float> irradiance;
+};
+
+// Read and validate a .atm file from disk. On failure, logs via
+// GetLogger() and returns false; the partial contents of `out` are
+// unspecified. On success, every required LUT vector is populated.
+bool LoadAtmFile(const std::filesystem::path& path, AtmFileData& out);
 
 } // namespace celestia::engine
