@@ -5,6 +5,7 @@ namespace celestia::render
 class AsterismRenderer;
 class AtmosphereRenderer;
 class BoundariesRenderer;
+class BrunetonAtmosphereRenderer;
 class CometRenderer;
 class EclipticLineRenderer;
 class GalaxyRenderer;
