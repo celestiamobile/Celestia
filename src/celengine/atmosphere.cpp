@@ -17,6 +17,13 @@
 #include "brunetonatmosphere.h"
 #include "atmfile.h"
 
+#include <celrender/brunetonatmosphereresource.h>
+
+Atmosphere::Atmosphere() = default;
+Atmosphere::~Atmosphere() = default;
+Atmosphere::Atmosphere(Atmosphere&&) noexcept = default;
+Atmosphere& Atmosphere::operator=(Atmosphere&&) noexcept = default;
+
 #ifndef HAVE_CONSTEXPR_CMATH
 #include <cmath>
 
