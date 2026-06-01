@@ -29,7 +29,8 @@ class LightingState;
 
 enum class StaticShader
 {
-    Comet = 0,
+    Atmosphere = 0,
+    Comet,
     Crosshair,
     Depth,
     Galaxy,
