@@ -15,6 +15,7 @@
 // header itself has no further dependencies on the legacy Atmosphere
 // struct above.
 #include "brunetonatmosphere.h"
+#include "atmfile.h"
 
 #ifndef HAVE_CONSTEXPR_CMATH
 #include <cmath>
