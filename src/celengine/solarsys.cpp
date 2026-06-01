@@ -1286,11 +1286,11 @@ void ReadAtmosphere(Body* body,
     if (auto lutFile = GetFilename(*atmosData, "LUTFile"sv, "Invalid filename in LUTFile\n");
         lutFile.has_value())
     {
-        // Bruneton .atm files ship under data/atmospheres/. Resolve
-        // relative to the ssc file's directory if not absolute.
+        // Bruneton .atm files ship under <content-root>/atmospheres/.
+        // Resolve bare names there; absolute paths pass through.
         std::filesystem::path resolved = *lutFile;
         if (resolved.is_relative())
-            resolved = path / resolved;
+            resolved = std::filesystem::path("atmospheres") / resolved;
         atmosphere->brunetonLUTFile = std::move(resolved);
     }
 
