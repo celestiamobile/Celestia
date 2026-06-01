@@ -61,6 +61,8 @@
 #include <celrender/asterismrenderer.h>
 #include <celrender/atmosphererenderer.h>
 #include <celrender/brunetonatmosphererenderer.h>
+#include <celrender/brunetonatmosphereresource.h>
+#include "atmfile.h"
 #include <celrender/boundariesrenderer.h>
 #include <celrender/cometrenderer.h>
 #include <celrender/eclipticlinerenderer.h>
@@ -2511,6 +2513,37 @@ void Renderer::renderObject(const Vector3f& pos,
 
         if (fade > 0 && util::is_set(renderFlags, RenderFlags::ShowAtmospheres) && atmosphere->height > 0.0f)
         {
+            // Lazy-load the body's Bruneton .atm LUT (if any) on first
+            // use: parse time has no GL context, so the upload has to
+            // wait until we're inside the render pass. On failure we
+            // clear the path so we don't retry every frame.
+            if (!atmosphere->brunetonLUTFile.empty() && atmosphere->brunetonResource == nullptr)
+            {
+                engine::AtmFileData lutData;
+                if (engine::LoadAtmFile(atmosphere->brunetonLUTFile, lutData))
+                {
+                    auto resource = std::make_unique<render::BrunetonAtmosphereResource>();
+                    if (resource->upload(lutData))
+                    {
+                        GetLogger()->info("Loaded Bruneton atmosphere LUT {}\n",
+                                          atmosphere->brunetonLUTFile.string());
+                        atmosphere->brunetonResource = std::move(resource);
+                    }
+                    else
+                    {
+                        GetLogger()->error("Failed to upload Bruneton atmosphere LUT {}\n",
+                                           atmosphere->brunetonLUTFile.string());
+                        atmosphere->brunetonLUTFile.clear();
+                    }
+                }
+                else
+                {
+                    GetLogger()->error("Failed to load Bruneton atmosphere LUT {}\n",
+                                       atmosphere->brunetonLUTFile.string());
+                    atmosphere->brunetonLUTFile.clear();
+                }
+            }
+
             // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
             // TODO: convert old style atmopshere parameters
             if (atmosphere->mieScaleHeight > 0.0f)

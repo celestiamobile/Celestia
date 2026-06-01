@@ -61,11 +61,15 @@ struct Atmosphere
     // Path to a precomputed Bruneton .atm LUT file (as resolved at SSC
     // parse time). Empty means no LUT file is attached and the renderer
     // should fall back to the legacy analytic scattering path.
-    std::filesystem::path brunetonLUTFile;
+    // Mutable so the render path can clear it on first-load failure to
+    // avoid retrying every frame.
+    mutable std::filesystem::path brunetonLUTFile;
 
     // Precomputed Bruneton LUTs uploaded to GPU. nullptr = no .atm file
     // attached -> fall back to the legacy analytic scattering path.
-    std::unique_ptr<celestia::render::BrunetonAtmosphereResource> brunetonResource;
+    // Mutable so the render path can lazily build the GPU resource the
+    // first time the body is drawn (parse time has no GL context).
+    mutable std::unique_ptr<celestia::render::BrunetonAtmosphereResource> brunetonResource;
 };
 
 // Atmosphere density is modeled with a exp(-y/H) falloff, where
