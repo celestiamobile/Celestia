@@ -18,11 +18,25 @@
 
 #include <Eigen/Core>
 
+#include <memory>
+
 #include <celutil/color.h>
 #include <celutil/texhandle.h>
 
+namespace celestia::render
+{
+class BrunetonAtmosphereResource;
+}
+
 struct Atmosphere
 {
+    Atmosphere();
+    ~Atmosphere();
+    Atmosphere(const Atmosphere&) = delete;
+    Atmosphere& operator=(const Atmosphere&) = delete;
+    Atmosphere(Atmosphere&&) noexcept;
+    Atmosphere& operator=(Atmosphere&&) noexcept;
+
     float height { 0.0f };
     Color lowerColor;
     Color upperColor;
@@ -42,6 +56,10 @@ struct Atmosphere
     Eigen::Vector3f absorptionCoeff{ Eigen::Vector3f::Zero() };
 
     float cloudShadowDepth{ 0.0f };
+
+    // Precomputed Bruneton LUTs uploaded to GPU. nullptr = no .atm file
+    // attached -> fall back to the legacy analytic scattering path.
+    std::unique_ptr<celestia::render::BrunetonAtmosphereResource> brunetonResource;
 };
 
 // Atmosphere density is modeled with a exp(-y/H) falloff, where
