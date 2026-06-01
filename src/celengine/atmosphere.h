@@ -18,6 +18,7 @@
 
 #include <Eigen/Core>
 
+#include <filesystem>
 #include <memory>
 
 #include <celutil/color.h>
@@ -56,6 +57,11 @@ struct Atmosphere
     Eigen::Vector3f absorptionCoeff{ Eigen::Vector3f::Zero() };
 
     float cloudShadowDepth{ 0.0f };
+
+    // Path to a precomputed Bruneton .atm LUT file (as resolved at SSC
+    // parse time). Empty means no LUT file is attached and the renderer
+    // should fall back to the legacy analytic scattering path.
+    std::filesystem::path brunetonLUTFile;
 
     // Precomputed Bruneton LUTs uploaded to GPU. nullptr = no .atm file
     // attached -> fall back to the legacy analytic scattering path.
