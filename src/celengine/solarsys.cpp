@@ -1283,6 +1283,17 @@ void ReadAtmosphere(Body* body,
         atmosphere->cloudShadowDepth = *cloudShadowDepth;
     }
 
+    if (auto lutFile = GetFilename(*atmosData, "LUTFile"sv, "Invalid filename in LUTFile\n");
+        lutFile.has_value())
+    {
+        // Bruneton .atm files ship under data/atmospheres/. Resolve
+        // relative to the ssc file's directory if not absolute.
+        std::filesystem::path resolved = *lutFile;
+        if (resolved.is_relative())
+            resolved = path / resolved;
+        atmosphere->brunetonLUTFile = std::move(resolved);
+    }
+
     if (newAtmosphere != nullptr)
         bodyFeaturesManager->setAtmosphere(body, std::move(newAtmosphere));
 }
