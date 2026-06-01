@@ -5,6 +5,8 @@ set(CELRENDER_SOURCES
   atmosphererenderer.h
   boundariesrenderer.cpp
   boundariesrenderer.h
+  brunetonatmosphereresource.cpp
+  brunetonatmosphereresource.h
   cometrenderer.cpp
   cometrenderer.h
   eclipticlinerenderer.cpp
