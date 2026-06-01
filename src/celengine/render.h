@@ -769,6 +769,7 @@ class Renderer
     std::unique_ptr<celestia::render::AsterismRenderer> m_asterismRenderer;
     std::unique_ptr<celestia::render::BoundariesRenderer> m_boundariesRenderer;
     std::unique_ptr<celestia::render::AtmosphereRenderer> m_atmosphereRenderer;
+    std::unique_ptr<celestia::render::BrunetonAtmosphereRenderer> m_brunetonAtmosphereRenderer;
     std::unique_ptr<celestia::render::CometRenderer> m_cometRenderer;
     std::unique_ptr<celestia::render::EclipticLineRenderer> m_eclipticLineRenderer;
     std::unique_ptr<celestia::render::GalaxyRenderer> m_galaxyRenderer;

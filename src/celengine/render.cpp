@@ -60,6 +60,7 @@
 #include <celmath/vecgl.h>
 #include <celrender/asterismrenderer.h>
 #include <celrender/atmosphererenderer.h>
+#include <celrender/brunetonatmosphererenderer.h>
 #include <celrender/boundariesrenderer.h>
 #include <celrender/cometrenderer.h>
 #include <celrender/eclipticlinerenderer.h>
@@ -171,6 +172,7 @@ Renderer::Renderer() :
     m_starPipelineOwner(std::make_unique<celestia::render::StarPipelineOwner>()),
     curvePlotVertexBuffer(std::make_unique<CurvePlotVertexBuffer>(*this)),
     m_atmosphereRenderer(std::make_unique<AtmosphereRenderer>(*this)),
+    m_brunetonAtmosphereRenderer(std::make_unique<BrunetonAtmosphereRenderer>(*this)),
     m_cometRenderer(std::make_unique<CometRenderer>(*this)),
     m_eclipticLineRenderer(std::make_unique<EclipticLineRenderer>(*this)),
     m_galaxyRenderer(std::make_unique<GalaxyRenderer>(*this)),
