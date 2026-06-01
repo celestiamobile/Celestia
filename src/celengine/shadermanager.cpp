@@ -54,6 +54,7 @@ const std::filesystem::path ShaderDirectory{ "shaders" };
 
 constexpr std::array StaticShaderBaseNames
 {
+    "atmosphere"sv,
     "comet"sv,
     "crosshair"sv,
     "depth"sv,
