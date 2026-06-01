@@ -2550,14 +2550,46 @@ void Renderer::renderObject(const Vector3f& pos,
             {
                 float atmScale = 1.0f + atmosphere->height / radius;
 
-                m_atmosphereRenderer->render(
-                    ri,
-                    *atmosphere,
-                    ls,
-                    obj.orientation,
-                    radius * atmScale,
-                    viewFrustum,
-                    planetMVP);
+                if (atmosphere->brunetonResource != nullptr &&
+                    atmosphere->brunetonResource->isReady())
+                {
+                    // Drive the Bruneton precomputed-scattering renderer.
+                    // The shader operates in object-space kilometres
+                    // (Bruneton's convention); Celestia's object space
+                    // is in body-radius units, so we rescale by `radius`
+                    // on the way in.
+                    render::BrunetonAtmosphereRenderer::FrameParams fp;
+
+                    Eigen::Matrix4f scaleInvKm = Eigen::Matrix4f::Identity();
+                    scaleInvKm(0, 0) = scaleInvKm(1, 1) = scaleInvKm(2, 2) = 1.0f / radius;
+                    const Eigen::Matrix4f mvKm = (*planetMVP.modelview) * scaleInvKm;
+
+                    fp.inv_projection   = planetMVP.projection->inverse();
+                    fp.inv_modelview_km = mvKm.inverse();
+                    fp.camera_km        = ls.eyePos_obj * radius;
+                    fp.sun_direction    = ls.lights[0].direction_obj.normalized();
+                    fp.white_point      = Eigen::Vector3f::Ones();
+                    fp.exposure         = 10.0f;
+
+                    PipelineState ps;
+                    ps.blending  = true;
+                    ps.blendFunc = { GL_ONE, GL_SRC_ALPHA };
+                    ps.depthTest = false;
+                    setPipelineState(ps);
+
+                    m_brunetonAtmosphereRenderer->render(*atmosphere->brunetonResource, fp);
+                }
+                else
+                {
+                    m_atmosphereRenderer->render(
+                        ri,
+                        *atmosphere,
+                        ls,
+                        obj.orientation,
+                        radius * atmScale,
+                        viewFrustum,
+                        planetMVP);
+                }
             }
             else
             {
