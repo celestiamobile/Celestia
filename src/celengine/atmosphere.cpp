@@ -10,6 +10,12 @@
 
 #include "atmosphere.h"
 
+// Include the Bruneton std140 UBO mirror here so its sizeof static_asserts
+// are evaluated by a translation unit that actually gets compiled. The
+// header itself has no further dependencies on the legacy Atmosphere
+// struct above.
+#include "brunetonatmosphere.h"
+
 #ifndef HAVE_CONSTEXPR_CMATH
 #include <cmath>
 
