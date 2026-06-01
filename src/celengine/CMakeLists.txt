@@ -11,6 +11,7 @@ set(CELENGINE_SOURCES
   boundaries.cpp
   boundaries.h
   brunetonatmosphere.h
+  atmfile.cpp
   atmfile.h
   category.cpp
   category.h
