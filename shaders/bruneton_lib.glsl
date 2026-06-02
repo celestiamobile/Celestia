@@ -2276,3 +2276,13 @@ Illuminance3 GetSunAndSkyIlluminance(
     sky_irradiance *= SKY_SPECTRAL_RADIANCE_TO_LUMINANCE;
     return sun_irradiance * SUN_SPECTRAL_RADIANCE_TO_LUMINANCE;
 }
+
+// Direct sunlight transmittance at a surface point. Use to tint Celestia's
+// existing diffuse term so the ground itself reddens at sunset. Returns
+// vec3(~1) when sun is high, reddened vec3 near the horizon, vec3(0) below.
+DimensionlessSpectrum GetSunTransmittanceObj(
+    Position point_km, Direction sun_direction) {
+    Length r = max(length(point_km), ATMOSPHERE.bottom_radius);
+    Number mu_s = dot(point_km, sun_direction) / r;
+    return GetTransmittanceToSun(ATMOSPHERE, transmittance_texture, r, mu_s);
+}
