@@ -69,6 +69,7 @@ enum class TexUsage : std::uint32_t
     StaticPointSize         = 0x10000,
     LineAsTriangles         = 0x20000,
     TextureCoordTransform   = 0x40000,
+    BrunetonScattering      = 0x80000,
 };
 
 ENUM_CLASS_BITWISE_OPS(TexUsage);
@@ -146,6 +147,7 @@ struct ShaderProperties
     bool hasTextureCoordTransform() const;
     bool hasSpecular() const;
     bool hasScattering() const;
+    bool hasBrunetonScattering() const;
     bool isViewDependent() const;
 
     std::uint16_t nLights{ 0 };
@@ -213,6 +215,7 @@ public:
     ~CelestiaGLProgram() = default;
 
     void use() const { program.use(); }
+    GLuint getProgramID() const { return program.getID(); }
 
     void setLightParameters(const LightingState& ls,
                             Color materialDiffuse,

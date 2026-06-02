@@ -23,6 +23,7 @@
 #include <celmath/geomutil.h>
 #include <celmath/mathlib.h>
 #include <celmodel/material.h>
+#include <celrender/brunetonatmosphereresource.h>
 #include <celrender/gl/buffer.h>
 #include <celrender/gl/vertexobject.h>
 #include <celutil/color.h>
@@ -193,7 +194,16 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
             // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
             // ... but don't show atmospheres when there are no light sources.
             if (atmosphere->mieScaleHeight > 0.0f && shadprop.nLights > 0)
-                shadprop.texUsage |= TexUsage::Scattering;
+            {
+                // Prefer the Bruneton precomputed-LUT path when a baked
+                // atmosphere is loaded and ready; otherwise fall back to
+                // the legacy 2-sample analytical scattering block.
+                if (atmosphere->brunetonResource != nullptr &&
+                    atmosphere->brunetonResource->isReady())
+                    shadprop.texUsage |= TexUsage::BrunetonScattering;
+                else
+                    shadprop.texUsage |= TexUsage::Scattering;
+            }
         }
 
         if (util::is_set(renderFlags, RenderFlags::ShowCloudMaps) &&
@@ -333,6 +343,54 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
         if (shadprop.hasScattering())
         {
             prog->setAtmosphereParameters(*atmosphere, radius, radius);
+        }
+        else if (shadprop.hasBrunetonScattering())
+        {
+            // Bind the Bruneton LUTs at units >= 12 so the legacy material
+            // texture units (which start at 0 and grow with nSamplers) can
+            // never collide. 16 combined texture units is the GL ES 3.0
+            // minimum guarantee; planet shaders typically use 0..8 at most.
+            constexpr GLint TransUnit   = 12;
+            constexpr GLint ScatUnit    = 13;
+            constexpr GLint SingleUnit  = 14;
+            constexpr GLint IrradUnit   = 15;
+            constexpr GLuint UboBinding = 0;
+
+            const auto& res = *atmosphere->brunetonResource;
+
+            const GLuint progId = prog->getProgramID();
+            const GLuint blockIdx = glGetUniformBlockIndex(progId, "AtmosphereBlock");
+            if (blockIdx != GL_INVALID_INDEX)
+            {
+                glUniformBlockBinding(progId, blockIdx, UboBinding);
+                glBindBufferBase(GL_UNIFORM_BUFFER, UboBinding, res.ubo());
+            }
+
+            prog->samplerParam("transmittance_texture") = TransUnit;
+            prog->samplerParam("scattering_texture")    = ScatUnit;
+            prog->samplerParam("irradiance_texture")    = IrradUnit;
+            const bool hasSeparateMie = res.singleMieTexture() != 0;
+            prog->samplerParam("single_mie_scattering_texture") =
+                hasSeparateMie ? SingleUnit : ScatUnit;
+
+            glActiveTexture(GL_TEXTURE0 + TransUnit);
+            glBindTexture(GL_TEXTURE_2D, res.transmittanceTexture());
+            glActiveTexture(GL_TEXTURE0 + ScatUnit);
+            glBindTexture(GL_TEXTURE_3D, res.scatteringTexture());
+            if (hasSeparateMie)
+            {
+                glActiveTexture(GL_TEXTURE0 + SingleUnit);
+                glBindTexture(GL_TEXTURE_3D, res.singleMieTexture());
+            }
+            glActiveTexture(GL_TEXTURE0 + IrradUnit);
+            glBindTexture(GL_TEXTURE_2D, res.irradianceTexture());
+            glActiveTexture(GL_TEXTURE0);
+
+            prog->vec3Param("atm_camera_km")         = ls.eyePos_obj * radius;
+            prog->vec3Param("atm_sun_direction_obj") = ls.lights[0].direction_obj.normalized();
+            prog->floatParam("atm_obj_radius_km")    = radius;
+            prog->vec3Param("atm_white_point")       = Eigen::Vector3f::Ones();
+            prog->floatParam("atm_exposure")         = renderer->getAtmosphereExposure();
         }
     }
 

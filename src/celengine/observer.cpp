@@ -1487,8 +1487,11 @@ Observer::gotoSurface(const Selection& sel, double duration)
     // Calculate the surface normal at the landing point (radial direction from center)
     Eigen::Vector3d surfaceNormal = bfPos.offsetFromKm(UniversalCoord::Zero()).normalized();
 
-    // Position the observer just above the surface
-    double height = 1.0001 * sel.radius();
+    // Position the observer ~912 m above the surface. (Was 1.0001 * radius
+    // ≈ 636 m on Earth — too low for the Bruneton atmosphere LUT to sample
+    // a meaningful slant path; 912 m sits comfortably inside the densest
+    // Rayleigh layer while staying clearly "near surface" on any body.)
+    double height = sel.radius() + 0.912;
     UniversalCoord nearSurfacePoint = UniversalCoord::Zero().offsetKm(surfaceNormal * height);
 
     Eigen::Quaterniond toOrientation;
