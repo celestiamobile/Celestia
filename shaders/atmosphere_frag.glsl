@@ -2225,6 +2225,30 @@ Luminance3 GetSolarLuminance() {
         SUN_SPECTRAL_RADIANCE_TO_LUMINANCE;
 }
 
+// Demo-style radiance wrappers (USE_LUMINANCE undefined): bind ATMOSPHERE +
+// LUT samplers but skip the spectral->luminance scaling so the caller gets
+// the raw RadianceSpectrum the demo's tone-mapper expects.
+RadianceSpectrum GetSolarRadiance() {
+    return ATMOSPHERE.solar_irradiance /
+        (PI * ATMOSPHERE.sun_angular_radius * ATMOSPHERE.sun_angular_radius);
+}
+
+RadianceSpectrum GetSkyRadiance(
+    Position camera, Direction view_ray, Length shadow_length,
+    Direction sun_direction, out DimensionlessSpectrum transmittance) {
+    return GetSkyRadiance(ATMOSPHERE, transmittance_texture,
+        scattering_texture, single_mie_scattering_texture,
+        camera, view_ray, shadow_length, sun_direction, transmittance);
+}
+
+RadianceSpectrum GetSkyRadianceToPoint(
+    Position camera, Position point, Length shadow_length,
+    Direction sun_direction, out DimensionlessSpectrum transmittance) {
+    return GetSkyRadianceToPoint(ATMOSPHERE, transmittance_texture,
+        scattering_texture, single_mie_scattering_texture,
+        camera, point, shadow_length, sun_direction, transmittance);
+}
+
 Luminance3 GetSkyLuminance(
     Position camera, Direction view_ray, Length shadow_length,
     Direction sun_direction, out DimensionlessSpectrum transmittance) {
@@ -2279,18 +2303,24 @@ void main()
     vec3 viewRay = normalize(mat3(inv_modelview_km) * viewDir);
 
     vec3 transmittance;
-    vec3 radiance = GetSkyLuminance(camera_km, viewRay, 0.0, sun_direction, transmittance);
+    // Demo default: USE_LUMINANCE is undefined -> GetSkyRadiance is real
+    // (returns spectral radiance at 680/550/440 nm).
+    vec3 radiance = GetSkyRadiance(camera_km, viewRay, 0.0, sun_direction, transmittance);
 
     if (dot(viewRay, sun_direction) > 0.9999)
-        radiance += transmittance * GetSolarLuminance();
+        radiance += transmittance * GetSolarRadiance();
 
     // Bruneton-style exposure tone-map (1 - exp(-x)) — gives a much more
     // vivid horizon glow than Reinhard's x/(1+x) because mid-range values
     // (~0.5 – 2.0 of the exposure scale) get pushed near 1 instead of
     // being compressed under ~0.7.
+    //
+    // We deliberately do NOT gamma-encode here: Celestia's sRGBViewportEffect
+    // does the linear→sRGB conversion as a final post-process. Applying
+    // pow(1/2.2) in this shader on top of that would double-encode and wash
+    // out the sky (cyan-pale instead of saturated blue).
     vec3 linRGB = radiance * exposure / white_point;
     vec3 mapped = vec3(1.0) - exp(-linRGB);
-    mapped = pow(mapped, vec3(1.0 / 2.2));
 
     float a = clamp(dot(transmittance, vec3(1.0 / 3.0)), 0.0, 1.0);
     fragColor = vec4(mapped, a);

@@ -16,7 +16,9 @@
 #include "celestiacore.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <cctype>
 #include <cwctype>
@@ -1600,6 +1602,25 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         // TODO: 'Edit mode' should be eliminated; it can be done better
         // with a Lua script.
         editMode = !editMode;
+        break;
+
+    case '|':
+        {
+            // Cycle Bruneton atmosphere exposure through a small preset
+            // ladder. Demo-parity radiance mode wants ~10; luminance mode
+            // wants ~5e-4. Wrap around the end of the list.
+            static constexpr float kPresets[] = { 1.0e-4f, 5.0e-4f, 2.0e-3f, 1.0f, 10.0f, 100.0f };
+            constexpr int kCount = sizeof(kPresets) / sizeof(kPresets[0]);
+            float current = renderer->getAtmosphereExposure();
+            int idx = 0;
+            for (int i = 0; i < kCount; ++i)
+                if (std::fabs(kPresets[i] - current) <= std::fabs(current) * 0.01f) { idx = i; break; }
+            idx = (idx + 1) % kCount;
+            renderer->setAtmosphereExposure(kPresets[idx]);
+            char buf[64];
+            std::snprintf(buf, sizeof buf, _("Atmosphere exposure: %g"), kPresets[idx]);
+            flash(buf, 2.0);
+        }
         break;
     }
 }
