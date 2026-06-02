@@ -1248,7 +1248,7 @@ R"glsl(
     if (props.lightModel == LightingModel::UnlitModel && util::is_set(props.texUsage, TexUsage::VertexColors))
         source += DeclareOutput("diff", Shader_Vector4);
 
-    if (props.isViewDependent() || props.hasScattering() || props.hasEclipseShadows())
+    if (props.isViewDependent() || props.hasScattering() || props.hasBrunetonScattering() || props.hasEclipseShadows())
         source += DeclareOutput("position", Shader_Vector3);
 
     // Shadow parameters
@@ -1285,7 +1285,7 @@ R"glsl(
     if (props.lightModel != LightingModel::ParticleDiffuseModel)
         source += "normal = in_Normal;\n";
 
-    if (props.isViewDependent() || props.hasScattering() || props.hasEclipseShadows())
+    if (props.isViewDependent() || props.hasScattering() || props.hasBrunetonScattering() || props.hasEclipseShadows())
         source += "position = in_Position.xyz;\n";
 
     if (props.usesTangentSpaceLighting())
@@ -1449,6 +1449,21 @@ buildFragmentShader(const ShaderProperties& props)
     source += CommonHeader;
     source += FragmentHeader;
 
+    // When the planet uses the Bruneton precomputed-LUT atmosphere, embed
+    // the shared library (UBO + sampler decls + all Bruneton functions and
+    // wrappers) so we can call GetSkyRadianceToPoint / GetSunAndSkyIlluminance
+    // for aerial perspective on the surface itself.
+    if (props.hasBrunetonScattering())
+    {
+        auto brunetonLib = ReadShaderFile(ShaderDirectory / std::filesystem::u8path("bruneton_lib.glsl"));
+        source += brunetonLib;
+        source += DeclareUniform("atm_camera_km",        Shader_Vector3);
+        source += DeclareUniform("atm_sun_direction_obj", Shader_Vector3);
+        source += DeclareUniform("atm_obj_radius_km",    Shader_Float);
+        source += DeclareUniform("atm_white_point",      Shader_Vector3);
+        source += DeclareUniform("atm_exposure",         Shader_Float);
+    }
+
     std::string diffTexCoord("diffTexCoord");
     std::string specTexCoord("specTexCoord");
     std::string nightTexCoord("nightTexCoord");
@@ -1476,7 +1491,7 @@ buildFragmentShader(const ShaderProperties& props)
     if (props.lightModel != LightingModel::ParticleDiffuseModel)
         source += DeclareInput("normal", Shader_Vector3);
 
-    if (props.isViewDependent() || props.hasScattering() || props.hasEclipseShadows())
+    if (props.isViewDependent() || props.hasScattering() || props.hasBrunetonScattering() || props.hasEclipseShadows())
         source += DeclareInput("position", Shader_Vector3);
 
     if (props.lightModel != LightingModel::UnlitModel)
@@ -1550,7 +1565,7 @@ buildFragmentShader(const ShaderProperties& props)
     if (props.lightModel != LightingModel::ParticleDiffuseModel)
         source += "vec3 N = normalize(normal);\n";
 
-    if (props.isViewDependent() || props.hasScattering() || props.hasEclipseShadows())
+    if (props.isViewDependent() || props.hasScattering() || props.hasBrunetonScattering() || props.hasEclipseShadows())
         source += "vec3 nposition = normalize(position);\n";
 
     if (props.lightModel != LightingModel::UnlitModel)
@@ -1799,6 +1814,29 @@ buildFragmentShader(const ShaderProperties& props)
         source += DeclareLocal("scatterColor", Shader_Vector3);
         source += AtmosphericEffects(props);
         source += "fragColor.rgb = fragColor.rgb * scatterEx + scatterColor;\n";
+    }
+    else if (props.hasBrunetonScattering())
+    {
+        // Bruneton aerial perspective on the planet surface.
+        //
+        // nposition is the fragment position in object-space, normalised
+        // (length 1 == body radius). Multiplying by the body's km radius
+        // gives the fragment's km position relative to planet center —
+        // exactly the coordinate system the Bruneton LUT was baked in.
+        // We pass shadow_length=0 (no light-shaft support yet).
+        //
+        // Compose: fragColor.rgb = surface * transmittance + inScatter,
+        // matching demo.glsl:367 modulo the spectral->display step that
+        // we fold in via Bruneton's exposure tone-map.
+        source += "{\n"
+                  "    vec3 _atm_pt_km = nposition * atm_obj_radius_km;\n"
+                  "    vec3 _atm_t;\n"
+                  "    vec3 _atm_inscatter = GetSkyRadianceToPoint(\n"
+                  "        atm_camera_km, _atm_pt_km, 0.0, atm_sun_direction_obj, _atm_t);\n"
+                  "    vec3 _atm_lin = _atm_inscatter * atm_exposure / atm_white_point;\n"
+                  "    vec3 _atm_mapped = vec3(1.0) - exp(-_atm_lin);\n"
+                  "    fragColor.rgb = fragColor.rgb * _atm_t + _atm_mapped;\n"
+                  "}\n";
     }
 
     // Limb darkening
@@ -2610,6 +2648,12 @@ ShaderProperties::hasScattering() const
 }
 
 bool
+ShaderProperties::hasBrunetonScattering() const
+{
+    return util::is_set(texUsage, TexUsage::BrunetonScattering);
+}
+
+bool
 ShaderProperties::isViewDependent() const
 {
     switch (lightModel)
@@ -2708,6 +2752,17 @@ ShaderManager::loadShader(StaticShader staticShader, const GeomShaderParams* gsP
     auto fs = ReadShaderFile(ShaderDirectory / std::filesystem::u8path(fmt::format("{}_frag.glsl", name)));
     if (fs.empty())
         return getErrorProgram();
+
+    // The atmosphere fragment shader depends on a large Bruneton library
+    // (definitions + functions + API wrappers) shared with the per-planet
+    // surface shader. Prepend it here so both consumers stay in sync.
+    if (staticShader == StaticShader::Atmosphere)
+    {
+        auto lib = ReadShaderFile(ShaderDirectory / std::filesystem::u8path("bruneton_lib.glsl"));
+        if (lib.empty())
+            return getErrorProgram();
+        fs = lib + fs;
+    }
 
     std::shared_ptr<CelestiaGLProgram> result;
     if (gsParams)
