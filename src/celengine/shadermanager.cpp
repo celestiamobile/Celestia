@@ -1830,6 +1830,9 @@ buildFragmentShader(const ShaderProperties& props)
         // we fold in via Bruneton's exposure tone-map.
         source += "{\n"
                   "    vec3 _atm_pt_km = nposition * atm_obj_radius_km;\n"
+                  "    vec3 _atm_sun_t = GetSunTransmittanceObj(_atm_pt_km, atm_sun_direction_obj);\n"
+                  "    float _atm_lit = smoothstep(-0.05, 0.05, dot(normalize(nposition), atm_sun_direction_obj));\n"
+                  "    fragColor.rgb *= mix(vec3(1.0), _atm_sun_t, _atm_lit);\n"
                   "    vec3 _atm_t;\n"
                   "    vec3 _atm_inscatter = GetSkyRadianceToPoint(\n"
                   "        atm_camera_km, _atm_pt_km, 0.0, atm_sun_direction_obj, _atm_t);\n"
