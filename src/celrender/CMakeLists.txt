@@ -19,6 +19,8 @@ set(CELRENDER_SOURCES
   globularrenderer.h
   largestarrenderer.cpp
   largestarrenderer.h
+  psfglowlargerenderer.cpp
+  psfglowlargerenderer.h
   linerenderer.cpp
   linerenderer.h
   nebularenderer.cpp

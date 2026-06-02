@@ -43,6 +43,8 @@
 #include "planetgrid.h"
 #include "pointstarvertexbuffer.h"
 #include "pointstarrenderer.h"
+#include "psfstarvertexbuffer.h"
+#include "starpipelineowner.h"
 #include "orbitsampler.h"
 #include "rendcontext.h"
 #include "textlayout.h"
@@ -65,6 +67,7 @@
 #include <celrender/cometrenderer.h>
 #include <celrender/eclipticlinerenderer.h>
 #include <celrender/largestarrenderer.h>
+#include <celrender/psfglowlargerenderer.h>
 #include <celrender/linerenderer.h>
 #include <celrender/galaxyrenderer.h>
 #include <celrender/globularrenderer.h>
@@ -168,6 +171,9 @@ Renderer::Renderer() :
 #endif
     pointStarVertexBuffer(std::make_unique<PointStarVertexBuffer>(*this, 2048)),
     glareVertexBuffer(std::make_unique<PointStarVertexBuffer>(*this, 2048)),
+    psfPointBuffer(std::make_unique<PsfStarVertexBuffer>(*this, 2048)),
+    psfGlowBuffer(std::make_unique<PsfStarVertexBuffer>(*this, 2048)),
+    m_starPipelineOwner(std::make_unique<celestia::render::StarPipelineOwner>()),
     curvePlotVertexBuffer(std::make_unique<CurvePlotVertexBuffer>(*this)),
     m_atmosphereRenderer(std::make_unique<AtmosphereRenderer>(*this)),
     m_brunetonAtmosphereRenderer(std::make_unique<BrunetonAtmosphereRenderer>(*this)),
@@ -176,6 +182,7 @@ Renderer::Renderer() :
     m_galaxyRenderer(std::make_unique<GalaxyRenderer>(*this)),
     m_globularRenderer(std::make_unique<GlobularRenderer>(*this)),
     m_largeStarRenderer(std::make_unique<LargeStarRenderer>(*this)),
+    m_psfGlowLargeRenderer(std::make_unique<PsfGlowLargeRenderer>(*this)),
     m_hollowMarkerRenderer(std::make_unique<LineRenderer>(*this, 1.0f, LineRenderer::PrimType::Lines, LineRenderer::StorageType::Static)),
     m_nebulaRenderer(std::make_unique<NebulaRenderer>(*this)),
     m_openClusterRenderer(std::make_unique<OpenClusterRenderer>(*this)),
@@ -1650,57 +1657,143 @@ void Renderer::renderObjectAsPoint(const Vector3f& position,
     float maxDiscSize = useScaledDiscs ? MaxScaledDiscStarSize : 1.0f;
     float maxBlendDiscSize = maxDiscSize + 3.0f;
 
-    if (discSizeInPixels < maxBlendDiscSize || useHalos)
+    if (discSizeInPixels >= maxBlendDiscSize && !useHalos) return;
+
+    // In PSF mode, render any light source as a PSF point-sprite when
+    // the PSF blob still dominates its true angular disc.  This is the
+    // close-object counterpart to the far-star PSF path in
+    // PointStarRenderer: the per-interval projection (km-scale) used
+    // here is what allows e.g. Sol at 1 AU to escape the ly-scale near
+    // plane of renderPointStars.
+    if (starStyle == StarStyle::PointSpreadFunction)
     {
-        float fade = 1.0f;
-        if (discSizeInPixels > maxDiscSize)
+        float pointScale = static_cast<float>(screenDpi) / 96.0f;
+        float psfDiscPx  = 2.0f * std::max(starPointRadius, 1.0e-3f) * pointScale;
+        if (psfDiscPx > discSizeInPixels)
         {
-            fade = std::min(1.0f, (maxBlendDiscSize - discSizeInPixels) /
-                                  (maxBlendDiscSize - maxDiscSize));
+            addStarAsPsfPoint(position, color, appMag, pointScale, mvp);
+            return;
+        }
+    }
+
+    float fade = 1.0f;
+    if (discSizeInPixels > maxDiscSize)
+    {
+        fade = std::min(1.0f, (maxBlendDiscSize - discSizeInPixels) /
+                        (maxBlendDiscSize - maxDiscSize));
+    }
+
+    float scale = static_cast<float>(screenDpi) / 96.0f;
+    float pointSize, alpha, glareSize, glareAlpha;
+    calculatePointSize(appMag, BaseStarDiscSize * scale, pointSize, alpha, glareSize, glareAlpha);
+
+    if (useScaledDiscs && discSizeInPixels > MaxScaledDiscStarSize)
+        glareAlpha = std::min(glareAlpha, (MaxScaledDiscStarSize - discSizeInPixels) / MaxScaledDiscStarSize + 1.0f);
+
+    alpha *= fade;
+    if (!emissive)
+        glareAlpha *= fade;
+
+    if (glareSize != 0.0f)
+        glareSize = std::max(glareSize, pointSize * discSizeInPixels / scale * 3.0f);
+
+    Renderer::PipelineState ps;
+    ps.blending = true;
+    ps.blendFunc = {GL_SRC_ALPHA, GL_ONE};
+    ps.depthTest = true;
+    setPipelineState(ps);
+
+    if (starStyle != StarStyle::PointStars)
+        m_gaussianDiscTex->bind();
+
+    if (pointSize > gl::maxPointSize)
+        m_largeStarRenderer->render(position, {color, alpha}, pointSize, mvp);
+    else
+        pointStarVertexBuffer->addStar(position, {color, alpha}, pointSize);
+
+    // If the object is brighter than magnitude 1, add a halo around it to
+    // make it appear more brilliant.  This is a hack to compensate for the
+    // limited dynamic range of monitors.
+    //
+    // TODO: Stars look fine but planets look unrealistically bright
+    // with halos.
+    if (useHalos && glareAlpha > 0.0f)
+    {
+        Eigen::Vector3f center = calculateQuadCenter(getCameraOrientationf(), position, radius);
+        m_gaussianGlareTex->bind();
+        if (glareSize > gl::maxPointSize)
+            m_largeStarRenderer->render(center, {color, glareAlpha}, glareSize, mvp);
+        else
+            glareVertexBuffer->addStar(center, {color, glareAlpha}, glareSize);
+    }
+}
+
+
+void Renderer::addStarAsPsfPoint(const Vector3f &position,
+                                 const Color    &color,
+                                 float           appMag,
+                                 float           pointScale,
+                                 const Matrices &mvp)
+{
+    // Mirrors the PSF math in PointStarRenderer::process for far stars,
+    // but submits to the same psfPointBuffer / psfGlowBuffer with KM-scale
+    // positions.  The buffers are drained per-interval inside
+    // renderSolarSystemObjects, which uses the per-interval (km-scale)
+    // projection — this is what lets close stars (e.g. Sol at 1 AU)
+    // escape the ly-scale near plane of renderPointStars.
+    float exposureFactor = std::max(starExposure, 1.0e-6f);
+    float irradiance     = astro::magToIrradiance(appMag);
+    float r              = std::max(starPointRadius, 1.0e-3f);
+    float peakRad        = exposureFactor * 3.0f * irradiance
+                           / (celestia::numbers::pi_v<float> * r * r);
+
+    float minPeak = (celestia::gl::sRGBRendering
+                        ? astro::LOWEST_IRRADIATION_SRGB
+                        : astro::LOWEST_IRRADIATION)
+                    * astro::PSF_PEAK_GATE_FACTOR;
+
+    float greenScale = 1.0f;
+    Color linearStarColor = psfGreenNormalization(color, 0.1f, greenScale);
+    float peakRadCol = peakRad * greenScale;
+
+    if (peakRadCol > minPeak)
+        psfPointBuffer->addStar(position, linearStarColor, peakRadCol);
+
+    if (peakRadCol > 1.0f && starOptimization > 0.0f)
+    {
+        float glowPeak = peakRadCol;
+        if (starMaxIrradiance > 0.0f)
+        {
+            glowPeak = (1.0f - 1.0f / (peakRadCol / starMaxIrradiance + 1.0f))
+                       * starMaxIrradiance;
         }
 
-        float scale = static_cast<float>(screenDpi) / 96.0f;
-        float pointSize, alpha, glareSize, glareAlpha;
-        calculatePointSize(appMag, BaseStarDiscSize * scale, pointSize, alpha, glareSize, glareAlpha);
+        float a        = starOptimization / r;
+        float rGlowLog = std::pow(glowPeak, 0.4f) / std::max(a, 1.0e-6f);
+        float sizePhys = 2.0f * rGlowLog * pointScale;
 
-        if (useScaledDiscs && discSizeInPixels > MaxScaledDiscStarSize)
-            glareAlpha = std::min(glareAlpha, (MaxScaledDiscStarSize - discSizeInPixels) / MaxScaledDiscStarSize + 1.0f);
-
-        alpha *= fade;
-        if (!emissive)
-            glareAlpha *= fade;
-
-        if (glareSize != 0.0f)
-            glareSize = std::max(glareSize, pointSize * discSizeInPixels / scale * 3.0f);
-
-        Renderer::PipelineState ps;
-        ps.blending = true;
-        ps.blendFunc = {GL_SRC_ALPHA, GL_ONE};
-        ps.depthTest = true;
-        setPipelineState(ps);
-
-        if (starStyle != StarStyle::PointStars)
-            m_gaussianDiscTex->bind();
-
-        if (pointSize > gl::maxPointSize)
-            m_largeStarRenderer->render(position, {color, alpha}, pointSize, mvp);
-        else
-            pointStarVertexBuffer->addStar(position, {color, alpha}, pointSize);
-
-        // If the object is brighter than magnitude 1, add a halo around it to
-        // make it appear more brilliant.  This is a hack to compensate for the
-        // limited dynamic range of monitors.
-        //
-        // TODO: Stars look fine but planets look unrealistically bright
-        // with halos.
-        if (useHalos && glareAlpha > 0.0f)
+        if (sizePhys > static_cast<float>(celestia::gl::maxPointSize))
         {
-            Eigen::Vector3f center = calculateQuadCenter(getCameraOrientationf(), position, radius);
-            m_gaussianGlareTex->bind();
-            if (glareSize > gl::maxPointSize)
-                m_largeStarRenderer->render(center, {color, glareAlpha}, glareSize, mvp);
-            else
-                glareVertexBuffer->addStar(center, {color, glareAlpha}, glareSize);
+            // Oversize glow (typical for very close stars like Sol at 1 AU):
+            // draw synchronously as a clip-space billboard using the current
+            // per-interval MVP.  Flush any PSF-buffer in-flight first: the
+            // billboard renderer binds its own program, and without the
+            // flush the next addStar() would early-return from makeCurrent
+            // (owner still thinks the buffer is active) and draw against
+            // the billboard's program.
+            starPipelineOwner().flush();
+            m_psfGlowLargeRenderer->render(position,
+                                           linearStarColor,
+                                           glowPeak,
+                                           starPointRadius,
+                                           starOptimization,
+                                           pointScale,
+                                           sizePhys,
+                                           mvp);
+        }
+        else
+        {
+            psfGlowBuffer->addStar(position, linearStarColor, glowPeak);
         }
     }
 }
@@ -3798,6 +3891,11 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     starRenderer.renderList        = &renderList;
     starRenderer.starVertexBuffer  = pointStarVertexBuffer.get();
     starRenderer.glareVertexBuffer = glareVertexBuffer.get();
+    starRenderer.psfPointBuffer    = psfPointBuffer.get();
+    starRenderer.psfGlowBuffer     = psfGlowBuffer.get();
+    starRenderer.psfGlowLargeRenderer = m_psfGlowLargeRenderer.get();
+    starRenderer.psfProj           = &getCurrentProjectionMatrix();
+    starRenderer.psfModelView      = &getCurrentModelViewMatrix();
     starRenderer.cosFOV            = std::cos(math::degToRad(calcMaxFOV(fov, getAspectRatio())) / 2.0f);
 
     starRenderer.pixelSize         = pixelSize;
@@ -3805,6 +3903,12 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     starRenderer.distanceLimit     = distanceLimit;
     starRenderer.labelMode         = labelMode;
     starRenderer.SolarSystemMaxDistance = SolarSystemMaxDistance;
+    starRenderer.starStyle         = starStyle;
+    starRenderer.pointRadius       = starPointRadius;
+    starRenderer.pointScale        = static_cast<float>(screenDpi) / 96.0f;
+    starRenderer.optimization      = starOptimization;
+    starRenderer.maxIrradiance     = starMaxIrradiance;
+    starRenderer.exposure          = starExposure;
 
     // = 1.0 at startup
     float effDistanceToScreen = mmToInches((float) REF_DISTANCE_TO_SCREEN) * pixelSize * getScreenDpi();
@@ -3812,22 +3916,65 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
 
     starRenderer.colorTemp = &starColors;
 
+    float scale = static_cast<float>(screenDpi) / 96.0f;
+
+    // Even in PSF mode, renderObjectAsPoint falls back to the legacy
+    // point-sprite buffers for close bodies whose true angular disc
+    // exceeds the PSF blob (psfDiscPx <= discSizeInPixels).  Configure
+    // their texture and point scale here so they're in a valid state
+    // before that path runs.
     m_gaussianDiscTex->bind();
     starRenderer.starVertexBuffer->setTexture(m_gaussianDiscTex.get());
-    starRenderer.starVertexBuffer->setPointScale(screenDpi / 96.0f);
+    starRenderer.starVertexBuffer->setPointScale(scale);
     starRenderer.glareVertexBuffer->setTexture(m_gaussianGlareTex.get());
-    starRenderer.glareVertexBuffer->setPointScale(screenDpi / 96.0f);
+    starRenderer.glareVertexBuffer->setPointScale(scale);
 
-    PointStarVertexBuffer::enable();
-    starRenderer.glareVertexBuffer->startSprites();
-    if (starStyle == StarStyle::PointStars)
-        starRenderer.starVertexBuffer->startBasicPoints();
-    else
-        starRenderer.starVertexBuffer->startSprites();
-
+    float iterFaintestMag = faintestMagNight;
     Renderer::PipelineState ps;
     ps.blending = true;
-    ps.blendFunc = {GL_SRC_ALPHA, GL_ONE};
+
+    if (starStyle == StarStyle::PointSpreadFunction)
+    {
+        starRenderer.psfPointBuffer->setPointScale(scale);
+        starRenderer.psfPointBuffer->setPointRadius(starPointRadius);
+        starRenderer.psfPointBuffer->setOptimization(starOptimization);
+        starRenderer.psfGlowBuffer->setPointScale(scale);
+        starRenderer.psfGlowBuffer->setPointRadius(starPointRadius);
+        starRenderer.psfGlowBuffer->setOptimization(starOptimization);
+
+        PsfStarVertexBuffer::enable();
+        starRenderer.psfPointBuffer->start(PsfStarVertexBuffer::Mode::Point);
+        starRenderer.psfGlowBuffer->start(PsfStarVertexBuffer::Mode::Glow);
+
+        ps.blendFunc = {GL_ONE, GL_ONE};
+
+        // Extend the iteration cutoff to the PSF's natural fade-in
+        // threshold so stars actually grow through minPeak instead of
+        // popping in at whatever peakRad they happen to have just past
+        // Celestia's perceptual faintestMag cutoff.
+        //   peakRad = exposure * 3 * irradiance / (pi * r^2),  irradiance = 10^(-0.4*m)
+        //   peakRad = minPeak  =>  m = (1/0.4) * log10(exposure * 3 / (pi * r^2 * minPeak))
+        float minPeak = (celestia::gl::sRGBRendering
+                            ? astro::LOWEST_IRRADIATION_SRGB
+                            : astro::LOWEST_IRRADIATION)
+                        * astro::PSF_PEAK_GATE_FACTOR;
+        float rLog = std::max(starPointRadius, 1.0e-3f);
+        float psfFaintMag = std::log10(starExposure * 3.0f
+                                       / (celestia::numbers::pi_v<float> * rLog * rLog * minPeak)) / 0.4f;
+        iterFaintestMag = std::max(faintestMagNight, psfFaintMag);
+    }
+    else
+    {
+        PointStarVertexBuffer::enable();
+        starRenderer.glareVertexBuffer->startSprites();
+        if (starStyle == StarStyle::PointStars)
+            starRenderer.starVertexBuffer->startBasicPoints();
+        else
+            starRenderer.starVertexBuffer->startSprites();
+
+        ps.blendFunc = {GL_SRC_ALPHA, GL_ONE};
+    }
+
     setPipelineState(ps);
 
     starDB.findVisibleStars(starRenderer,
@@ -3835,11 +3982,20 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
                             getCameraOrientationf(),
                             math::degToRad(fov),
                             getAspectRatio(),
-                            faintestMagNight);
+                            iterFaintestMag);
 
-    starRenderer.starVertexBuffer->finish();
-    starRenderer.glareVertexBuffer->finish();
-    PointStarVertexBuffer::disable();
+    if (starStyle == StarStyle::PointSpreadFunction)
+    {
+        starRenderer.psfPointBuffer->finish();
+        starRenderer.psfGlowBuffer->finish();
+        PsfStarVertexBuffer::disable();
+    }
+    else
+    {
+        starRenderer.starVertexBuffer->finish();
+        starRenderer.glareVertexBuffer->finish();
+        PointStarVertexBuffer::disable();
+    }
 
 #ifndef GL_ES
     if (toggleAA)
@@ -4304,6 +4460,61 @@ void Renderer::setStarStyle(StarStyle style)
 StarStyle Renderer::getStarStyle() const
 {
     return starStyle;
+}
+
+
+void Renderer::setStarPointRadius(float r)
+{
+    starPointRadius = std::clamp(r, 1.0f, 10.0f);
+    markSettingsChanged();
+}
+
+
+float Renderer::getStarPointRadius() const
+{
+    return starPointRadius;
+}
+
+
+void Renderer::setStarOptimization(float opt)
+{
+    starOptimization = std::clamp(opt, 0.0f, 10.0f);
+    markSettingsChanged();
+}
+
+
+float Renderer::getStarOptimization() const
+{
+    return starOptimization;
+}
+
+
+void Renderer::setStarMaxIrradiance(float v)
+{
+    if (v <= 0.0f)
+        starMaxIrradiance = 0.0f;
+    else
+        starMaxIrradiance = std::clamp(v, 1.0f, 1.0e6f);
+    markSettingsChanged();
+}
+
+
+float Renderer::getStarMaxIrradiance() const
+{
+    return starMaxIrradiance;
+}
+
+
+void Renderer::setStarExposure(float e)
+{
+    starExposure = std::clamp(e, 1.0e-3f, 1.0e6f);
+    markSettingsChanged();
+}
+
+
+float Renderer::getStarExposure() const
+{
+    return starExposure;
 }
 
 
@@ -5364,6 +5575,29 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
         pointStarVertexBuffer->render();
         pointStarVertexBuffer->finish();
         PointStarVertexBuffer::disable();
+
+        // Drain any close-star PSF point-sprites added by
+        // Drain any close-star PSF point-sprites added by
+        // renderObjectAsPoint during renderItem above.  Uses the current
+        // per-interval (km-scale) projection so Sol-at-1AU stays inside
+        // the depth range.  The buffers were started+finished once in
+        // renderPointStars (m_prog persists), so render() can pick up the
+        // current MVP via makeCurrent() without re-calling start().
+        if (starStyle == StarStyle::PointSpreadFunction)
+        {
+            Renderer::PipelineState psPsf;
+            psPsf.blending  = true;
+            psPsf.blendFunc = {GL_ONE, GL_ONE};
+            psPsf.depthTest = true;
+            setPipelineState(psPsf);
+
+            PsfStarVertexBuffer::enable();
+            psfPointBuffer->render();
+            psfGlowBuffer->render();
+            psfPointBuffer->finish();
+            psfGlowBuffer->finish();
+            PsfStarVertexBuffer::disable();
+        }
 
         // Render annotations in this interval
         annotation = renderSortedAnnotations(annotation,
