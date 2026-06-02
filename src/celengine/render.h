@@ -171,6 +171,8 @@ class Renderer
     void setAmbientLightLevel(float);
     float getTintSaturation() const;
     void setTintSaturation(float);
+    float getAtmosphereExposure() const;
+    void setAtmosphereExposure(float);
     float getMinimumOrbitSize() const;
     void setMinimumOrbitSize(float);
     float getMinimumFeatureSize() const;
@@ -664,6 +666,11 @@ class Renderer
     float ambientLightLevel{ 0.1f };
     float tintSaturation{ 0.5f };
     float brightnessBias{ 0.0f };
+
+    // Bruneton precomputed-atmosphere tone-map exposure (cycled via the
+    // Alt+/Alt- hotkeys). Demo parity in radiance mode is exposure=10;
+    // luminance mode wants ~5e-4.
+    float atmosphereExposure{ 10.0f };
 
     float brightnessScale{ 1.0f };
     float faintestMag{ 0.0f };

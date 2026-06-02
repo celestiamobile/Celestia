@@ -14,6 +14,7 @@
 #include "qtpreferencesdialog.h"
 
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 
 #include <Qt>
@@ -257,6 +258,16 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
     ui.tintSaturationSlider->setEnabled(colors != ColorTableType::Enhanced);
     ui.tintSaturationSpinBox->setValue(tint);
     ui.tintSaturationSpinBox->setEnabled(colors != ColorTableType::Enhanced);
+
+    {
+        // Round log10 of the current exposure to one decimal, then * 10 to
+        // get the integer slider value (range -50..20).
+        float exp = renderer->getAtmosphereExposure();
+        int atmExp = static_cast<int>(std::round(std::log10(std::max(exp, 1e-6f)) * 10.0f));
+        atmExp = std::clamp(atmExp, -50, 20);
+        ui.atmosphereExposureSlider->setValue(atmExp);
+        ui.atmosphereExposureSpinBox->setValue(atmExp);
+    }
 
     switch (renderer->getStarStyle())
     {
@@ -843,6 +854,31 @@ PreferencesDialog::on_tintSaturationSpinBox_valueChanged(int value)
     auto savedBlockState = ui.tintSaturationSlider->blockSignals(true);
     ui.tintSaturationSlider->setValue(value);
     ui.tintSaturationSlider->blockSignals(savedBlockState);
+}
+
+// Atmosphere exposure (slider/spinbox value = round(log10(exposure) * 10), so
+// step 1 = 0.1 dB-equivalent decades; range -50 .. 20 maps to 1e-5 .. 100.)
+
+void
+PreferencesDialog::on_atmosphereExposureSlider_valueChanged(int value)
+{
+    float exposure = std::pow(10.0f, static_cast<float>(value) / 10.0f);
+    appCore->getRenderer()->setAtmosphereExposure(exposure);
+    appCore->flash("Atmosphere exposure: " + std::to_string(exposure));
+    auto saved = ui.atmosphereExposureSpinBox->blockSignals(true);
+    ui.atmosphereExposureSpinBox->setValue(value);
+    ui.atmosphereExposureSpinBox->blockSignals(saved);
+}
+
+void
+PreferencesDialog::on_atmosphereExposureSpinBox_valueChanged(int value)
+{
+    float exposure = std::pow(10.0f, static_cast<float>(value) / 10.0f);
+    appCore->getRenderer()->setAtmosphereExposure(exposure);
+    appCore->flash("Atmosphere exposure: " + std::to_string(exposure));
+    auto saved = ui.atmosphereExposureSlider->blockSignals(true);
+    ui.atmosphereExposureSlider->setValue(value);
+    ui.atmosphereExposureSlider->blockSignals(saved);
 }
 
 // Star style

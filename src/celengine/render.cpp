@@ -676,6 +676,19 @@ void Renderer::setTintSaturation(float level)
 }
 
 
+float Renderer::getAtmosphereExposure() const
+{
+    return atmosphereExposure;
+}
+
+
+void Renderer::setAtmosphereExposure(float v)
+{
+    atmosphereExposure = v;
+    markSettingsChanged();
+}
+
+
 float Renderer::getMinimumFeatureSize() const
 {
     return minFeatureSize;
@@ -2575,17 +2588,26 @@ void Renderer::renderObject(const Vector3f& pos,
                     fp.camera_km        = ls.eyePos_obj * radius;
                     fp.sun_direction    = ls.lights[0].direction_obj.normalized();
                     fp.white_point      = Eigen::Vector3f::Ones();
-                    // GetSkyLuminance returns values pre-multiplied by
-                    // SKY_SPECTRAL_RADIANCE_TO_LUMINANCE (~10^5), so the
-                    // .atm-baked spectral radiances (~10^-2) come out
-                    // ~10^3 cd/m². Drop exposure accordingly so the
-                    // tone-map (1-exp(-x)) doesn't immediately saturate.
-                    fp.exposure         = 1.0e-4f;
+                    // Demo-parity: radiance-mode samples * exposure=10
+                    // (the demo's `+/-` HUD value when use_luminance=off).
+                    // Demo.cc:440 divides exposure by 1e5 in luminance
+                    // mode; in radiance mode the full 10 goes to the GPU,
+                    // which is what we replicate here.
+                    fp.exposure         = atmosphereExposure;
 
                     PipelineState ps;
                     ps.blending  = true;
                     ps.blendFunc = { GL_ONE, GL_SRC_ALPHA };
-                    ps.depthTest = false;
+                    // Depth test ON (Celestia uses GL_LEQUAL globally):
+                    // the fullscreen atmosphere quad is emitted at z=1
+                    // (far plane) by the vertex shader, so it only
+                    // passes the test on pixels with depth==1, i.e.
+                    // space pixels around the planet. This preserves
+                    // the planet surface that was rendered earlier.
+                    // We don't write depth, since the atmosphere is
+                    // logically "behind" any later geometry.
+                    ps.depthTest = true;
+                    ps.depthMask = false;
                     setPipelineState(ps);
 
                     m_brunetonAtmosphereRenderer->render(*atmosphere->brunetonResource, fp);

@@ -118,6 +118,9 @@ private slots:
     void on_tintSaturationSlider_valueChanged(int value);
     void on_tintSaturationSpinBox_valueChanged(int value);
 
+    void on_atmosphereExposureSlider_valueChanged(int value);
+    void on_atmosphereExposureSpinBox_valueChanged(int value);
+
     void on_pointStarsButton_clicked() const;
     void on_scaledDiscsButton_clicked() const;
     void on_fuzzyPointStarsButton_clicked() const;

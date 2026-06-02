@@ -117,7 +117,9 @@ void main(void)
 #ifdef GL_ES
 constexpr std::string_view VersionHeader = "#version 300 es\n"sv;
 constexpr std::string_view VersionHeaderGeom = "#version 320 es\n"sv;
-constexpr std::string_view CommonHeader = "precision highp float;\n"sv;
+constexpr std::string_view CommonHeader = "precision highp float;\n"
+                                          "precision highp sampler2D;\n"
+                                          "precision highp sampler3D;\n"sv;
 #else
 constexpr std::string_view VersionHeader = "#version 330\n"sv;
 constexpr std::string_view VersionHeaderGeom = "#version 330\n"sv;
