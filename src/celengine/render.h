@@ -534,8 +534,7 @@ class Renderer
                              float discSizeInPixels,
                              const Color& color,
                              bool useHalos,
-                             bool emissive,
-                             const Matrices&);
+                             bool emissive);
 
     // PSF-mode point-sprite for a close star.  Called from
     // renderObjectAsPoint when the PSF blob still dominates the star's
@@ -545,8 +544,7 @@ class Renderer
     void addStarAsPsfPoint(const Eigen::Vector3f &position,
                            const Color           &color,
                            float                  appMag,
-                           float                  pointScale,
-                           const Matrices        &mvp);
+                           float                  pointScale);
 
     void locationsToAnnotations(const Body& body,
                                 const Eigen::Vector3d& bodyPosition,
@@ -765,7 +763,8 @@ class Renderer
     std::unique_ptr<celestia::render::EclipticLineRenderer> m_eclipticLineRenderer;
     std::unique_ptr<celestia::render::GalaxyRenderer> m_galaxyRenderer;
     std::unique_ptr<celestia::render::GlobularRenderer> m_globularRenderer;
-    std::unique_ptr<celestia::render::LargeStarRenderer> m_largeStarRenderer;
+    std::unique_ptr<celestia::render::LegacyLargeStarRenderer> m_legacyLargeStarRenderer;
+    std::unique_ptr<celestia::render::LegacyLargeStarRenderer> m_legacyLargeGlareRenderer;
     std::unique_ptr<celestia::render::PsfGlowLargeRenderer> m_psfGlowLargeRenderer;
     std::unique_ptr<celestia::render::LineRenderer> m_hollowMarkerRenderer;
     std::unique_ptr<celestia::render::NebulaRenderer> m_nebulaRenderer;
