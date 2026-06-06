@@ -1748,13 +1748,12 @@ void Renderer::addStarAsPsfPoint(const Vector3f &position,
     if (peakRadCol > minPeak && discSizeInPixels <= 1.0f)
         psfPointBuffer->addStar(spritePos, linearStarColor, peakRadCol);
 
-    // Peak radiance whose bloom radius (per the shader's PSF formula)
-    // equals the body's angular disc.  kLimbFudge < 1 pulls the bright
-    // edge inside the limb (Askaniy's overexposure mitigation).
-    constexpr float kLimbFudge = 0.7f;
+    // Peak radiance whose saturation (overexposure) radius
+    // equals the body's angular disc.
+    // Derived from the shader's PSF formula.
     float a    = starOptimization / r;
     float invB = celestia::numbers::pi_v<float> / r - a;
-    float angR = kLimbFudge * discSizeInPixels / pointScale;
+    float angR = discSizeInPixels / pointScale;
     float linkedGlowPeak = std::pow(angR * (a + invB), 2.5f);
 
     // Gate on the irradiance-based peak so the linked term only
@@ -1774,7 +1773,7 @@ void Renderer::addStarAsPsfPoint(const Vector3f &position,
         if (!overflow && !emissive)
             return;
 
-        Vector3f glowPos = overflow && radius > 0.0f
+        Vector3f glowPos = radius > 0.0f
             ? calculateQuadCenter(getCameraOrientationf(), spritePos, radius)
             : spritePos;
         float glowPeakToUse = overflow ? glowPeak : linkedGlowPeak;
