@@ -414,12 +414,14 @@ class Renderer
         Surface* surface{ nullptr };
         const Atmosphere* atmosphere{ nullptr };
         RingSystem* rings{ nullptr };
+        LightingState::EclipseShadowVector* eclipseShadows{ nullptr };
+
+        Eigen::Quaternionf orientation{ Eigen::Quaternionf::Identity() };
+        Eigen::Vector3f semiAxes{ Eigen::Vector3f::Ones() };
         float radius{ 1.0f };
         float geometryScale{ 1.0f };
-        Eigen::Vector3f semiAxes{ Eigen::Vector3f::Ones() };
         celestia::engine::GeometryHandle geometry{ celestia::engine::GeometryHandle::Invalid };
-        Eigen::Quaternionf orientation{ Eigen::Quaternionf::Identity() };
-        LightingState::EclipseShadowVector* eclipseShadows;
+	bool isStar{ false };
     };
 
     struct DepthBufferPartition
@@ -526,8 +528,17 @@ class Renderer
                             float &glareSize,
                             float &glareAlpha) const;
 
-    void renderObjectAsPoint(const Eigen::Vector3f& center,
-                             float radius,
+    // Geometric description of a renderable point-like body shared by
+    // renderObjectAsPoint / addStarAsPsfPoint, so we can thread the
+    // precomputed camera distance without exceeding parameter limits.
+    struct PointObjectInfo
+    {
+        Eigen::Vector3f position;
+        float           distance;
+        float           radius;
+    };
+
+    void renderObjectAsPoint(const PointObjectInfo& info,
                              float appMag,
                              float discSizeInPixels,
                              const Color& color,
@@ -539,10 +550,12 @@ class Renderer
     // true angular disc.  Adds to psfPointBuffer / psfGlowBuffer (drained
     // per-interval inside renderSolarSystemObjects), or falls back to the
     // m_psfGlowLargeRenderer billboard path for oversize glows.
-    void addStarAsPsfPoint(const Eigen::Vector3f &position,
+    void addStarAsPsfPoint(const PointObjectInfo &info,
                            const Color           &color,
                            float                  appMag,
-                           float                  pointScale);
+                           float                  pointScale,
+                           float                  discSizeInPixels,
+                           bool                   emissive);
 
     void locationsToAnnotations(const Body& body,
                                 const Eigen::Vector3d& bodyPosition,
