@@ -51,7 +51,7 @@ invalidateAttachments(GLenum target, GLsizei count, const GLenum *tokens)
 
 } // namespace
 
-FramebufferObject::FramebufferObject(GLuint width, GLuint height, Attachment attachments, int samples, bool useFloatColor) :
+FramebufferObject::FramebufferObject(GLuint width, GLuint height, Attachment attachments, int samples, bool useFloatColor, bool useFloatDepth) :
     m_width(width),
     m_height(height),
     m_colorTexId(0),
@@ -60,6 +60,7 @@ FramebufferObject::FramebufferObject(GLuint width, GLuint height, Attachment att
     m_samples(samples > 1 ? samples : 1),
     m_requestedSamples(m_samples),
     m_useFloatColor(useFloatColor),
+    m_useFloatDepth(useFloatDepth),
     m_status(GL_FRAMEBUFFER_UNSUPPORTED),
     m_owned(true)
 {
@@ -78,6 +79,7 @@ FramebufferObject::FramebufferObject(GLuint fboId) :
     m_samples(1),
     m_requestedSamples(1),
     m_useFloatColor(false),
+    m_useFloatDepth(false),
     m_status(GL_FRAMEBUFFER_COMPLETE),
     m_owned(false)
 {
@@ -102,6 +104,7 @@ FramebufferObject::FramebufferObject(FramebufferObject &&other) noexcept:
     m_samples(other.m_samples),
     m_requestedSamples(other.m_requestedSamples),
     m_useFloatColor(other.m_useFloatColor),
+    m_useFloatDepth(other.m_useFloatDepth),
     m_status(other.m_status),
     m_owned(other.m_owned)
 {
@@ -126,6 +129,7 @@ FramebufferObject& FramebufferObject::operator=(FramebufferObject &&other) noexc
     m_samples       = other.m_samples;
     m_requestedSamples = other.m_requestedSamples;
     m_useFloatColor = other.m_useFloatColor;
+    m_useFloatDepth = other.m_useFloatDepth;
     m_status        = other.m_status;
     m_owned         = other.m_owned;
 
@@ -219,11 +223,12 @@ FramebufferObject::generateDepthTexture()
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     // Set the texture dimensions
-    GLint internalFormat = GL_DEPTH_COMPONENT24;
+    GLint internalFormat = m_useFloatDepth ? GL_DEPTH_COMPONENT32F : GL_DEPTH_COMPONENT24;
     if (hasTextureStorage())
         glTexStorage2D(GL_TEXTURE_2D, 1, internalFormat, m_width, m_height);
     else
-        glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, m_width, m_height, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
+        glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, m_width, m_height, 0, GL_DEPTH_COMPONENT,
+                     m_useFloatDepth ? GL_FLOAT : GL_UNSIGNED_INT, nullptr);
 
     // Unbind the texture
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -322,7 +327,9 @@ FramebufferObject::generateMSAAFbo(Attachment attachments)
     {
         glGenRenderbuffers(1, &m_depthRboId);
         glBindRenderbuffer(GL_RENDERBUFFER, m_depthRboId);
-        glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_DEPTH_COMPONENT24, m_width, m_height);
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples,
+                                        m_useFloatDepth ? GL_DEPTH_COMPONENT32F : GL_DEPTH_COMPONENT24,
+                                        m_width, m_height);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_depthRboId);
     }
 

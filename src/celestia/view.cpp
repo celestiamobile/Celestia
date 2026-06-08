@@ -305,13 +305,14 @@ View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, in
             && fbo->width()            == newWidth
             && fbo->height()           == newHeight
             && fbo->requestedSamples() == samples
-            && fbo->useFloatColor()    == useFloat)
+            && fbo->useFloatColor()    == useFloat
+            && fbo->useFloatDepth()    == gl::reverseZ)
             continue;
 
         fbo = std::make_unique<FramebufferObject>(newWidth, newHeight,
                                                   FramebufferObject::Attachment::Color | FramebufferObject::Attachment::Depth,
                                                   samples,
-                                                  useFloat);
+                                                  useFloat, gl::reverseZ);
         if (!fbo->isValid())
         {
             GetLogger()->error("Error creating view FBO {}.\n", i);

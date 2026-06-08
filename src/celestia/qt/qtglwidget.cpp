@@ -140,7 +140,12 @@ CelestiaGlWidget::initializeGL()
     if (settings.contains("SceneAntialiasingSamples"))
         sceneSamples = settings.value("SceneAntialiasingSamples").toUInt();
 
-    if (!appCore->initRenderer(static_cast<engine::TextureResolution>(textureResolution), sRGBOverride, sceneSamples, false))
+    std::optional<bool> reverseZOverride;
+    if (settings.contains("ReverseZ"))
+        reverseZOverride = settings.value("ReverseZ").toBool();
+
+    if (!appCore->initRenderer(static_cast<engine::TextureResolution>(textureResolution),
+                               sRGBOverride, sceneSamples, false, reverseZOverride))
     {
         // cerr << "Failed to initialize renderer.\n";
         exit(1);

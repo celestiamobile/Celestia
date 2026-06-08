@@ -195,7 +195,8 @@ public:
     bool initRenderer(celestia::engine::TextureResolution,
                       std::optional<bool> sRGBRendering = std::nullopt,
                       std::optional<unsigned int> aaSamples = std::nullopt,
-                      bool useMesaPackInvert = true);
+                      bool useMesaPackInvert = true,
+                      std::optional<bool> reverseZ = std::nullopt);
     unsigned int getSceneMSAASamples() const;
     unsigned int getMaxSceneMSAASamples() const;
     // Applied on the next draw; no current GL context is required.

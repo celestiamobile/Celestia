@@ -245,6 +245,7 @@ applyRenderDetails(CelestiaConfig::RenderDetails& renderDetails, const Associati
     applyNumber(renderDetails.output.toneMappingExposure, hash, "ToneMappingExposure"sv);
     renderDetails.output.toneMappingExposure = std::clamp(renderDetails.output.toneMappingExposure, 1.0e-3f, 1.0e6f);
     applyToneMappingMode(renderDetails.output.toneMapping, hash, "ToneMappingMode"sv);
+    applyBoolean(renderDetails.reverseZ, hash, "ReverseZ"sv);
     applyNumber(renderDetails.stars.pointRadius, hash, "StarPointRadius"sv);
     renderDetails.stars.pointRadius = std::clamp(renderDetails.stars.pointRadius, 1.0f, 10.0f);
     applyNumber(renderDetails.stars.optimization, hash, "StarOptimization"sv);

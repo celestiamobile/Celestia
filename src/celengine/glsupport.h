@@ -50,7 +50,9 @@ extern CELAPI bool ARB_texture_storage; //NOSONAR
 #endif
 extern CELAPI bool dualSourceBlending; //NOSONAR
 extern CELAPI bool colorBufferHalfFloat; //NOSONAR
+extern CELAPI bool ARB_clip_control; //NOSONAR
 extern CELAPI bool ARB_texture_compression_bptc; //NOSONAR
+extern CELAPI bool EXT_clip_control; //NOSONAR
 extern CELAPI bool EXT_texture_compression_s3tc; //NOSONAR
 extern CELAPI bool EXT_texture_compression_s3tc_srgb; //NOSONAR
 extern CELAPI bool EXT_texture_filter_anisotropic; //NOSONAR
@@ -64,8 +66,10 @@ extern CELAPI GLint maxTextureSize; //NOSONAR
 extern CELAPI GLfloat maxLineWidth; //NOSONAR
 extern CELAPI GLint maxTextureAnisotropy; //NOSONAR
 extern CELAPI bool sRGBRendering; //NOSONAR
+extern CELAPI bool reverseZ; //NOSONAR
 
 bool init(std::span<const std::string> = {}) noexcept;
 bool checkVersion(int) noexcept;
+void setClipControl(bool zeroToOne) noexcept;
 
 } // end namespace celestia::gl

@@ -129,6 +129,16 @@ void renderGeometryShadow_GLSL(RenderGeometry* geometry,
         glDisable(GL_SCISSOR_TEST);
     glViewport(0, 0, shadowFbo->width(), shadowFbo->height());
 
+    // The shadow pass is forward-Z throughout (Ortho [-1,+1] NDC, clear=1,
+    // LEQUAL, positive polygon offset, sampler does `myDepth > pcfDepth`).
+    // Isolate it from the global reverseZ state.
+    if (gl::reverseZ)
+    {
+        gl::setClipControl(false);
+        glDepthFunc(GL_LEQUAL);
+        glClearDepthf(1.0f);
+    }
+
     // Write only to the depth buffer
     glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
     glClear(GL_DEPTH_BUFFER_BIT);
@@ -161,6 +171,14 @@ void renderGeometryShadow_GLSL(RenderGeometry* geometry,
     if (scissorEnabled)
         glEnable(GL_SCISSOR_TEST);
     shadowFbo->unbind(oldFboId);
+
+    // Restore reverseZ globals.
+    if (gl::reverseZ)
+    {
+        gl::setClipControl(true);
+        glDepthFunc(GL_GEQUAL);
+        glClearDepthf(0.0f);
+    }
 }
 
 } // end unnamed namespace

@@ -2051,6 +2051,13 @@ bool CelestiaCore::hasAnnotationDepthBuffer(GLuint framebuffer)
                                          GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE, &bits);
     // Require at least the precision requested for the scene framebuffer.
     annotationDepthAvailable = bits >= 24;
+    if (gl::reverseZ)
+    {
+        GLint componentType = GL_NONE;
+        glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, attachment,
+                                             GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &componentType);
+        annotationDepthAvailable = bits >= 32 && componentType == GL_FLOAT;
+    }
     return annotationDepthAvailable;
 }
 
@@ -2810,7 +2817,8 @@ void CelestiaCore::setSceneMSAASamples(unsigned int samples)
 bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
                                 std::optional<bool> sRGBRendering,
                                 std::optional<unsigned int> aaSamples,
-                                [[maybe_unused]] bool useMesaPackInvert)
+                                [[maybe_unused]] bool useMesaPackInvert,
+                                std::optional<bool> reverseZ)
 {
     annotationDepthFramebuffer.reset();
     GLint maxSamples = 1;
@@ -2819,6 +2827,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
     setSceneMSAASamples(aaSamples.value_or(config->renderDetails.getSceneAASamples()));
     gl::sRGBRendering = sRGBRendering.value_or(config->renderDetails.output.sRGB);
     celestia::engine::SetTextureAnisotropy(config->renderDetails.textures.anisotropy);
+    gl::reverseZ = reverseZ.value_or(config->renderDetails.reverseZ);
 
     bool useFloatScene = gl::sRGBRendering && gl::colorBufferHalfFloat;
     if (gl::sRGBRendering && !useFloatScene)

@@ -16,7 +16,9 @@ CELAPI bool ARB_texture_storage                = false; //NOSONAR
 #endif
 CELAPI bool dualSourceBlending                 = false; //NOSONAR
 CELAPI bool colorBufferHalfFloat               = false; //NOSONAR
+CELAPI bool ARB_clip_control                  = false; //NOSONAR
 CELAPI bool ARB_texture_compression_bptc      = false; //NOSONAR
+CELAPI bool EXT_clip_control                  = false; //NOSONAR
 CELAPI bool EXT_texture_compression_s3tc      = false; //NOSONAR
 CELAPI bool EXT_texture_compression_s3tc_srgb = false; //NOSONAR
 CELAPI bool EXT_texture_filter_anisotropic    = false; //NOSONAR
@@ -27,6 +29,7 @@ CELAPI GLint maxTextureSize                   = 0; //NOSONAR
 CELAPI GLfloat maxLineWidth                   = 0.0f; //NOSONAR
 CELAPI GLint maxTextureAnisotropy             = 0; //NOSONAR
 CELAPI bool sRGBRendering                     = false; //NOSONAR
+CELAPI bool reverseZ                          = false; //NOSONAR
 
 namespace
 {
@@ -81,6 +84,13 @@ bool init(std::span<const std::string> ignore) noexcept
     EXT_texture_filter_anisotropic = check_extension(ignore, "GL_EXT_texture_filter_anisotropic") || check_extension(ignore, "GL_ARB_texture_filter_anisotropic");
     EXT_texture_sRGB_R8            = check_extension(ignore, "GL_EXT_texture_sRGB_R8");
     MESA_pack_invert               = check_extension(ignore, "GL_MESA_pack_invert");
+#ifdef GL_ES
+    EXT_clip_control               = check_extension(ignore, "GL_EXT_clip_control");
+#else
+    ARB_clip_control               = check_extension(ignore, "GL_ARB_clip_control")
+                                     || checkVersion(celestia::gl::GL_4_5);
+    EXT_clip_control               = check_extension(ignore, "GL_EXT_clip_control");
+#endif
 
     std::array<GLint, 2> pointSizeRange = { 0, 0 };
     std::array<GLfloat, 2> lineWidthRange = { 0.0f, 0.0f };
@@ -102,6 +112,18 @@ bool init(std::span<const std::string> ignore) noexcept
         glGetIntegerv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxTextureAnisotropy);
 
     return true;
+}
+
+void setClipControl(bool zeroToOne) noexcept
+{
+#ifndef GL_ES
+    if (ARB_clip_control)
+    {
+        glClipControl(GL_LOWER_LEFT, zeroToOne ? GL_ZERO_TO_ONE : GL_NEGATIVE_ONE_TO_ONE);
+        return;
+    }
+#endif
+    glClipControlEXT(GL_LOWER_LEFT_EXT, zeroToOne ? GL_ZERO_TO_ONE_EXT : GL_NEGATIVE_ONE_TO_ONE_EXT);
 }
 
 bool checkVersion(int v) noexcept
