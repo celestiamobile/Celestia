@@ -638,6 +638,10 @@ FillinSurface(const AssociativeArray& surfaceData,
         surface.specularPower = *specularPower;
     if (auto lunarLambert = surfaceData.getNumber<float>("LunarLambert"); lunarLambert.has_value())
         surface.lunarLambert = *lunarLambert;
+    if (auto terrainHeightScale = surfaceData.getNumber<float>("TerrainHeightScale"); terrainHeightScale.has_value())
+        surface.terrainHeightScale = *terrainHeightScale;
+    if (auto terrainHeightOffset = surfaceData.getNumber<float>("TerrainHeightOffset"); terrainHeightOffset.has_value())
+        surface.terrainHeightOffset = *terrainHeightOffset;
 
     auto baseTexture = GetFilename(surfaceData, "Texture"sv, "Invalid filename in Texture\n");
     auto bumpTexture = GetFilename(surfaceData, "BumpMap"sv, "Invalid filename in BumpMap\n");
@@ -645,6 +649,7 @@ FillinSurface(const AssociativeArray& surfaceData,
     auto specularTexture = GetFilename(surfaceData, "SpecularTexture"sv, "Invalid filename in SpecularTexture\n");
     auto normalTexture = GetFilename(surfaceData, "NormalMap"sv, "Invalid filename in NormalMap\n");
     auto overlayTexture = GetFilename(surfaceData, "OverlayTexture"sv, "Invalid filename in OverlayTexture\n");
+    auto terrainHeightmap = surfaceData.getPath("TerrainHeightmap"sv);
 
     constexpr auto baseFlags = engine::TextureFlags::WrapTexture;
     constexpr auto bumpFlags = engine::TextureFlags::WrapTexture | engine::TextureFlags::LinearColorspace;
@@ -655,6 +660,10 @@ FillinSurface(const AssociativeArray& surfaceData,
 
     bool blendTexture = surfaceData.getBoolean("BlendTexture").value_or(false);
     bool emissive = surfaceData.getBoolean("Emissive").value_or(false);
+    bool hasTerrain = surfaceData.getBoolean("Terrain").value_or(false)
+                      || terrainHeightmap.has_value()
+                      || surfaceData.getNumber<float>("TerrainHeightScale").has_value()
+                      || surfaceData.getNumber<float>("TerrainHeightOffset").has_value();
 
     util::set_or_unset(surface.appearanceFlags, Surface::Flags::BlendTexture, blendTexture);
     util::set_or_unset(surface.appearanceFlags, Surface::Flags::Emissive, emissive);
@@ -664,6 +673,7 @@ FillinSurface(const AssociativeArray& surfaceData,
     util::set_or_unset(surface.appearanceFlags, Surface::Flags::SeparateSpecularMap, specularTexture.has_value());
     util::set_or_unset(surface.appearanceFlags, Surface::Flags::ApplyOverlay, overlayTexture.has_value());
     util::set_or_unset(surface.appearanceFlags, Surface::Flags::SpecularReflection, surface.specularColor != Color(0.0f, 0.0f, 0.0f));
+    util::set_or_unset(surface.appearanceFlags, Surface::Flags::HasTerrain, hasTerrain);
 
     if (baseTexture.has_value())
         surface.baseTexture = texturePaths.getHandle(*baseTexture, path, baseFlags);
@@ -680,6 +690,8 @@ FillinSurface(const AssociativeArray& surfaceData,
 
     if (overlayTexture.has_value())
         surface.overlayTexture = texturePaths.getHandle(*overlayTexture, path, baseFlags);
+    if (terrainHeightmap.has_value())
+        surface.terrainHeightmapPath = terrainHeightmap->is_absolute() ? *terrainHeightmap : path / *terrainHeightmap;
 }
 
 

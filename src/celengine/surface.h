@@ -10,10 +10,14 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
+#include <memory>
 
 #include <celutil/color.h>
 #include <celutil/flag.h>
 #include <celutil/texhandle.h>
+
+class TerrainData;
 
 struct Surface
 {
@@ -34,6 +38,7 @@ struct Surface
         Emissive             = 0x80,
         SeparateSpecularMap  = 0x100,
         ApplyOverlay         = 0x200,
+        HasTerrain           = 0x400,
     };
 
     Flags appearanceFlags{ Flags::None };
@@ -46,6 +51,18 @@ struct Surface
     celestia::util::TextureHandle specularTexture{ celestia::util::TextureHandle::Invalid };// specular mask
     celestia::util::TextureHandle overlayTexture{ celestia::util::TextureHandle::Invalid }; // overlay texture, applied last
     float lunarLambert{ 0.0f };     // mix between Lambertian and Lommel-Seeliger (lunar-like) photometric functions
+    
+    // Terrain configuration
+    float terrainHeightScale{ 1.0f };   // Multiply heightmap values by this
+    float terrainHeightOffset{ 0.0f };  // Add this to height values
+    std::filesystem::path terrainHeightmapPath;  // Path to heightmap tiles
+
+    // Lazily-constructed cache for terrain data so the heightmap isn't
+    // reloaded every frame. Built on first render that needs terrain.
+    // Mutable because Surface is consumed via const pointer in the
+    // renderer but the cache is logically derived from the immutable
+    // terrainHeightmapPath/Scale/Offset fields above.
+    mutable std::shared_ptr<TerrainData> terrainData;
 };
 
 ENUM_CLASS_BITWISE_OPS(Surface::Flags);

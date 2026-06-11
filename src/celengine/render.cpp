@@ -26,6 +26,8 @@
 #include "glshader.h"
 #include "spheremesh.h"
 #include "lodspheremesh.h"
+#include "terrainlodmanager.h"
+#include "terraindata.h"
 #include "geometry.h"
 #include "texmanager.h"
 #include "renderinfo.h"
@@ -422,6 +424,7 @@ bool Renderer::init(int winWidth, int winHeight,
     m_rectBO = std::make_unique<celestia::gl::Buffer>(celestia::gl::Buffer::TargetHint::Array);
 
     m_lodSphere = std::make_unique<LODSphereMesh>();
+    m_terrainLOD = std::make_unique<TerrainLODManager>();
 
     m_gaussianDiscTex = BuildGaussianDiscTexture(8);
     m_gaussianGlareTex = BuildGaussianGlareTexture(9);
@@ -2501,6 +2504,120 @@ void Renderer::renderObject(const Vector3f& pos,
                                       planetMVP, this);
         }
         glActiveTexture(GL_TEXTURE0);
+    }
+
+    if (util::is_set(obj.surface->appearanceFlags, Surface::Flags::HasTerrain))
+    {
+        // Distance LOD gate. ri.eyePos_obj is in units of planet radii
+        // (positions are divided by semiAxes), so altitude = norm - 1. The
+        // per-vertex atmospheric scattering computed by the dynamic shader
+        // produces visible Gouraud-interpolation banding across the coarse
+        // terrain triangulation when the camera is far from the surface and
+        // each patch covers many pixels. At those altitudes, real terrain
+        // height (~10 km on Earth, ~0.001 R) is sub-pixel anyway, so the
+        // smooth sphere is the correct image. Cut terrain off when the
+        // camera is more than ~half a planet radius above the surface
+        // (~3000 km on Earth) and let the smooth sphere take over.
+        const float terrainMaxAltitudeR = 0.5f;
+        if (ri.eyePos_obj.norm() - 1.0f > terrainMaxAltitudeR)
+        {
+            // fall through to the rest of the planet rendering
+        }
+        else
+        {
+        // Build (and cache on the surface) the TerrainData for this body
+        // on the first frame that needs it. Re-loading the heightmap every
+        // frame was previously hammering the JPEG decoder.
+        auto& terrainData = obj.surface->terrainData;
+        if (!terrainData)
+        {
+            terrainData = std::make_shared<TerrainData>(
+                obj.surface->terrainHeightmapPath);
+        }
+        // Scale/offset are cheap and could in principle change at runtime
+        // if the .ssc was hot-reloaded, so refresh each frame.
+        terrainData->setHeightScale(obj.surface->terrainHeightScale / obj.radius);
+        terrainData->setHeightOffset(obj.surface->terrainHeightOffset / obj.radius);
+
+        // Build a ShaderProperties variant that mirrors what renderEllipsoid_GLSL
+        // requests for the underlying smooth sphere, plus the Terrain bit. This
+        // gives the terrain mesh the same atmospheric scattering, eclipse
+        // shadows, ring shadows, specular highlights, and diffuse texturing as
+        // the base sphere — instead of a hand-rolled shader that had to
+        // re-implement (and got wrong) all of those effects. Our patch UVs are
+        // already in global equirectangular space, so we deliberately do NOT
+        // request TextureCoordTransform.
+        ShaderProperties shadprop;
+        shadprop.nLights = std::min(ls.nLights, MaxShaderLights);
+        shadprop.texUsage = TexUsage::Terrain;
+        if (ri.baseTex != nullptr)
+            shadprop.texUsage |= TexUsage::DiffuseTexture;
+        if (ri.specularColor != Color::Black)
+        {
+            shadprop.lightModel = LightingModel::PerPixelSpecularModel;
+            if (ri.glossTex != nullptr)
+                shadprop.texUsage |= TexUsage::SpecularTexture;
+            else
+                shadprop.texUsage |= TexUsage::SpecularInDiffuseAlpha;
+        }
+        if (atmosphere != nullptr
+            && util::is_set(renderFlags, RenderFlags::ShowAtmospheres)
+            && atmosphere->mieScaleHeight > 0.0f
+            && shadprop.nLights > 0)
+        {
+            shadprop.texUsage |= TexUsage::Scattering;
+        }
+
+        CelestiaGLProgram* prog = getShaderManager().getShader(shadprop);
+        if (prog != nullptr)
+        {
+            prog->use();
+            prog->setMVPMatrices(*planetMVP.projection, *planetMVP.modelview);
+            prog->setLightParameters(ls, ri.color, ri.specularColor, Color::Black);
+            prog->eyePosition = ls.eyePos_obj;
+            prog->ambientColor = ri.ambientColor.toVector3();
+            prog->shininess = ri.specularPower;
+            prog->textureOffset = 0.0f;
+
+            if (shadprop.hasScattering())
+            {
+                float radius = obj.radius;
+                prog->setAtmosphereParameters(*atmosphere, radius, radius);
+            }
+
+            // Sign of the clip-space depth bias flips under reverse-Z: there
+            // "closer to the camera" means LARGER depth (cleared to 0, GEQUAL).
+            prog->floatParam("terrainDepthBias") = gl::reverseZ ? 1.0e-4f : -1.0e-4f;
+
+            // Bind textures in the order the shader expects them (matches
+            // renderEllipsoid_GLSL): diffuse on TEX0, specular on TEX1.
+            std::size_t texUnit = 0;
+            if (ri.baseTex != nullptr)
+            {
+                glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(texUnit));
+                ri.baseTex->bind();
+                ++texUnit;
+            }
+            if (util::is_set(shadprop.texUsage, TexUsage::SpecularTexture)
+                && ri.glossTex != nullptr)
+            {
+                glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(texUnit));
+                ri.glossTex->bind();
+                ++texUnit;
+            }
+            glActiveTexture(GL_TEXTURE0);
+
+            PipelineState terrainPs;
+            terrainPs.blending  = false;
+            terrainPs.depthTest = true;
+            terrainPs.depthMask = true;
+            setPipelineState(terrainPs);
+
+            m_terrainLOD->selectPatches(ri.eyePos_obj, viewFrustum, 1.0f, ri.eyePos_obj.norm());
+            m_terrainLOD->generateMeshes(*terrainData);
+            m_terrainLOD->render(prog);
+        }
+        }
     }
 
     if (showRings)

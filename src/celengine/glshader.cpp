@@ -134,7 +134,10 @@ createShader(Key key, std::string_view source, GLShaderStatus& status)
     status = compile(id, source);
     if (status != GLShaderStatus::OK)
     {
-        writeShaderLog("Error compiling {} shader:\n{}", shaderType(Shader::ShaderType), GetInfoLog(id));
+        auto infoLog = GetInfoLog(id);
+        writeShaderLog("Error compiling {} shader:\n{}", shaderType(Shader::ShaderType), infoLog);
+        GetLogger()->error("Error compiling {} shader:\n{}\n", shaderType(Shader::ShaderType), infoLog);
+        fmt::print(stderr, "[SHADER] compile error ({}):\n{}\n--- source ---\n{}\n", shaderType(Shader::ShaderType), infoLog, source);
         return Shader();
     }
 
@@ -413,8 +416,11 @@ GLProgramBuilder::link(GLShaderStatus& status)
     glGetProgramiv(id, GL_LINK_STATUS, &linkSuccess);
     if (linkSuccess != GL_TRUE)
     {
-        writeShaderLog("Error linking shader program:\n{}", GetInfoLog(id));
+        auto infoLog = GetInfoLog(id);
+        writeShaderLog("Error linking shader program:\n{}", infoLog);
+        GetLogger()->error("Error linking shader program:\n{}\n", infoLog);
         status = GLShaderStatus::LinkError;
+        return GLProgram{};
     }
 
     status = GLShaderStatus::OK;

@@ -171,6 +171,16 @@ constexpr std::string_view NormalVertexPosition = R"glsl(
     set_vp(in_Position);
 )glsl"sv;
 
+constexpr std::string_view TerrainVertexPosition = R"glsl(
+    set_vp(in_Position);
+    // Push terrain fragments slightly toward the camera in clip space so they
+    // consistently win z-fight against the underlying base ellipsoid. Skip
+    // skirt vertices (in_TexCoord0.z >= 0.5) so they remain occluded by the
+    // base sphere except where they're sandwiched between adjacent patches.
+    if (in_TexCoord0.z < 0.5)
+        gl_Position.z += terrainDepthBias * gl_Position.w;
+)glsl"sv;
+
 constexpr std::string_view LineVertexPosition = R"glsl(
     vec4 thisPos = calc_vp(in_Position);
     vec4 nextPos = calc_vp(in_PositionNext);
@@ -185,7 +195,11 @@ constexpr std::string_view LineVertexPosition = R"glsl(
 std::string_view
 VertexPosition(const ShaderProperties& props)
 {
-    return util::is_set(props.texUsage, TexUsage::LineAsTriangles) ? LineVertexPosition : NormalVertexPosition;
+    if (util::is_set(props.texUsage, TexUsage::LineAsTriangles))
+        return LineVertexPosition;
+    if (util::is_set(props.texUsage, TexUsage::Terrain))
+        return TerrainVertexPosition;
+    return NormalVertexPosition;
 }
 
 constexpr std::string_view FragmentHeader = R"glsl(
@@ -1205,6 +1219,9 @@ R"glsl(
     source += DeclareLights(props);
     source += TextureCoordDeclarations(props, Shader_Out);
     source += DeclareUniform("texCoordOffset", Shader_Float);
+
+    if (util::is_set(props.texUsage, TexUsage::Terrain))
+        source += DeclareUniform("terrainDepthBias", Shader_Float);
 
     if (props.usePointSize())
         source += PointSizeDeclaration();

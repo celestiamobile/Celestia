@@ -137,6 +137,10 @@ set(CELENGINE_SOURCES
   stellarclass.cpp
   stellarclass.h
   surface.h
+  terraindata.cpp
+  terraindata.h
+  terrainlodmanager.cpp
+  terrainlodmanager.h
   texmanager.cpp
   texmanager.h
   textlayout.cpp

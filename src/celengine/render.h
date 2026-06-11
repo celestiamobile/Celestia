@@ -43,6 +43,8 @@ class ReferenceMark;
 class CurvePlot;
 class CurvePlotVertexBuffer;
 class PointStarVertexBuffer;
+class TerrainLODManager;
+class TerrainData;
 namespace celestia::render { class PsfStarVertexBuffer; class StarPipelineOwner; }
 class Observer;
 struct Surface;
@@ -769,10 +771,11 @@ class Renderer
     std::unique_ptr<celestia::gl::Buffer> m_rectBO;
     mutable bool m_rectInitialized{ false };
 
-    // Saturation magnitude used to calculate a point star size
+     // Saturation magnitude used to calculate a point star size
     float satPoint;
 
     std::unique_ptr<LODSphereMesh> m_lodSphere;
+    std::unique_ptr<TerrainLODManager> m_terrainLOD;
     std::unique_ptr<Texture> m_gaussianDiscTex;
     std::unique_ptr<Texture> m_gaussianGlareTex;
 

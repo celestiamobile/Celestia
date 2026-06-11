@@ -71,6 +71,11 @@ enum class TexUsage : std::uint32_t
     StaticPointSize         = 0x10000,
     LineAsTriangles         = 0x20000,
     TextureCoordTransform   = 0x40000,
+    // Terrain mesh variant: position is already in object space (no LOD-sphere
+    // remap), in_TexCoord0.z carries a 0/1 skirt flag, and a small clip-space
+    // depth bias is applied to non-skirt verts so terrain wins z-fight against
+    // the underlying base ellipsoid.
+    Terrain                 = 0x80000,
 };
 
 ENUM_CLASS_BITWISE_OPS(TexUsage);
