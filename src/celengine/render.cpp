@@ -2458,25 +2458,48 @@ void Renderer::renderObject(const Vector3f& pos,
             cloudTexOffset = (float) (-math::pfmod(now * atmosphere->cloudSpeed * 0.5 * celestia::numbers::inv_pi, 1.0));
     }
 
+    const bool hasTerrain = util::is_set(obj.surface->appearanceFlags, Surface::Flags::HasTerrain);
+    const float terrainMaxAltitudeR = 0.5f;
+    const bool terrainInLODRange = hasTerrain && (ri.eyePos_obj.norm() - 1.0f <= terrainMaxAltitudeR);
+
+    // Keep a base sphere as coverage fallback under terrain patches. Sink it to
+    // terrain minimum when terrain is active so negative elevations can still
+    // appear above the fallback instead of being clipped by a unit sphere.
+    Vector3f baseSphereScaleFactors = scaleFactors;
+    if (terrainInLODRange)
+    {
+        float minTerrainOffsetR = std::min(0.0f, obj.surface->terrainHeightOffset / obj.radius);
+        float baseSphereRadiusScale = std::max(0.0f, 1.0f + minTerrainOffsetR);
+        baseSphereScaleFactors *= baseSphereRadiusScale;
+    }
+
+    Matrix4f baseSphereMV = (*m.modelview) * (transform * Scaling(baseSphereScaleFactors)).matrix();
+    Matrices baseSphereMVP = { m.projection, &baseSphereMV };
+    RenderInfo baseSphereRI = ri;
+    if (terrainInLODRange)
+    {
+        baseSphereRI.eyePos_obj = -(planetRotation * (pos.cwiseQuotient(baseSphereScaleFactors)));
+    }
+
     if (obj.geometry == engine::GeometryHandle::Invalid)
     {
-        // A null model indicates that this body is a sphere
+        // A null model indicates that this body is a sphere.
         if (lit)
         {
-            renderEllipsoid_GLSL(ri, ls,
+            renderEllipsoid_GLSL(baseSphereRI, ls,
                                  atmosphere, cloudTexOffset,
-                                 scaleFactors,
+                                 baseSphereScaleFactors,
                                  renderFlags,
                                  obj.orientation,
                                  viewFrustum,
-                                 planetMVP,
+                                 baseSphereMVP,
                                  this,
                                  m_lodSphere.get());
         }
         else
         {
-            ri.isStar = obj.isStar;
-            renderSphereUnlit(ri, viewFrustum, planetMVP, this, m_lodSphere.get());
+            baseSphereRI.isStar = obj.isStar;
+            renderSphereUnlit(baseSphereRI, viewFrustum, baseSphereMVP, this, m_lodSphere.get());
         }
     }
     else if (geometry != nullptr)
@@ -2506,136 +2529,186 @@ void Renderer::renderObject(const Vector3f& pos,
         glActiveTexture(GL_TEXTURE0);
     }
 
-    if (util::is_set(obj.surface->appearanceFlags, Surface::Flags::HasTerrain))
+    if (hasTerrain)
     {
-        // Distance LOD gate. ri.eyePos_obj is in units of planet radii
-        // (positions are divided by semiAxes), so altitude = norm - 1. The
-        // per-vertex atmospheric scattering computed by the dynamic shader
-        // produces visible Gouraud-interpolation banding across the coarse
-        // terrain triangulation when the camera is far from the surface and
-        // each patch covers many pixels. At those altitudes, real terrain
-        // height (~10 km on Earth, ~0.001 R) is sub-pixel anyway, so the
-        // smooth sphere is the correct image. Cut terrain off when the
-        // camera is more than ~half a planet radius above the surface
-        // (~3000 km on Earth) and let the smooth sphere take over.
-        const float terrainMaxAltitudeR = 0.5f;
-        if (ri.eyePos_obj.norm() - 1.0f > terrainMaxAltitudeR)
+        if (!terrainInLODRange)
         {
             // fall through to the rest of the planet rendering
         }
         else
         {
-        // Build (and cache on the surface) the TerrainData for this body
-        // on the first frame that needs it. Re-loading the heightmap every
-        // frame was previously hammering the JPEG decoder.
-        auto& terrainData = obj.surface->terrainData;
-        if (!terrainData)
-        {
-            terrainData = std::make_shared<TerrainData>(
-                obj.surface->terrainHeightmapPath);
-        }
-        // Scale/offset are cheap and could in principle change at runtime
-        // if the .ssc was hot-reloaded, so refresh each frame.
-        terrainData->setHeightScale(obj.surface->terrainHeightScale / obj.radius);
-        terrainData->setHeightOffset(obj.surface->terrainHeightOffset / obj.radius);
-
-        // Build a ShaderProperties variant that mirrors what renderEllipsoid_GLSL
-        // requests for the underlying smooth sphere, plus the Terrain bit. This
-        // gives the terrain mesh the same atmospheric scattering, eclipse
-        // shadows, ring shadows, specular highlights, and diffuse texturing as
-        // the base sphere — instead of a hand-rolled shader that had to
-        // re-implement (and got wrong) all of those effects. Our patch UVs are
-        // already in global equirectangular space, so we deliberately do NOT
-        // request TextureCoordTransform.
-        ShaderProperties shadprop;
-        shadprop.nLights = std::min(ls.nLights, MaxShaderLights);
-        shadprop.texUsage = TexUsage::Terrain;
-        if (ri.baseTex != nullptr)
-            shadprop.texUsage |= TexUsage::DiffuseTexture;
-        // Bind the body's normal map (if any) so per-pixel normals on the
-        // terrain mesh match the smooth-sphere path. Without this, water
-        // specular highlights become mirror-sharp and visibly larger than
-        // the smooth-sphere equivalent when the camera crosses the
-        // terrain-enable altitude threshold.
-        if (ri.bumpTex != nullptr)
-        {
-            shadprop.texUsage |= TexUsage::NormalTexture;
-            if (ri.bumpTex->getFormatOptions() & Texture::DXT5NormalMap)
-                shadprop.texUsage |= TexUsage::CompressedNormalTexture;
-        }
-        if (ri.specularColor != Color::Black)
-        {
-            shadprop.lightModel = LightingModel::PerPixelSpecularModel;
-            if (ri.glossTex != nullptr)
-                shadprop.texUsage |= TexUsage::SpecularTexture;
-            else
-                shadprop.texUsage |= TexUsage::SpecularInDiffuseAlpha;
-        }
-        if (atmosphere != nullptr
-            && util::is_set(renderFlags, RenderFlags::ShowAtmospheres)
-            && atmosphere->mieScaleHeight > 0.0f
-            && shadprop.nLights > 0)
-        {
-            shadprop.texUsage |= TexUsage::Scattering;
-        }
-
-        CelestiaGLProgram* prog = getShaderManager().getShader(shadprop);
-        if (prog != nullptr)
-        {
-            prog->use();
-            prog->setMVPMatrices(*planetMVP.projection, *planetMVP.modelview);
-            prog->setLightParameters(ls, ri.color, ri.specularColor, Color::Black);
-            prog->eyePosition = ls.eyePos_obj;
-            prog->ambientColor = ri.ambientColor.toVector3();
-            prog->shininess = ri.specularPower;
-            prog->textureOffset = 0.0f;
-
-            if (shadprop.hasScattering())
+            // Build (and cache on the surface) the TerrainData for this body
+            // on the first frame that needs it. Re-loading the heightmap every
+            // frame was previously hammering the JPEG decoder.
+            auto& terrainData = obj.surface->terrainData;
+            if (!terrainData)
             {
-                float radius = obj.radius;
-                prog->setAtmosphereParameters(*atmosphere, radius, radius);
+                terrainData = std::make_shared<TerrainData>(
+                    obj.surface->terrainHeightmapPath);
             }
+            // Scale/offset are cheap and could in principle change at runtime
+            // if the .ssc was hot-reloaded, so refresh each frame.
+            terrainData->setHeightScale(obj.surface->terrainHeightScale / obj.radius);
+            terrainData->setHeightOffset(obj.surface->terrainHeightOffset / obj.radius);
 
-            // Sign of the clip-space depth bias flips under reverse-Z: there
-            // "closer to the camera" means LARGER depth (cleared to 0, GEQUAL).
-            prog->floatParam("terrainDepthBias") = gl::reverseZ ? 1.0e-4f : -1.0e-4f;
-
-            // Bind textures in the order the shader expects them (matches
-            // renderEllipsoid_GLSL): diffuse on TEX0, normal on TEX1,
-            // specular on TEX2.
-            std::size_t texUnit = 0;
+            // Build a ShaderProperties variant that mirrors what renderEllipsoid_GLSL
+            // requests for the underlying smooth sphere, plus the Terrain bit. This
+            // gives the terrain mesh the same atmospheric scattering, eclipse
+            // shadows, ring shadows, specular highlights, and diffuse texturing as
+            // the base sphere — instead of a hand-rolled shader that had to
+            // re-implement (and got wrong) all of those effects. Our patch UVs are
+            // already in global equirectangular space, so we deliberately do NOT
+            // request TextureCoordTransform.
+            ShaderProperties shadprop;
+            shadprop.nLights = std::min(ls.nLights, MaxShaderLights);
+            shadprop.texUsage = TexUsage::Terrain;
             if (ri.baseTex != nullptr)
+                shadprop.texUsage |= TexUsage::DiffuseTexture;
+            // Bind the body's normal map (if any) so per-pixel normals on the
+            // terrain mesh match the smooth-sphere path. Without this, water
+            // specular highlights become mirror-sharp and visibly larger than
+            // the smooth-sphere equivalent when the camera crosses the
+            // terrain-enable altitude threshold.
+            if (ri.bumpTex != nullptr)
             {
-                glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(texUnit));
-                ri.baseTex->bind();
-                ++texUnit;
+                shadprop.texUsage |= TexUsage::NormalTexture;
+                if (ri.bumpTex->getFormatOptions() & Texture::DXT5NormalMap)
+                    shadprop.texUsage |= TexUsage::CompressedNormalTexture;
             }
-            if (util::is_set(shadprop.texUsage, TexUsage::NormalTexture)
-                && ri.bumpTex != nullptr)
+            if (ri.specularColor != Color::Black)
             {
-                glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(texUnit));
-                ri.bumpTex->bind();
-                ++texUnit;
+                shadprop.lightModel = LightingModel::PerPixelSpecularModel;
+                if (ri.glossTex != nullptr)
+                    shadprop.texUsage |= TexUsage::SpecularTexture;
+                else
+                    shadprop.texUsage |= TexUsage::SpecularInDiffuseAlpha;
             }
-            if (util::is_set(shadprop.texUsage, TexUsage::SpecularTexture)
-                && ri.glossTex != nullptr)
+            if (ri.lunarLambert != 0.0f)
+                shadprop.lightModel |= LightingModel::LunarLambertModel;
+            if (atmosphere != nullptr
+                && util::is_set(renderFlags, RenderFlags::ShowAtmospheres)
+                && atmosphere->mieScaleHeight > 0.0f
+                && shadprop.nLights > 0)
             {
-                glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(texUnit));
-                ri.glossTex->bind();
-                ++texUnit;
+                shadprop.texUsage |= TexUsage::Scattering;
             }
-            glActiveTexture(GL_TEXTURE0);
 
-            PipelineState terrainPs;
-            terrainPs.blending  = false;
-            terrainPs.depthTest = true;
-            terrainPs.depthMask = true;
-            setPipelineState(terrainPs);
+            // Match smooth-sphere shadow setup so terrain lighting does not
+            // diverge when terrain activates near the surface.
+            for (unsigned int li = 0; li < ls.nLights; ++li)
+            {
+                if (ls.shadows[li] && !ls.shadows[li]->empty())
+                {
+                    auto nShadows = std::min(MaxShaderEclipseShadows, static_cast<unsigned int>(ls.shadows[li]->size()));
+                    shadprop.setEclipseShadowCountForLight(li, nShadows);
+                }
+            }
+            if (ls.shadowingRingSystem)
+            {
+                Texture* ringsTex = m_textureManager->findShadow(ls.shadowingRingSystem->texture);
+                if (ringsTex != nullptr)
+                {
+                    glActiveTexture(GL_TEXTURE0);
+                    ringsTex->bind();
+#ifdef GL_ES
+                    if (gl::OES_texture_border_clamp)
+#endif
+                    {
+                        float bc[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+#ifndef GL_ES
+                        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, bc);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+#else
+                        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR_OES, bc);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER_OES);
+#endif
+                    }
+                    shadprop.texUsage |= TexUsage::RingShadowTexture;
+                    for (unsigned int lightIndex = 0; lightIndex < ls.nLights; ++lightIndex)
+                    {
+                        if (ls.lights[lightIndex].castsShadows &&
+                            ls.shadowingRingSystem == ls.ringShadows[lightIndex].ringSystem)
+                        {
+                            shadprop.setRingShadowForLight(lightIndex, true);
+                        }
+                    }
+                }
+            }
 
-            m_terrainLOD->selectPatches(ri.eyePos_obj, viewFrustum, 1.0f, ri.eyePos_obj.norm());
-            m_terrainLOD->generateMeshes(*terrainData);
-            m_terrainLOD->render(prog);
-        }
+            CelestiaGLProgram* prog = getShaderManager().getShader(shadprop);
+            if (prog != nullptr)
+            {
+                prog->use();
+                prog->setMVPMatrices(*planetMVP.projection, *planetMVP.modelview);
+                prog->setLightParameters(ls, ri.color, ri.specularColor, Color::Black);
+                prog->eyePosition = ls.eyePos_obj;
+                prog->shininess = ri.specularPower;
+                prog->textureOffset = 0.0f;
+                if (util::is_set(shadprop.lightModel, LightingModel::LunarLambertModel))
+                    prog->lunarLambert = ri.lunarLambert;
+
+                if (shadprop.hasScattering())
+                {
+                    float radius = obj.radius;
+                    prog->setAtmosphereParameters(*atmosphere, radius, radius);
+                }
+                if (util::is_set(shadprop.texUsage, TexUsage::RingShadowTexture))
+                {
+                    float radius = obj.radius;
+                    float ringWidth = ls.shadowingRingSystem->outerRadius - ls.shadowingRingSystem->innerRadius;
+                    prog->ringRadius = ls.shadowingRingSystem->innerRadius / radius;
+                    prog->ringWidth = radius / ringWidth;
+                    prog->ringPlane = Eigen::Hyperplane<float, 3>(ls.ringPlaneNormal, ls.ringCenter / radius).coeffs();
+                    prog->ringCenter = ls.ringCenter / radius;
+                    for (unsigned int lightIndex = 0; lightIndex < ls.nLights; ++lightIndex)
+                    {
+                        if (shadprop.hasRingShadowForLight(lightIndex))
+                            prog->ringShadowLOD[lightIndex] = ls.ringShadows[lightIndex].texLod;
+                    }
+                }
+                if (shadprop.hasEclipseShadows())
+                    prog->setEclipseShadowParameters(ls, scaleFactors, obj.orientation);
+
+                // Sign of the clip-space depth bias flips under reverse-Z: there
+                // "closer to the camera" means LARGER depth (cleared to 0, GEQUAL).
+                prog->floatParam("terrainDepthBias") = gl::reverseZ ? 1.0e-4f : -1.0e-4f;
+
+                // Bind textures in the order the shader expects them (matches
+                // renderEllipsoid_GLSL): diffuse on TEX0, normal on TEX1,
+                // specular on TEX2.
+                std::size_t texUnit = 0;
+                if (ri.baseTex != nullptr)
+                {
+                    glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(texUnit));
+                    ri.baseTex->bind();
+                    ++texUnit;
+                }
+                if (util::is_set(shadprop.texUsage, TexUsage::NormalTexture)
+                    && ri.bumpTex != nullptr)
+                {
+                    glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(texUnit));
+                    ri.bumpTex->bind();
+                    ++texUnit;
+                }
+                if (util::is_set(shadprop.texUsage, TexUsage::SpecularTexture)
+                    && ri.glossTex != nullptr)
+                {
+                    glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(texUnit));
+                    ri.glossTex->bind();
+                    ++texUnit;
+                }
+                glActiveTexture(GL_TEXTURE0);
+
+                PipelineState terrainPs;
+                terrainPs.blending  = false;
+                terrainPs.depthTest = true;
+                terrainPs.depthMask = true;
+                setPipelineState(terrainPs);
+
+                m_terrainLOD->selectPatches(ri.eyePos_obj, viewFrustum, 1.0f, ri.eyePos_obj.norm());
+                m_terrainLOD->generateMeshes(*terrainData);
+                m_terrainLOD->render(prog);
+            }
         }
     }
 

@@ -216,8 +216,17 @@ bool TerrainLODManager::shouldRefine(const TerrainPatch& patch,
     // Compute angular size of patch on screen
     float angularSize = std::atan2(patch.radius, distance);
 
+    // Near-surface views need a tighter threshold; otherwise the quadtree
+    // stops one level too early and large square patches become visible.
+    // Blend from ~3.5 deg at the surface to the configured threshold by
+    // ~0.05R altitude (~320 km on Earth).
+    float altitudeR = std::max(0.0f, cameraPos.norm() - sphereRadius) / sphereRadius;
+    float nearSurfaceThreshold = 0.06f;
+    float t = std::clamp(altitudeR / 0.05f, 0.0f, 1.0f);
+    float adaptiveThreshold = nearSurfaceThreshold + (refinementThreshold - nearSurfaceThreshold) * t;
+
     // Refine if angular size exceeds threshold
-    return angularSize > refinementThreshold;
+    return angularSize > adaptiveThreshold;
 }
 
 std::array<TerrainPatch, 4> TerrainLODManager::subdividePatch(const TerrainPatch& patch) const
