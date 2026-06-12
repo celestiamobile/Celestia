@@ -2552,6 +2552,17 @@ void Renderer::renderObject(const Vector3f& pos,
         shadprop.texUsage = TexUsage::Terrain;
         if (ri.baseTex != nullptr)
             shadprop.texUsage |= TexUsage::DiffuseTexture;
+        // Bind the body's normal map (if any) so per-pixel normals on the
+        // terrain mesh match the smooth-sphere path. Without this, water
+        // specular highlights become mirror-sharp and visibly larger than
+        // the smooth-sphere equivalent when the camera crosses the
+        // terrain-enable altitude threshold.
+        if (ri.bumpTex != nullptr)
+        {
+            shadprop.texUsage |= TexUsage::NormalTexture;
+            if (ri.bumpTex->getFormatOptions() & Texture::DXT5NormalMap)
+                shadprop.texUsage |= TexUsage::CompressedNormalTexture;
+        }
         if (ri.specularColor != Color::Black)
         {
             shadprop.lightModel = LightingModel::PerPixelSpecularModel;
@@ -2590,12 +2601,20 @@ void Renderer::renderObject(const Vector3f& pos,
             prog->floatParam("terrainDepthBias") = gl::reverseZ ? 1.0e-4f : -1.0e-4f;
 
             // Bind textures in the order the shader expects them (matches
-            // renderEllipsoid_GLSL): diffuse on TEX0, specular on TEX1.
+            // renderEllipsoid_GLSL): diffuse on TEX0, normal on TEX1,
+            // specular on TEX2.
             std::size_t texUnit = 0;
             if (ri.baseTex != nullptr)
             {
                 glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(texUnit));
                 ri.baseTex->bind();
+                ++texUnit;
+            }
+            if (util::is_set(shadprop.texUsage, TexUsage::NormalTexture)
+                && ri.bumpTex != nullptr)
+            {
+                glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(texUnit));
+                ri.bumpTex->bind();
                 ++texUnit;
             }
             if (util::is_set(shadprop.texUsage, TexUsage::SpecularTexture)

@@ -38,6 +38,7 @@ void TerrainLODManager::clearCache()
         if (patch->vao != 0) glDeleteVertexArrays(1, &patch->vao);
         if (patch->vbo != 0) glDeleteBuffers(1, &patch->vbo);
         if (patch->nbo != 0) glDeleteBuffers(1, &patch->nbo);
+        if (patch->tanbo != 0) glDeleteBuffers(1, &patch->tanbo);
         if (patch->tbo != 0) glDeleteBuffers(1, &patch->tbo);
         if (patch->ebo != 0) glDeleteBuffers(1, &patch->ebo);
     }
@@ -333,6 +334,7 @@ void TerrainLODManager::generatePatchVertices(TerrainPatch& patch,
 {
     patch.vertices.clear();
     patch.normals.clear();
+    patch.tangents.clear();
     patch.texCoords.clear();
     // Keep vertex density CONSTANT per patch regardless of subdivision level.
     // The previous "halve verts every 2 levels" decay was actively harmful:
@@ -424,9 +426,15 @@ void TerrainLODManager::generatePatchVertices(TerrainPatch& patch,
             const float displacement = terrain.getHeightAt(u_global, v_global);
             Eigen::Vector3f position = baseNormal * (sphereRadius + chordBulge + displacement);
             Eigen::Vector3f normal = baseNormal;
-            
+            // Tangent matching LODSphereMesh::createVertices convention so
+            // the normal map perturbs identically: T = (sinPhi, 0, -cosPhi).
+            // Independent of theta (latitude) — points east along constant
+            // latitude in mesh space.
+            Eigen::Vector3f tangent(sinPhi, 0.0f, -cosPhi);
+
             patch.vertices.push_back(position);
             patch.normals.push_back(normal);
+            patch.tangents.push_back(tangent);
             // texcoord vec4: xy = UV, z = skirt flag (0 for surface verts).
             patch.texCoords.push_back(Eigen::Vector4f(u_global, v_global, 0.0f, 0.0f));
         }
@@ -462,6 +470,7 @@ void TerrainLODManager::generatePatchVertices(TerrainPatch& patch,
         Eigen::Vector3f skirtPos = p - n * skirtDepth;
         patch.vertices.push_back(skirtPos);
         patch.normals.push_back(patch.normals[idx]);
+        patch.tangents.push_back(patch.tangents[idx]);
         // Copy uv from the source vert but mark this vertex as a skirt (z=1).
         Eigen::Vector4f tc = patch.texCoords[idx];
         tc.z() = 1.0f;
@@ -594,6 +603,7 @@ void TerrainLODManager::generateMeshes(const TerrainData& terrain)
             patch.vao = cached->vao;
             patch.vbo = cached->vbo;
             patch.nbo = cached->nbo;
+            patch.tanbo = cached->tanbo;
             patch.tbo = cached->tbo;
             patch.ebo = cached->ebo;
             patch.indexCount = cached->indexCount;
@@ -627,6 +637,19 @@ void TerrainLODManager::uploadPatchToGPU(TerrainPatch& patch)
                  GL_STATIC_DRAW);
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Eigen::Vector3f), (void*)0);
+
+    // Upload tangents (attribute index 6 = TangentAttributeIndex). Required
+    // when the shader has TexUsage::NormalTexture set so the normal map can
+    // perturb per-pixel normals in tangent space the same way the smooth
+    // sphere path does.
+    glGenBuffers(1, &patch.tanbo);
+    glBindBuffer(GL_ARRAY_BUFFER, patch.tanbo);
+    glBufferData(GL_ARRAY_BUFFER,
+                 patch.tangents.size() * sizeof(Eigen::Vector3f),
+                 patch.tangents.data(),
+                 GL_STATIC_DRAW);
+    glEnableVertexAttribArray(6);
+    glVertexAttribPointer(6, 3, GL_FLOAT, GL_FALSE, sizeof(Eigen::Vector3f), (void*)0);
     
     // Upload texture coordinates as vec4 (s, t, isSkirt, 0). The dynamic
     // shader pipeline declares in_TexCoord0 as vec4 and reads the skirt flag

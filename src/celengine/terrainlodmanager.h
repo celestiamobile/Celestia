@@ -53,12 +53,20 @@ struct TerrainPatch
     // flag from .z without needing a dedicated attribute slot.
     std::vector<Eigen::Vector3f> vertices;
     std::vector<Eigen::Vector3f> normals;
+    // Per-vertex tangent in the same parameterization as LODSphereMesh:
+    // T = (sin(phi), 0, -cos(phi)) for sphere position (sinTheta*cosPhi,
+    // cosTheta, sinTheta*sinPhi). Required so the normal map perturbs
+    // per-pixel normals identically to the smooth-sphere path; without it,
+    // water specular reflections become mirror-sharp and visibly larger
+    // than the smooth-sphere equivalent at close range.
+    std::vector<Eigen::Vector3f> tangents;
     std::vector<Eigen::Vector4f> texCoords;
     std::vector<unsigned int> indices;
     
     GLuint vao = 0;               // Vertex array object
     GLuint vbo = 0;               // Vertex buffer object
     GLuint nbo = 0;               // Normal buffer object
+    GLuint tanbo = 0;             // Tangent buffer object
     GLuint tbo = 0;               // Texture coordinate buffer object (s,t,isSkirt,0)
     GLuint ebo = 0;               // Element (index) buffer object
     int indexCount = 0;
