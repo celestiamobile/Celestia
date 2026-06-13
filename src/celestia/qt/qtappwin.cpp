@@ -1273,6 +1273,20 @@ CelestiaAppWindow::slotShowGLInfo()
         out << "<br>\n";
     }
 
+    if (info.count("Backend") > 0)
+    {
+        out << QString(_("<b>Backend:</b> %1")).arg(info["Backend"].c_str());
+        out << "<br>\n";
+    }
+
+    if (info.count("BackendBlockers") > 0)
+    {
+        QString blockers = QString::fromStdString(info["BackendBlockers"]);
+        blockers.replace('\n', "<br>\n");
+        out << QString(_("<b>Backend blockers:</b> %1")).arg(blockers);
+        out << "<br>\n";
+    }
+
     // shading language version
     if (info.count("Language") > 0)
     {

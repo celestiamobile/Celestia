@@ -81,6 +81,7 @@
 #include <celttf/truetypefont.h>
 #include "glsupport.h"
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <cassert>
 #include <sstream>
@@ -4988,22 +4989,78 @@ float Renderer::getAspectRatio() const
     return static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight);
 }
 
+static bool
+containsCaseInsensitive(std::string_view text, std::string_view needle)
+{
+    auto it = std::search(text.begin(), text.end(),
+                          needle.begin(), needle.end(),
+                          [](char c1, char c2)
+                          {
+                              return std::tolower(static_cast<unsigned char>(c1))
+                                  == std::tolower(static_cast<unsigned char>(c2));
+                          });
+    return it != text.end();
+}
+
+static std::string
+detectBackend(std::string_view vendor, std::string_view renderer)
+{
+    if (containsCaseInsensitive(renderer, "ANGLE"))
+    {
+        if (containsCaseInsensitive(renderer, "Metal"))
+            return "ANGLE/Metal";
+        if (containsCaseInsensitive(renderer, "Vulkan"))
+            return "ANGLE/Vulkan";
+        if (containsCaseInsensitive(renderer, "Direct3D") || containsCaseInsensitive(renderer, "D3D"))
+            return "ANGLE/D3D";
+        return "ANGLE";
+    }
+
+    if (containsCaseInsensitive(vendor, "Apple"))
+        return "Apple Metal-backed OpenGL";
+
+    return "OpenGL";
+}
+
+static std::string
+getBackendBlocker(std::string_view backend)
+{
+    if (containsCaseInsensitive(backend, "Metal"))
+    {
+        return "Not using UBOs yet; Metal backends enforce uniform-buffer style binding and this remains a blocker.";
+    }
+
+    return "No blocker recorded.";
+}
+
 bool Renderer::getInfo(map<string, string>& info) const
 {
     info["API"] = "OpenGL";
 
     const char* s;
+    std::string vendor;
+    std::string renderer;
     s = reinterpret_cast<const char*>(glGetString(GL_VERSION));
     if (s != nullptr)
         info["APIVersion"] = s;
 
     s = reinterpret_cast<const char*>(glGetString(GL_VENDOR));
     if (s != nullptr)
+    {
         info["Vendor"] = s;
+        vendor = s;
+    }
 
     s = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
     if (s != nullptr)
+    {
         info["Renderer"] = s;
+        renderer = s;
+    }
+
+    auto backend = detectBackend(vendor, renderer);
+    info["Backend"] = backend;
+    info["BackendBlockers"] = getBackendBlocker(backend);
 
     s = reinterpret_cast<const char*>(glGetString(GL_SHADING_LANGUAGE_VERSION));
     if (s != nullptr)

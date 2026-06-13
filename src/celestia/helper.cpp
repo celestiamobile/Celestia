@@ -126,6 +126,12 @@ Helper::getRenderInfo(const Renderer *r)
     if (info.count("Renderer") > 0)
         s += fmt::sprintf(_("Renderer: %s\n"), info["Renderer"]);
 
+    if (info.count("Backend") > 0)
+        s += fmt::sprintf(_("Backend: %s\n"), info["Backend"]);
+
+    if (info.count("BackendBlockers") > 0)
+        s += fmt::sprintf(_("Backend blockers: %s\n"), info["BackendBlockers"]);
+
     if (info.count("Language") > 0)
         s += fmt::sprintf(_("%s Version: %s\n"), info["Language"], info["LanguageVersion"]);
 
