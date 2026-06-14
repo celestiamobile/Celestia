@@ -1964,13 +1964,6 @@ void CelestiaCore::draw()
     if (!viewUpdateRequired())
         return;
 
-    if (needsUpdateFonts)
-    {
-        needsUpdateFonts = false;
-        renderer->updateFonts();
-        hud->updateFonts();
-    }
-
     // Render each view
     for (const auto view : viewManager->views())
         draw(view);
@@ -2065,9 +2058,6 @@ void CelestiaCore::draw(View* view)
     int sceneWidth  = process ? static_cast<int>(fbo->width())  : viewWidth;
     int sceneHeight = process ? static_cast<int>(fbo->height()) : viewHeight;
     bool sceneRescaled = process && (sceneWidth != viewWidth || sceneHeight != viewHeight);
-    float sceneScale = sceneRescaled
-        ? static_cast<float>(sceneWidth) / static_cast<float>(viewWidth)
-        : 1.0f;
 
     // If we need to process, we draw to the FBO which starts at point zero
     renderer->setRenderRegion(process ? 0 : x, process ? 0 : y,
@@ -2076,19 +2066,44 @@ void CelestiaCore::draw(View* view)
                               !view->isRootView());
     if (sceneRescaled)
     {
-        renderer->setRenderScale(sceneScale);
         // setRenderRegion → resize → projectionMode->setSize(scene*) updated
         // the projection's pixel dimensions, which would make PerspectiveFOV
         // (which depends on the height/screenDpi ratio) shrink the FOV and
-        // produce a zoomed-in scene. Scale the projection's screenDpi by
-        // the same sceneScale so the height/screenDpi ratio — and therefore
-        // the FOV — is preserved. pixelSize (= 2·tan(fov/2)/height) then
-        // lives in scene-pixel units, which matches the GL viewport and
-        // keeps discSizeInPixels, mesh LOD, minFeaturePixelSize, and
-        // getPickRay all internally consistent. Renderer::screenDpi is
-        // intentionally left alone so text and HUD chrome stay full-res.
+        // produce a zoomed-in scene. Scale the projection's screenDpi by the
+        // same ratio so the height/screenDpi ratio — and therefore the FOV
+        // — is preserved. pixelSize (= 2·tan(fov/2)/height) then lives in
+        // scene-pixel units, which matches the GL viewport and keeps
+        // discSizeInPixels, mesh LOD, minFeaturePixelSize, and getPickRay all
+        // internally consistent. Renderer::screenDpi is intentionally left
+        // alone so text and HUD chrome stay full-res; this is the only piece
+        // we need to bookend per-view because the projection is mutated
+        // through Renderer::resize, which doesn't touch screenDpi.
+        //
+        // The ratio is taken from the actual fbos[0] size (the truth) rather
+        // than renderer->getRenderScale() so the two can never drift apart.
+        float sceneScale = static_cast<float>(sceneHeight) / static_cast<float>(viewHeight);
         renderer->getProjectionMode()->setScreenDpi(
             std::max(1, static_cast<int>(std::lround(renderer->getScreenDpi() * sceneScale))));
+        if (renderer->getRenderScale() != sceneScale)
+        {
+            renderer->setRenderScale(sceneScale);
+            needsUpdateFonts = true;
+        }
+    }
+    else if (renderer->getRenderScale() != 1.0f)
+    {
+        renderer->setRenderScale(1.0f);
+        needsUpdateFonts = true;
+    }
+
+    // Flush any pending font reload before sim->render so renderer-owned
+    // (useRenderScale-tagged) fonts and HUD fonts both pick up the latest
+    // screenDpi / textScaleFactor / renderScale before any text is drawn.
+    if (needsUpdateFonts)
+    {
+        needsUpdateFonts = false;
+        renderer->updateFonts();
+        hud->updateFonts();
     }
 
     if (view->isRootView())
@@ -2096,13 +2111,8 @@ void CelestiaCore::draw(View* view)
     else
         sim->render(*renderer, *view->observer);
 
-    // Restore render scale before any further drawing so point sprites and
-    // PSF sizes return to their normal DPI-derived scale.
     if (sceneRescaled)
-    {
-        renderer->setRenderScale(1.0f);
         renderer->getProjectionMode()->setScreenDpi(renderer->getScreenDpi());
-    }
 
     // Viewport must be reset for the effect chain: either because we have a
     // non-origin destination or because the scene was rendered at a size
