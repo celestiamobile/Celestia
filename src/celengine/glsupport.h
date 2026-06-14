@@ -19,6 +19,11 @@
 #undef glDepthRange
 #endif
 #define glDepthRange glDepthRangef
+#ifdef __APPLE__
+#ifndef GL_VARIABLE_RASTERIZATION_RATE_ANGLE
+#define GL_VARIABLE_RASTERIZATION_RATE_ANGLE            0x96BC
+#endif
+#endif
 #endif
 
 namespace celestia::gl

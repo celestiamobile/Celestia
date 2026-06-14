@@ -223,6 +223,10 @@ public:
     void joystickButton(int button, bool down);
     void pinchUpdate(float focusX, float focusY, float scale, bool zoomFOV);
     void resize(GLsizei w, GLsizei h);
+    // Update the physical (rasterization) extents of the output framebuffer.
+    // When variable rasterization rate is enabled, this is smaller than the
+    // logical size set via resize(); otherwise pass the same dimensions.
+    void setPhysicalSize(int width, int height);
     void draw();
     void draw(celestia::View*);
     void tick();
