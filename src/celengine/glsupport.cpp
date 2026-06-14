@@ -10,6 +10,9 @@ namespace celestia::gl
 
 #ifdef GL_ES
 CELAPI bool OES_texture_border_clamp          = false; //NOSONAR
+#ifdef __APPLE__
+CELAPI bool supportsRasterizationRateMap      = false; //NOSONAR
+#endif
 #else
 CELAPI bool ARB_invalidate_subdata             = false; //NOSONAR
 #endif
@@ -58,6 +61,9 @@ bool init(util::array_view<std::string> ignore) noexcept
     // GL_ARB_texture_compression_bptc extension, so the same flag drives both
     // upload paths.
     ARB_texture_compression_bptc   = check_extension(ignore, "GL_EXT_texture_compression_bptc");
+#ifdef __APPLE__
+    supportsRasterizationRateMap   = check_extension(ignore, "GL_ANGLE_variable_rasterization_rate_metal");
+#endif
 #else
     ARB_invalidate_subdata         = check_extension(ignore, "GL_ARB_invalidate_subdata");
     ARB_texture_compression_bptc   = check_extension(ignore, "GL_ARB_texture_compression_bptc");

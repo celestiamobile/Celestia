@@ -19,6 +19,11 @@
 #undef glDepthRange
 #endif
 #define glDepthRange glDepthRangef
+#ifdef __APPLE__
+#ifndef GL_VARIABLE_RASTERIZATION_RATE_ANGLE
+#define GL_VARIABLE_RASTERIZATION_RATE_ANGLE            0x96BC
+#endif
+#endif
 #endif
 
 namespace celestia::gl
@@ -56,6 +61,9 @@ extern CELAPI bool EXT_texture_sRGB_R8; //NOSONAR
 extern CELAPI bool MESA_pack_invert; //NOSONAR
 #ifdef GL_ES
 extern CELAPI bool OES_texture_border_clamp; //NOSONAR
+#ifdef __APPLE__
+extern CELAPI bool supportsRasterizationRateMap; //NOSONAR
+#endif
 #endif
 extern CELAPI GLint maxPointSize; //NOSONAR
 extern CELAPI GLint maxTextureSize; //NOSONAR

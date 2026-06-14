@@ -2081,8 +2081,15 @@ void CelestiaCore::draw()
     for (const auto view : viewManager->views())
         draw(view);
 
+#if defined(GL_ES) && defined(__APPLE__)
+    GLboolean wasVrrEnabled = gl::supportsRasterizationRateMap && glIsEnabled(GL_VARIABLE_RASTERIZATION_RATE_ANGLE);
+    bool renderRegionHasChanged = (wasVrrEnabled && isViewportEffectUsed) || viewManager->views().size() > 1;
+#else
+    bool renderRegionHasChanged = viewManager->views().size() > 1;
+#endif
+
     // Reset to render to the main window
-    if (viewManager->views().size() > 1)
+    if (renderRegionHasChanged)
         renderer->setRenderRegion(0, 0, metrics.width, metrics.height, false);
 
     bool toggleAA = renderer->isMSAAEnabled();
@@ -2137,6 +2144,12 @@ void CelestiaCore::resize(GLsizei w, GLsizei h)
         return;
 }
 
+void CelestiaCore::setPhysicalSize(int w, int h)
+{
+    metrics.physicalWidth = w;
+    metrics.physicalHeight = h;
+}
+
 void CelestiaCore::draw(View* view)
 {
     if (view->type != View::ViewWindow) return;
@@ -2152,7 +2165,7 @@ void CelestiaCore::draw(View* view)
     if (nEffects > 0)
     {
         // create/update FBOs for viewport effect chain
-        view->updateFBOs(viewportEffects, metrics.width, metrics.height);
+        view->updateFBOs(viewportEffects, metrics.physicalWidth == 0 ? metrics.width : metrics.physicalWidth, metrics.physicalHeight == 0 ? metrics.height : metrics.physicalHeight);
         fbo = view->getFBO(0);
     }
     bool process = fbo != nullptr && viewportEffects[0]->preprocess(renderer, fbo);
@@ -2171,6 +2184,17 @@ void CelestiaCore::draw(View* view)
 
     if (process)
     {
+#if defined(GL_ES) && defined(__APPLE__)
+        GLboolean wasVrrEnabled = gl::supportsRasterizationRateMap && glIsEnabled(GL_VARIABLE_RASTERIZATION_RATE_ANGLE);
+        if (wasVrrEnabled)
+        {
+            glFlush();
+            glDisable(GL_VARIABLE_RASTERIZATION_RATE_ANGLE);
+            // Viewport effects should have rasterization rate map disabled and work
+            // as normal framebuffer and use the actual physical sizes
+            renderer->setRenderRegion(0, 0, fbo->width(), fbo->height());
+        }
+#endif
         bool ok = true;
         for (int i = 0; i < nEffects; i++)
         {
@@ -2179,9 +2203,10 @@ void CelestiaCore::draw(View* view)
             {
                 // The last effect renders to the screen FBO, needs to be reset
                 // to start from (x,y) instead of point zero
+                // TODO: This is actually wrong in multi-view because x,y also needs to be mapped
                 dst = &screenFbo.value();
                 if (x != 0 || y != 0)
-                    renderer->setRenderRegion(x, y, viewWidth, viewHeight);
+                    renderer->setRenderRegion(x, y, fbo->width(), fbo->height());
             }
             else
             {
@@ -2190,7 +2215,7 @@ void CelestiaCore::draw(View* view)
 
             FramebufferObject* src = view->getFBO(i);
             if (!viewportEffects[i]->prerender(renderer, src, dst) ||
-                !viewportEffects[i]->render(renderer, src, viewWidth, viewHeight))
+                !viewportEffects[i]->render(renderer, src, fbo->width(), fbo->height()))
             {
                 GetLogger()->error("Unable to render viewport effect.\n");
                 ok = false;
@@ -2198,6 +2223,13 @@ void CelestiaCore::draw(View* view)
             }
         }
         viewportEffectUsed = ok;
+#if defined(GL_ES) && defined(__APPLE__)
+        if (wasVrrEnabled)
+        {
+            glFlush();
+            glEnable(GL_VARIABLE_RASTERIZATION_RATE_ANGLE);
+        }
+#endif
     }
     isViewportEffectUsed = viewportEffectUsed;
 }

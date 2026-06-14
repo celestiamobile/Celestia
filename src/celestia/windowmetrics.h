@@ -33,6 +33,12 @@ struct WindowMetrics
 
     int width{ 1 };
     int height{ 1 };
+    // Physical (rasterization) extents of the output framebuffer. When variable
+    // rasterization rate (e.g. ANGLE foveated rendering) is enabled, this is
+    // smaller than width/height; otherwise it matches them. Used to size
+    // intermediate viewport-effect FBOs to the actual color attachment.
+    int physicalWidth{ 0 };
+    int physicalHeight{ 0 };
     int insetLeft{ 0 };
     int insetRight{ 0 };
     int insetTop{ 0 };
