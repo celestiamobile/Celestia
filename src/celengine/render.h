@@ -184,6 +184,16 @@ class Renderer
     float getTextScaleFactor() const;
     void setTextScaleFactor(float);
 
+    // Render scale applies a multiplicative factor on top of the DPI-derived
+    // scale used for point sprites, PSF stars, and getPointWidth/Height. It is
+    // intended to be set to the source-resolution fraction (e.g. 0.5) while
+    // rendering the scene into a downscaled FBO that will later be upscaled by
+    // a viewport effect, so that on-screen point/star sizes remain consistent
+    // regardless of the internal render resolution. Does NOT affect text
+    // layout or star label magnitude thresholds.
+    float getRenderScale() const;
+    void setRenderScale(float);
+
     float getScaleFactor() const;
     float getPointWidth() const;
     float getPointHeight() const;
@@ -657,6 +667,7 @@ class Renderer
     double cosViewConeAngle{ 0.0 };
     int screenDpi{ 96 };
     float textScaleFactor{ 1.0f };
+    float renderScale{ 1.0f };
     float corrFac{ 1.12f };
     float pixelSize{ 1.0f };
     float faintestAutoMag45deg{ 8.0f };

@@ -483,9 +483,19 @@ void Renderer::setTextScaleFactor(float scale)
     textScaleFactor = scale;
 }
 
+float Renderer::getRenderScale() const
+{
+    return renderScale;
+}
+
+void Renderer::setRenderScale(float scale)
+{
+    renderScale = scale;
+}
+
 float Renderer::getScaleFactor() const
 {
-    return screenDpi / 96.0f;
+    return screenDpi / 96.0f * renderScale;
 }
 
 float Renderer::getPointWidth() const
@@ -1646,7 +1656,7 @@ void Renderer::renderObjectAsPoint(const PointObjectInfo& info,
     // on a planet whose true visual is just the sharp-edged disc.
     if (starStyle == StarStyle::PointSpreadFunction)
     {
-        float pointScale = static_cast<float>(screenDpi) / 96.0f;
+        float pointScale = getScaleFactor();
         addStarAsPsfPoint(info, color, appMag, pointScale, discSizeInPixels, emissive);
         return;
     }
@@ -1664,7 +1674,7 @@ void Renderer::renderObjectAsPoint(const PointObjectInfo& info,
                         (maxBlendDiscSize - maxDiscSize));
     }
 
-    float scale = static_cast<float>(screenDpi) / 96.0f;
+    float scale = getScaleFactor();
     float pointSize, alpha, glareSize, glareAlpha;
     calculatePointSize(appMag, BaseStarDiscSize * scale, pointSize, alpha, glareSize, glareAlpha);
 
@@ -1789,6 +1799,11 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
     // equals the body's angular disc.
     float a    = starOptimization / r;
     float invB = celestia::numbers::pi_v<float> / r - a;
+    // discSizeInPixels lives in scene-pixel units (pixelSize is derived
+    // from the projection whose size matches the GL viewport). The shader's
+    // PSF formula computes gl_PointSize = ptSize * pointScale in those same
+    // scene-pixel units. To invert, divide by pointScale so angR is in DP,
+    // which is what the shader expects when it uses pointScale again.
     float angR = discSizeInPixels / pointScale;
     float linkedGlowPeak = std::pow(angR * (a + invB), 2.5f);
 
@@ -1949,7 +1964,13 @@ Renderer::locationsToAnnotations(const Body& body,
     math::Ellipsoidd bodyEllipsoid(semiAxes.cast<double>());
 
     Matrix3d bodyMatrix = bodyOrientation.conjugate().toRotationMatrix();
-    float minFeaturePixelSize = minFeatureSize * static_cast<float>(getScreenDpi()) / 96.0f;
+    // pixelSize is in scene-pixel units (the projection size matches the
+    // GL viewport, and its screenDpi is scaled with renderScale to preserve
+    // FOV). pixSize below therefore lives in scene pixels, which is the
+    // same unit getScaleFactor() (= dpi/96 · renderScale) produces for the
+    // DP→scene-pixel conversion. Renderer::screenDpi alone would give
+    // full-view pixels and the comparison would be off.
+    float minFeaturePixelSize = minFeatureSize * getScaleFactor();
 
     for (const auto location : *locations)
     {
@@ -3942,7 +3963,7 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     starRenderer.SolarSystemMaxDistance = SolarSystemMaxDistance;
     starRenderer.starStyle         = starStyle;
     starRenderer.psf.pointRadius   = starPointRadius;
-    starRenderer.psf.pointScale    = static_cast<float>(screenDpi) / 96.0f;
+    starRenderer.psf.pointScale    = getScaleFactor();
     starRenderer.psf.optimization  = starOptimization;
     starRenderer.psf.maxIrradiance = starMaxIrradiance;
     starRenderer.psf.exposure      = starExposure;
@@ -3953,7 +3974,7 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
 
     starRenderer.colorTemp = &starColors;
 
-    float scale = static_cast<float>(screenDpi) / 96.0f;
+    float scale = getScaleFactor();
 
     // Even in PSF mode, renderObjectAsPoint falls back to the legacy
     // point-sprite buffers for close bodies whose true angular disc

@@ -175,7 +175,7 @@ void PointStarRenderer::process(const Star& star, float distance, float appMag)
             else
             {
                 float pointSize, alpha, glareSize, glareAlpha;
-                float size = BaseStarDiscSize * static_cast<float>(renderer->getScreenDpi()) / 96.0f;
+                float size = BaseStarDiscSize * renderer->getScaleFactor();
                 renderer->calculatePointSize(appMag,
                                              size,
                                              pointSize,

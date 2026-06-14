@@ -9,6 +9,10 @@
 
 #include "view.h"
 
+#include <algorithm>
+#include <utility>
+#include <vector>
+
 #include <celengine/framebuffer.h>
 #include <celengine/glsupport.h>
 #include <celengine/overlay.h>
@@ -265,8 +269,8 @@ void
 View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, int gWidth, int gHeight)
 {
     int count = static_cast<int>(effects.size());
-    auto newWidth = static_cast<GLuint>(width * gWidth);
-    auto newHeight = static_cast<GLuint>(height * gHeight);
+    int fullWidth  = static_cast<int>(width  * gWidth);
+    int fullHeight = static_cast<int>(height * gHeight);
 
     // Query the sample count of the currently bound (output) framebuffer so the
     // first viewport-effect FBO matches it.  glGetIntegerv(GL_SAMPLES) returns 0
@@ -281,16 +285,56 @@ View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, in
     if (static_cast<int>(fbos.size()) != count)
         fbos.resize(count);
 
+    // Resolve source sizes by chaining backwards from the screen. The chain
+    // is seeded with the view's full dimensions (the screen is always the
+    // final destination at view size); each effect's source FBO size is
+    // then whatever it requests for the destination size it must produce
+    // (which is the source size of the next effect in the chain). This
+    // lets effects compose: e.g. two Upscale(0.5) effects produce a scene
+    // FBO at 0.25 × view size, with each effect doing one 2× stretch.
+    //
+    // Float buffer requirement propagates backwards as well: if any effect
+    // at index >= i needs a float source, fbos[i] must also be float so
+    // linear-light precision is preserved end-to-end (otherwise the chain
+    // would clip to 8-bit between stages, defeating effects like sRGB
+    // tonemap that need the precision in the first place).
+    std::vector<std::pair<int, int>> sizes(count);
+    std::vector<bool> useFloats(count, false);
+    int dstWidth  = fullWidth;
+    int dstHeight = fullHeight;
+    bool needFloatDownstream = false;
+    for (int i = count - 1; i >= 0; --i)
+    {
+        auto [sw, sh] = effects[i]->sourceSize(dstWidth, dstHeight);
+        sw = std::clamp(sw, 1, fullWidth);
+        sh = std::clamp(sh, 1, fullHeight);
+        sizes[i] = { sw, sh };
+        dstWidth  = sw;
+        dstHeight = sh;
+
+        bool needsFloat = effects[i]->needsFloatSource() || needFloatDownstream;
+        useFloats[i] = needsFloat;
+        needFloatDownstream = needsFloat;
+    }
+
     for (int i = 0; i < count; i++)
     {
-        // Only the first FBO needs MSAA to match the output framebuffer.
-        // Subsequent FBOs receive already-resolved blits so samples=1 suffices.
-        int samples = (i == 0) ? samplesToRequest : 1;
+        auto [w, h] = sizes[i];
+        auto newWidth  = static_cast<GLuint>(w);
+        auto newHeight = static_cast<GLuint>(h);
 
-        // Use a float color buffer only when the consuming effect requires it
-        // (e.g. the sRGB tonemap needs linear-light precision). Half-float
-        // texture formats are core in GLES 3.0+ and desktop GL 3.0+.
-        bool useFloat = effects[i]->needsFloatSource();
+        // Only fbos[0] (the scene render target) may receive MSAA samples
+        // matching the output framebuffer. Subsequent FBOs receive
+        // already-resolved blits so samples=1 suffices. When fbos[0] is
+        // not at full view size, force samples=1 too: any rescaling pass
+        // (e.g. an upscaler) is expected to handle reconstruction, and
+        // MSAA on a rescaled target wastes bandwidth.
+        bool isScene = (i == 0);
+        bool sceneFullSize = isScene && w == fullWidth && h == fullHeight;
+        int samples = sceneFullSize ? samplesToRequest : 1;
+
+        // Half-float texture formats are core in GLES 3.0+ and desktop GL 3.0+.
+        bool useFloat = useFloats[i];
 
         auto& fbo = fbos[i];
 

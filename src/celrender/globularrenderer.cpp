@@ -664,7 +664,7 @@ GlobularRenderer::renderForm(CelestiaGLProgram *tidalProg, CelestiaGLProgram *gl
     globProg->vec3Param("offset")       = obj.offset;
     globProg->floatParam("brightness")  = obj.brightness;
     globProg->floatParam("pixelWeight") = pixelWeight;
-    globProg->floatParam("scale")       = size * static_cast<float>(m_renderer.getScreenDpi()) / 96.0f;
+    globProg->floatParam("scale")       = size * m_renderer.getScaleFactor();
     globProg->samplerParam("colorTex")  = 0;
     globProg->samplerParam("starTex")   = 2;
 

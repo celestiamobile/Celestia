@@ -454,7 +454,7 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
     }
     else if (useStaticPointSize)
     {
-        prog->pointScale = renderer->getScreenDpi() / 96.0f;
+        prog->pointScale = renderer->getScaleFactor();
     }
 
     // Ring shadow parameters
@@ -613,7 +613,7 @@ GLSLUnlit_RenderContext::makeCurrent(const cmod::Material& m)
     }
     else if (useStaticPointSize)
     {
-        prog->pointScale = renderer->getScreenDpi() / 96.0f;
+        prog->pointScale = renderer->getScaleFactor();
     }
 
     cmod::BlendMode newBlendMode = cmod::BlendMode::InvalidBlend;

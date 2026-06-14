@@ -10,6 +10,7 @@
 
 #include "viewporteffect.h"
 
+#include <algorithm>
 #include <array>
 
 #include "framebuffer.h"
@@ -122,6 +123,36 @@ void PassthroughViewportEffect::initialize()
 WarpMeshViewportEffect::WarpMeshViewportEffect(std::unique_ptr<WarpMesh>&& _mesh) :
     mesh(std::move(_mesh))
 {
+}
+
+UpscaleViewportEffect::UpscaleViewportEffect(float scale,
+                                             StaticShader shaderName,
+                                             bool needsFloatSource) :
+    PassthroughViewportEffect(shaderName, needsFloatSource),
+    m_scale(scale > 0.0f && scale <= 1.0f ? scale : 1.0f)
+{
+}
+
+std::pair<int, int>
+UpscaleViewportEffect::sourceSize(int dstWidth, int dstHeight) const
+{
+    int w = std::max(1, static_cast<int>(dstWidth  * m_scale));
+    int h = std::max(1, static_cast<int>(dstHeight * m_scale));
+    return { w, h };
+}
+
+bool
+UpscaleViewportEffect::distortXY(float& x, float& y)
+{
+    // No remap is needed for picking: the scene is rendered with the
+    // projection's size scaled by m_scale and its screenDpi scaled by the
+    // same factor (see CelestiaCore::draw). PerspectiveFOV preserves FOV
+    // under proportional changes to both, so getPickRay produces the same
+    // ray regardless of renderScale and the picked normalized coordinate
+    // maps 1:1 onto the rendered scene.
+    (void)x;
+    (void)y;
+    return true;
 }
 
 WarpMeshViewportEffect::~WarpMeshViewportEffect() = default;

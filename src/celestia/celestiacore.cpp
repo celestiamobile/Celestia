@@ -16,6 +16,7 @@
 #include "celestiacore.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
@@ -2054,16 +2055,60 @@ void CelestiaCore::draw(View* view)
     auto y = static_cast<int>(view->y * static_cast<float>(metrics.height));
     auto viewWidth = static_cast<int>(view->width * static_cast<float>(metrics.width));
     auto viewHeight = static_cast<int>(view->height * static_cast<float>(metrics.height));
+
+    // When the first viewport effect requests a source FBO with dimensions
+    // that differ from the view, the 3D scene is rendered into that
+    // resized fbos[0]; the effect then maps it back into the next buffer
+    // in the chain (full view size for the last effect, per the chained
+    // sizing in View::updateFBOs). HUD/overlay is rendered separately in
+    // renderOverlay() and is unaffected by this scaling.
+    int sceneWidth  = process ? static_cast<int>(fbo->width())  : viewWidth;
+    int sceneHeight = process ? static_cast<int>(fbo->height()) : viewHeight;
+    bool sceneRescaled = process && (sceneWidth != viewWidth || sceneHeight != viewHeight);
+    float sceneScale = sceneRescaled
+        ? static_cast<float>(sceneWidth) / static_cast<float>(viewWidth)
+        : 1.0f;
+
     // If we need to process, we draw to the FBO which starts at point zero
-    renderer->setRenderRegion(process ? 0 : x, process ? 0 : y, viewWidth, viewHeight, !view->isRootView());
+    renderer->setRenderRegion(process ? 0 : x, process ? 0 : y,
+                              process ? sceneWidth  : viewWidth,
+                              process ? sceneHeight : viewHeight,
+                              !view->isRootView());
+    if (sceneRescaled)
+    {
+        renderer->setRenderScale(sceneScale);
+        // setRenderRegion → resize → projectionMode->setSize(scene*) updated
+        // the projection's pixel dimensions, which would make PerspectiveFOV
+        // (which depends on the height/screenDpi ratio) shrink the FOV and
+        // produce a zoomed-in scene. Scale the projection's screenDpi by
+        // the same sceneScale so the height/screenDpi ratio — and therefore
+        // the FOV — is preserved. pixelSize (= 2·tan(fov/2)/height) then
+        // lives in scene-pixel units, which matches the GL viewport and
+        // keeps discSizeInPixels, mesh LOD, minFeaturePixelSize, and
+        // getPickRay all internally consistent. Renderer::screenDpi is
+        // intentionally left alone so text and HUD chrome stay full-res.
+        renderer->getProjectionMode()->setScreenDpi(
+            std::max(1, static_cast<int>(std::lround(renderer->getScreenDpi() * sceneScale))));
+    }
 
     if (view->isRootView())
         sim->render(*renderer);
     else
         sim->render(*renderer, *view->observer);
 
-    // Viewport need to be reset to start from (x,y) instead of point zero
-    if (process && (x != 0 || y != 0))
+    // Restore render scale before any further drawing so point sprites and
+    // PSF sizes return to their normal DPI-derived scale.
+    if (sceneRescaled)
+    {
+        renderer->setRenderScale(1.0f);
+        renderer->getProjectionMode()->setScreenDpi(renderer->getScreenDpi());
+    }
+
+    // Viewport must be reset for the effect chain: either because we have a
+    // non-origin destination or because the scene was rendered at a size
+    // that differs from the view dimensions and the next effect needs to
+    // write at view dimensions.
+    if (process && (x != 0 || y != 0 || sceneRescaled))
         renderer->setRenderRegion(x, y, viewWidth, viewHeight);
 
     if (process)
