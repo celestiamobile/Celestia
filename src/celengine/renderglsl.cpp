@@ -392,6 +392,12 @@ void renderGeometry_GLSL(RenderGeometry* geometry,
         glGetFloatv(GL_DEPTH_RANGE, range);
         glDepthRange(0.0f, 1.0f);
 
+#if defined(GL_ES) && defined(__APPLE__)
+    GLboolean wasVrrEnabled = glIsEnabled(GL_VARIABLE_RASTERIZATION_RATE_ANGLE);
+    if (wasVrrEnabled)
+        glDisable(GL_VARIABLE_RASTERIZATION_RATE_ANGLE);
+#endif
+
 #ifdef DEPTH_STATE_DEBUG
         float bias, bits, clear, range[2], scale;
         glGetFloatv(GL_DEPTH_BIAS, &bias);
@@ -404,6 +410,11 @@ void renderGeometry_GLSL(RenderGeometry* geometry,
 
         renderGeometryShadow_GLSL(geometry, shadowBuffer, ls, 0,
                                   tsec, renderer, &lightMatrix);
+
+#if defined(GL_ES) && defined(__APPLE__)
+        if (wasVrrEnabled)
+            glEnable(GL_VARIABLE_RASTERIZATION_RATE_ANGLE);
+#endif
         renderer->setViewport(viewport);
 #ifdef DEPTH_BUFFER_DEBUG
         glDisable(GL_DEPTH_TEST);

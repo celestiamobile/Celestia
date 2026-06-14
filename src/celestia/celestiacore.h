@@ -231,6 +231,10 @@ public:
     void touchMove(const Eigen::Vector3f&, const Eigen::Vector3f&, const Eigen::Vector3f&);
     void touchUp(const Eigen::Vector3f&);
     void resize(GLsizei w, GLsizei h);
+    // Update the physical (rasterization) extents of the output framebuffer.
+    // When variable rasterization rate is enabled, this is smaller than the
+    // logical size set via resize(); otherwise pass the same dimensions.
+    void setPhysicalSize(int width, int height);
     void draw();
     void draw(celestia::View*);
     void tick();
