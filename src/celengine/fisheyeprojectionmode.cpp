@@ -105,7 +105,7 @@ Eigen::Vector3f FisheyeProjectionMode::getPickRay(float x, float y, float /*zoom
 Eigen::Vector2f FisheyeProjectionMode::getRayIntersection(Eigen::Vector3f pickRay, float /*zoom*/) const
 {
     float phi = std::acos(pickRay.z());
-    float r = phi / celestia::numbers::pi_v<float>;
+    float r = phi / std::numbers::pi_v<float>;
     float theta = std::atan2(pickRay.y(), pickRay.x());
     float x = r * std::cos(theta);
     float y = r * std::sin(theta);
