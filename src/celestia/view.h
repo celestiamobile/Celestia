@@ -51,7 +51,7 @@ public:
     void reset();
     static View* remove(View*);
     void drawBorder(Overlay*, int gWidth, int gHeight, const Color &color, float linewidth = 1.0f) const;
-    void updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, int gWidth, int gHeight);
+    void updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, int gWidth, int gHeight, bool foveatedFirst = false);
     FramebufferObject *getFBO(int index) const;
 
     Type           type;

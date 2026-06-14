@@ -2121,9 +2121,21 @@ void CelestiaCore::draw(View* view)
                                   : std::nullopt;
     if (nEffects > 0)
     {
-        // create/update FBOs for viewport effect chain
-        view->updateFBOs(viewportEffects, metrics.width, metrics.height);
+        // create/update FBOs for viewport effect chain. The first FBO is the
+        // one the scene is rendered into, so apply foveation there when the
+        // renderer has requested it.
+        view->updateFBOs(viewportEffects, metrics.width, metrics.height,
+                         foveationParameters.enabled);
         fbo = view->getFBO(0);
+        if (fbo != nullptr && foveationParameters.enabled)
+        {
+            fbo->setFoveationParameters(0, 0,
+                                        foveationParameters.focalX,
+                                        foveationParameters.focalY,
+                                        foveationParameters.gainX,
+                                        foveationParameters.gainY,
+                                        foveationParameters.foveaArea);
+        }
     }
     bool process = fbo != nullptr && viewportEffects[0]->preprocess(renderer, fbo);
 

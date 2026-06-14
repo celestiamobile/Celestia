@@ -262,7 +262,7 @@ View::drawBorder(Overlay* overlay, int gWidth, int gHeight, const Color &color, 
 
 
 void
-View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, int gWidth, int gHeight)
+View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, int gWidth, int gHeight, bool foveatedFirst)
 {
     int count = static_cast<int>(effects.size());
     auto newWidth = static_cast<GLuint>(width * gWidth);
@@ -292,19 +292,25 @@ View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, in
         // texture formats are core in GLES 3.0+ and desktop GL 3.0+.
         bool useFloat = effects[i]->needsFloatSource();
 
+        // Only the very first FBO is rendered into by the scene draw, so it's
+        // the only one that benefits from foveated rendering.
+        bool foveated = (i == 0) && foveatedFirst;
+
         auto& fbo = fbos[i];
 
         if (fbo
             && fbo->width()         == newWidth
             && fbo->height()        == newHeight
             && fbo->samples()       == samples
-            && fbo->useFloatColor() == useFloat)
+            && fbo->useFloatColor() == useFloat
+            && fbo->foveated()      == foveated)
             continue;
 
         fbo = std::make_unique<FramebufferObject>(newWidth, newHeight,
                                                   FramebufferObject::ColorAttachment | FramebufferObject::DepthAttachment,
                                                   samples,
-                                                  useFloat);
+                                                  useFloat,
+                                                  foveated);
         if (!fbo->isValid())
         {
             GetLogger()->error("Error creating view FBO {}.\n", i);

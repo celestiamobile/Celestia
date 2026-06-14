@@ -440,6 +440,31 @@ public:
 
     celestia::engine::TexturePaths* getTexturePaths() const noexcept { return texturePaths.get(); }
 
+    // ── Foveated rendering ────────────────────────────────────────────────────
+    // Per-eye / per-frame foveation parameters supplied by the renderer (e.g.
+    // the OpenXR backend on Quest). When enabled and at least one viewport
+    // effect is active, draw(View*) marks the first viewport-effect FBO as
+    // foveated and forwards the parameters to it. When no viewport effect is
+    // active, the renderer is expected to apply foveation directly to its
+    // own render target.
+    struct FoveationParameters
+    {
+        bool  enabled   = false;
+        float focalX    = 0.0f;   // NDC, -1..1
+        float focalY    = 0.0f;   // NDC, -1..1
+        float gainX     = 2.0f;
+        float gainY     = 2.0f;
+        float foveaArea = 2.0f;
+    };
+
+    void setFoveationParameters(const FoveationParameters& params) { foveationParameters = params; }
+    const FoveationParameters& getFoveationParameters() const { return foveationParameters; }
+
+    // Number of viewport effects currently registered. Stable across a
+    // session, so renderers can use this once at setup time to decide where
+    // to apply foveation.
+    bool hasViewportEffects() const { return !viewportEffects.empty(); }
+
 private:
     void charEnteredAutoComplete(const char*);
     void updateSelectionFromInput();
@@ -549,6 +574,7 @@ private:
     std::vector<std::unique_ptr<ViewportEffect>> viewportEffects;
     bool isViewportEffectUsed { false };
     bool needsUpdateFonts{ false };
+    FoveationParameters foveationParameters{};
 
     ScriptSystemAccessPolicy scriptSystemAccessPolicy { ScriptSystemAccessPolicy::Ask };
 

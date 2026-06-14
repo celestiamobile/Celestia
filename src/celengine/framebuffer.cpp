@@ -12,7 +12,26 @@
 
 #include <cassert>
 
-FramebufferObject::FramebufferObject(GLuint width, GLuint height, unsigned int attachments, int samples, bool useFloatColor) :
+#include "glsupport.h"
+
+// QCOM_texture_foveated tokens / entry points are not always present in the
+// GL headers shipped with the SDK we build against (notably on desktop builds,
+// or on older GLES headers). Provide fallback definitions so the code below
+// always compiles; the values come from the published extension spec.
+#ifndef GL_TEXTURE_FOVEATED_FEATURE_BITS_QCOM
+#define GL_TEXTURE_FOVEATED_FEATURE_BITS_QCOM 0x8BFB
+#endif
+#ifndef GL_FOVEATION_ENABLE_BIT_QCOM
+#define GL_FOVEATION_ENABLE_BIT_QCOM          0x00000001
+#endif
+#ifndef GL_FOVEATION_SCALED_BIN_METHOD_BIT_QCOM
+#define GL_FOVEATION_SCALED_BIN_METHOD_BIT_QCOM 0x00000002
+#endif
+#ifndef GL_TEXTURE_FOVEATED_MIN_PIXEL_DENSITY_QCOM
+#define GL_TEXTURE_FOVEATED_MIN_PIXEL_DENSITY_QCOM 0x8BFD
+#endif
+
+FramebufferObject::FramebufferObject(GLuint width, GLuint height, unsigned int attachments, int samples, bool useFloatColor, bool foveated) :
     m_width(width),
     m_height(height),
     m_colorTexId(0),
@@ -20,6 +39,8 @@ FramebufferObject::FramebufferObject(GLuint width, GLuint height, unsigned int a
     m_fboId(0),
     m_samples(samples > 1 ? samples : 1),
     m_useFloatColor(useFloatColor),
+    m_foveated(foveated && (attachments & ColorAttachment) != 0 && (samples <= 1)
+               && isFoveationSupported()),
     m_status(GL_FRAMEBUFFER_UNSUPPORTED),
     m_owned(true)
 {
@@ -60,6 +81,7 @@ FramebufferObject::FramebufferObject(FramebufferObject &&other) noexcept:
     m_depthRboId(other.m_depthRboId),
     m_samples(other.m_samples),
     m_useFloatColor(other.m_useFloatColor),
+    m_foveated(other.m_foveated),
     m_status(other.m_status),
     m_owned(other.m_owned)
 {
@@ -83,6 +105,7 @@ FramebufferObject& FramebufferObject::operator=(FramebufferObject &&other) noexc
     m_depthRboId    = other.m_depthRboId;
     m_samples       = other.m_samples;
     m_useFloatColor = other.m_useFloatColor;
+    m_foveated      = other.m_foveated;
     m_status        = other.m_status;
     m_owned         = other.m_owned;
 
@@ -133,6 +156,23 @@ FramebufferObject::generateColorTexture()
     // Clamp to edge
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // Mark the texture as foveated before allocating storage. The driver may
+    // use the feature bits to pick a different storage layout (e.g. tiled
+    // density-aware allocation).
+    if (m_foveated)
+    {
+        glTexParameteri(GL_TEXTURE_2D,
+                        GL_TEXTURE_FOVEATED_FEATURE_BITS_QCOM,
+                        GL_FOVEATION_ENABLE_BIT_QCOM | GL_FOVEATION_SCALED_BIN_METHOD_BIT_QCOM);
+        // Match the floor used by the XR renderer's swapchain path so the
+        // peripheral density (and hence pixel-shader savings) are comparable
+        // whether or not a viewport effect is active. 0.25 = max 4× linear
+        // downscale at the periphery.
+        glTexParameterf(GL_TEXTURE_2D,
+                        GL_TEXTURE_FOVEATED_MIN_PIXEL_DENSITY_QCOM,
+                        0.25f);
+    }
 
     // Set the texture dimensions
 #ifdef GL_ES
@@ -419,4 +459,75 @@ FramebufferObject::resolve() const
     if (scissorEnabled)
         glEnable(GL_SCISSOR_TEST);
     return true;
+}
+
+bool
+FramebufferObject::isFoveationSupported()
+{
+#ifdef GL_ES
+    return celestia::gl::QCOM_texture_foveated;
+#else
+    return false;
+#endif
+}
+
+#ifndef GL_TEXTURE_FOVEATED_MIN_PIXEL_DENSITY_QCOM
+#define GL_TEXTURE_FOVEATED_MIN_PIXEL_DENSITY_QCOM   0x8BFD
+#endif
+
+void
+FramebufferObject::enableTextureFoveation(GLuint texture, float minPixelDensity)
+{
+    if (texture == 0 || !isFoveationSupported())
+        return;
+    GLint prev = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexParameteri(GL_TEXTURE_2D,
+                    GL_TEXTURE_FOVEATED_FEATURE_BITS_QCOM,
+                    GL_FOVEATION_ENABLE_BIT_QCOM | GL_FOVEATION_SCALED_BIN_METHOD_BIT_QCOM);
+    if (minPixelDensity > 0.0f)
+    {
+        if (minPixelDensity > 1.0f) minPixelDensity = 1.0f;
+        glTexParameterf(GL_TEXTURE_2D,
+                        GL_TEXTURE_FOVEATED_MIN_PIXEL_DENSITY_QCOM,
+                        minPixelDensity);
+    }
+    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prev));
+}
+
+void
+FramebufferObject::setTextureFoveationParameters(GLuint texture,
+                                                 GLuint layer,
+                                                 GLuint focalPoint,
+                                                 float focalX,
+                                                 float focalY,
+                                                 float gainX,
+                                                 float gainY,
+                                                 float foveaArea)
+{
+    if (texture == 0 || !isFoveationSupported())
+        return;
+    // epoxy resolves QCOM entry points lazily; the symbol is always declared
+    // by <epoxy/gl.h>, but calling it without the extension would crash, hence
+    // the isFoveationSupported() gate above.
+    glTextureFoveationParametersQCOM(texture, layer, focalPoint,
+                                     focalX, focalY,
+                                     gainX, gainY,
+                                     foveaArea);
+}
+
+void
+FramebufferObject::setFoveationParameters(GLuint layer,
+                                          GLuint focalPoint,
+                                          float focalX,
+                                          float focalY,
+                                          float gainX,
+                                          float gainY,
+                                          float foveaArea) const
+{
+    if (!m_foveated || m_colorTexId == 0)
+        return;
+    setTextureFoveationParameters(m_colorTexId, layer, focalPoint,
+                                  focalX, focalY, gainX, gainY, foveaArea);
 }

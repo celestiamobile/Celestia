@@ -11,6 +11,7 @@ namespace celestia::gl
 #ifdef GL_ES
 CELAPI bool OES_texture_border_clamp          = false; //NOSONAR
 CELAPI bool OES_geometry_shader               = false; //NOSONAR
+CELAPI bool QCOM_texture_foveated             = false; //NOSONAR
 #endif
 CELAPI bool ARB_texture_compression_bptc      = false; //NOSONAR
 CELAPI bool EXT_texture_compression_s3tc      = false; //NOSONAR
@@ -80,6 +81,7 @@ bool init(util::array_view<std::string> ignore) noexcept
 #ifdef GL_ES
     OES_texture_border_clamp           = check_extension(ignore, "GL_OES_texture_border_clamp") || check_extension(ignore, "GL_EXT_texture_border_clamp");
     OES_geometry_shader                = check_extension(ignore, "GL_OES_geometry_shader") || check_extension(ignore, "GL_EXT_geometry_shader");
+    QCOM_texture_foveated              = check_extension(ignore, "GL_QCOM_texture_foveated");
     // BPTC on GLES is exposed via GL_EXT_texture_compression_bptc; the
     // compressed-format tokens (0x8E8C / 0x8E8D) are identical to the desktop
     // GL_ARB_texture_compression_bptc extension, so the same flag drives both
