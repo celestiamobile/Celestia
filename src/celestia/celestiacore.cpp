@@ -2757,13 +2757,15 @@ static std::shared_ptr<TextureFont>
 LoadFontHelper(const Renderer* renderer,
                const std::filesystem::path& configPath,
                const char* defaultKey,
-               const std::filesystem::path& defaultPath)
+               const std::filesystem::path& defaultPath,
+               bool useRenderScale = false)
 {
     if (!configPath.empty())
     {
         if (auto font = LoadTextureFont(
                 renderer,
-                configPath.is_absolute() ? configPath : std::filesystem::path("fonts") / configPath);
+                configPath.is_absolute() ? configPath : std::filesystem::path("fonts") / configPath,
+                std::nullopt, std::nullopt, useRenderScale);
             font != nullptr)
         {
             return font;
@@ -2773,7 +2775,8 @@ LoadFontHelper(const Renderer* renderer,
     // Reading default font as fallback
     const char* translated = _(defaultKey);
     std::filesystem::path fontPath = translated == defaultKey ? defaultPath : translated;
-    return LoadTextureFont(renderer, fontPath.is_absolute() ? fontPath : std::filesystem::path("fonts") / fontPath);
+    return LoadTextureFont(renderer, fontPath.is_absolute() ? fontPath : std::filesystem::path("fonts") / fontPath,
+                           std::nullopt, std::nullopt, useRenderScale);
 }
 
 bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
@@ -2859,15 +2862,22 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
 
     if (config->fonts.labelFont.empty())
     {
-        renderer->setFont(Renderer::FontStyle::Normal, hud->font());
+        // No dedicated label font configured — reload the main font with
+        // useRenderScale=true so renderer-owned label text shrinks with the
+        // scene FBO without affecting the HUD's copy of the same font.
+        auto rendererMainFont = LoadFontHelper(renderer, config->fonts.mainFont, N_("DEFAULT_MAIN_FONT"), "DejaVuSans.ttf,9", /*useRenderScale=*/true);
+        renderer->setFont(Renderer::FontStyle::Normal, rendererMainFont == nullptr ? hud->font() : rendererMainFont);
     }
     else
     {
-        auto labelFont = LoadFontHelper(renderer, config->fonts.labelFont, N_("DEFAULT_LABEL_FONT"), "DejaVuSans.ttf,9");
+        auto labelFont = LoadFontHelper(renderer, config->fonts.labelFont, N_("DEFAULT_LABEL_FONT"), "DejaVuSans.ttf,9", /*useRenderScale=*/true);
         renderer->setFont(Renderer::FontStyle::Normal, labelFont == nullptr ? hud->font() : labelFont);
     }
 
-    renderer->setFont(Renderer::FontStyle::Large, hud->titleFont());
+    // Renderer's Large style is shared with HUD title; reload with
+    // useRenderScale=true so in-scene large labels track renderScale.
+    auto rendererTitleFont = LoadFontHelper(renderer, config->fonts.titleFont, N_("DEFAULT_TITLE_FONT"), "DejaVuSans-Bold.ttf,15", /*useRenderScale=*/true);
+    renderer->setFont(Renderer::FontStyle::Large, rendererTitleFont == nullptr ? hud->titleFont() : rendererTitleFont);
     renderer->setRTL(metrics.layoutDirection == LayoutDirection::RightToLeft);
     return true;
 }
@@ -2959,7 +2969,7 @@ bool CelestiaCore::setHudTitleFont(const std::filesystem::path& fontPath, int co
 
 bool CelestiaCore::setRendererFont(const std::filesystem::path& fontPath, int collectionIndex, int fontSize, Renderer::FontStyle fontStyle)
 {
-    if (auto f = LoadTextureFont(renderer, fontPath, collectionIndex, fontSize); f != nullptr)
+    if (auto f = LoadTextureFont(renderer, fontPath, collectionIndex, fontSize, /*useRenderScale=*/true); f != nullptr)
     {
         renderer->setFont(fontStyle, f);
         return true;

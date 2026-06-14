@@ -10,6 +10,7 @@
 #include "truetypefont.h"
 
 #include <algorithm>
+#include <cmath>
 #include <array>
 #include <cstddef>
 #include <memory>
@@ -74,7 +75,8 @@ struct FontDescriptor
     int index;
     int size;
     float scale;
-    int screenDpi;
+    int effectiveDpi;
+    bool useRenderScale;
 };
 
 struct FontMetrics
@@ -85,6 +87,18 @@ struct FontMetrics
 
 constexpr Glyph g_badGlyph = { 0, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f };
 constexpr auto INVALID_POS = static_cast<std::size_t>(-1);
+
+// Effective DPI fed to FreeType. When useRenderScale is set, fold the
+// renderer's renderScale into the raw DPI so glyphs are rasterised at the
+// size they will occupy in the rescaled scene FBO. Used for renderer-owned
+// label fonts; HUD/overlay fonts opt out so chrome text stays full-res.
+int computeEffectiveDpi(const Renderer *r, bool useRenderScale)
+{
+    int dpi = r->getScreenDpi();
+    if (!useRenderScale)
+        return dpi;
+    return std::max(1, static_cast<int>(std::lround(static_cast<float>(dpi) * r->getRenderScale())));
+}
 
 FT_Face
 LoadFontFace(FT_Library ft, const std::filesystem::path &path, int index, int size, int dpi);
@@ -114,7 +128,7 @@ struct TextureFontPrivate
 
     std::pair<float, float> render(std::u16string_view line, float x, float y);
 
-    bool                       loadFont(const std::filesystem::path &filename, int index, int size);
+    bool                       loadFont(const std::filesystem::path &filename, int index, int size, bool useRenderScale);
     void                       buildAtlas();
     void                       computeTextureSize();
     bool                       loadGlyphInfo(FT_ULong /*ch*/, Glyph & /*c*/) const;
@@ -277,7 +291,7 @@ TextureFontPrivate::computeTextureSize()
 }
 
 bool
-TextureFontPrivate::loadFont(const std::filesystem::path &filename, int index, int size)
+TextureFontPrivate::loadFont(const std::filesystem::path &filename, int index, int size, bool useRenderScale)
 {
     assert(m_face == nullptr);
 
@@ -290,11 +304,11 @@ TextureFontPrivate::loadFont(const std::filesystem::path &filename, int index, i
     }
 
     float scale     = m_renderer->getTextScaleFactor();
-    int   screenDpi = m_renderer->getScreenDpi();
+    int   effectiveDpi = computeEffectiveDpi(m_renderer, useRenderScale);
     auto  face      = LoadFontFace(ftlib, filename,
                                    index,
                                    static_cast<int>(scale * static_cast<float>(size)),
-                                   screenDpi);
+                                   effectiveDpi);
     if (face == nullptr)
         return false;
 
@@ -303,7 +317,8 @@ TextureFontPrivate::loadFont(const std::filesystem::path &filename, int index, i
     m_descriptor.index = index;
     m_descriptor.size = size;
     m_descriptor.scale = scale;
-    m_descriptor.screenDpi = screenDpi;
+    m_descriptor.effectiveDpi = effectiveDpi;
+    m_descriptor.useRenderScale = useRenderScale;
 
     buildAtlas();
 
@@ -686,10 +701,14 @@ TextureFont::flush()
 bool
 TextureFont::update()
 {
-    if (auto [currentDpi, currentScale] = std::make_tuple(impl->m_descriptor.screenDpi, impl->m_descriptor.scale);
-        currentDpi != impl->m_renderer->getScreenDpi() || currentScale != impl->m_renderer->getTextScaleFactor())
+    bool useRenderScale = impl->m_descriptor.useRenderScale;
+    int currentEffectiveDpi = computeEffectiveDpi(impl->m_renderer, useRenderScale);
+    float currentScale = impl->m_renderer->getTextScaleFactor();
+
+    if (impl->m_descriptor.effectiveDpi != currentEffectiveDpi || impl->m_descriptor.scale != currentScale)
     {
-        if (auto newImpl = std::make_unique<TextureFontPrivate>(impl->m_renderer); newImpl->loadFont(impl->m_descriptor.path, impl->m_descriptor.index, impl->m_descriptor.size))
+        if (auto newImpl = std::make_unique<TextureFontPrivate>(impl->m_renderer);
+            newImpl->loadFont(impl->m_descriptor.path, impl->m_descriptor.index, impl->m_descriptor.size, useRenderScale))
         {
             impl = std::move(newImpl);
             return true;
@@ -761,10 +780,11 @@ struct FontCacheKey
     std::filesystem::path filename;
     int index;
     int size;
+    bool useRenderScale;
 
     bool operator==(const FontCacheKey &other) const
     {
-        return filename == other.filename && index == other.index && size == other.size;
+        return filename == other.filename && index == other.index && size == other.size && useRenderScale == other.useRenderScale;
     }
 };
 
@@ -772,14 +792,14 @@ template<> struct std::hash<FontCacheKey>
 {
     std::size_t operator()(const FontCacheKey &k) const
     {
-        return std::hash<std::string>()(k.filename.string()) ^ std::hash<int>()(k.index) ^ std::hash<int>()(k.size);
+        return std::hash<std::string>()(k.filename.string()) ^ std::hash<int>()(k.index) ^ std::hash<int>()(k.size) ^ std::hash<bool>()(k.useRenderScale);
     }
 };
 
 using FontCache = std::unordered_map<FontCacheKey, std::weak_ptr<TextureFont>>;
 
 std::shared_ptr<TextureFont>
-LoadTextureFont(const Renderer *r, const std::filesystem::path &filename, std::optional<int> index, std::optional<int> size)
+LoadTextureFont(const Renderer *r, const std::filesystem::path &filename, std::optional<int> index, std::optional<int> size, bool useRenderScale)
 {
     // Init FontCache
     static FontCache *fontCache = nullptr;
@@ -794,12 +814,12 @@ LoadTextureFont(const Renderer *r, const std::filesystem::path &filename, std::o
     parsedSize  = size.value_or(parsedSize);
 
     // Lookup for an existing cached font
-    std::weak_ptr<TextureFont> &font = (*fontCache)[{ path, parsedIndex, parsedSize }];
+    std::weak_ptr<TextureFont> &font = (*fontCache)[{ path, parsedIndex, parsedSize, useRenderScale }];
     std::shared_ptr<TextureFont> ret = font.lock();
     if (ret == nullptr)
     {
         ret = std::make_shared<TextureFont>(r);
-        if (!ret->impl->loadFont(path, parsedIndex, parsedSize))
+        if (!ret->impl->loadFont(path, parsedIndex, parsedSize, useRenderScale))
         {
             GetLogger()->error("Could not load font at path: {} index: {} size: {}\n", path, parsedIndex, parsedSize);
             return nullptr;

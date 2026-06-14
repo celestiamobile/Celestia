@@ -21,7 +21,11 @@ class Renderer;
 class TextureFont;
 
 std::shared_ptr<TextureFont>
-LoadTextureFont(const Renderer*, const std::filesystem::path&, std::optional<int> index = std::nullopt, std::optional<int> size = std::nullopt);
+LoadTextureFont(const Renderer*,
+                const std::filesystem::path&,
+                std::optional<int> index = std::nullopt,
+                std::optional<int> size = std::nullopt,
+                bool useRenderScale = false);
 
 struct TextureFontPrivate;
 class TextureFont
@@ -59,5 +63,5 @@ private:
     std::unique_ptr<TextureFontPrivate> impl;
 
     friend std::shared_ptr<TextureFont>
-    LoadTextureFont(const Renderer*, const std::filesystem::path&, std::optional<int>, std::optional<int>);
+    LoadTextureFont(const Renderer*, const std::filesystem::path&, std::optional<int>, std::optional<int>, bool);
 };
