@@ -2314,15 +2314,19 @@ void Renderer::renderObject(const Vector3f& pos,
     // Get the textures . . .
     if (obj.surface->baseTexture != util::TextureHandle::Invalid)
         ri.baseTex = m_textureManager->find(obj.surface->baseTexture);
-    if ((obj.surface->appearanceFlags & Surface::ApplyBumpMap) != 0 &&
+    if (util::is_set(obj.surface->appearanceFlags, Surface::Flags::ApplyBumpMap) &&
         obj.surface->bumpTexture != util::TextureHandle::Invalid)
+    {
         ri.bumpTex = m_textureManager->find(obj.surface->bumpTexture);
-    if ((obj.surface->appearanceFlags & Surface::ApplyNightMap) != 0 &&
+    }
+    if (util::is_set(obj.surface->appearanceFlags, Surface::Flags::ApplyNightMap) &&
         util::is_set(renderFlags, RenderFlags::ShowNightMaps))
+    {
         ri.nightTex = m_textureManager->find(obj.surface->nightTexture);
-    if ((obj.surface->appearanceFlags & Surface::SeparateSpecularMap) != 0)
+    }
+    if (util::is_set(obj.surface->appearanceFlags, Surface::Flags::SeparateSpecularMap))
         ri.glossTex = m_textureManager->find(obj.surface->specularTexture);
-    if ((obj.surface->appearanceFlags & Surface::ApplyOverlay) != 0)
+    if (util::is_set(obj.surface->appearanceFlags, Surface::Flags::ApplyOverlay))
         ri.overlayTex = m_textureManager->find(obj.surface->overlayTexture);
 
     // Scaling will be nonuniform for nonspherical planets. As long as the
@@ -2373,7 +2377,7 @@ void Renderer::renderObject(const Vector3f& pos,
 
     // Set up the colors
     if (ri.baseTex == nullptr ||
-        (obj.surface->appearanceFlags & Surface::BlendTexture) != 0)
+        util::is_set(obj.surface->appearanceFlags, Surface::Flags::BlendTexture))
     {
         ri.color = obj.surface->color.linearize(gl::sRGBRendering);
     }
@@ -2384,7 +2388,7 @@ void Renderer::renderObject(const Vector3f& pos,
     ri.lunarLambert = obj.surface->lunarLambert;
 
     // See if the surface should be lit
-    bool lit = (obj.surface->appearanceFlags & Surface::Emissive) == 0;
+    bool lit = !util::is_set(obj.surface->appearanceFlags, Surface::Flags::Emissive);
 
     // The sphere rendering code uses the view frustum to determine which
     // patches are visible. In order to avoid rendering patches that can't
@@ -3077,14 +3081,14 @@ void Renderer::renderRingSystem(Body& body,
     const Texture* baseTex = nullptr;
     if (surface->baseTexture != util::TextureHandle::Invalid)
         baseTex = m_textureManager->find(surface->baseTexture);
-    if (baseTex == nullptr || (surface->appearanceFlags & Surface::BlendTexture) != 0)
+    if (baseTex == nullptr || util::is_set(surface->appearanceFlags, Surface::Flags::BlendTexture))
         ri.color = surface->color.linearize(gl::sRGBRendering);
     ri.ambientColor = ambientColor;
     ri.specularColor = surface->specularColor.linearize(gl::sRGBRendering);
 
     // Self-shadow of the body on the rings requires at least one lit light
     // source and the user setting.
-    bool lit = (surface->appearanceFlags & Surface::Emissive) == 0;
+    bool lit = !util::is_set(surface->appearanceFlags, Surface::Flags::Emissive);
     bool renderShadow = lit && util::is_set(renderFlags, RenderFlags::ShowRingShadows);
 
     float segmentSizeInPixels = 2.0f * rings->outerRadius / (max(nearPlaneDistance, altitude) * pixelSize);
@@ -3124,8 +3128,8 @@ void Renderer::renderStar(const Star& star,
             surface.baseTexture = mtex;
         else
             surface.baseTexture = util::TextureHandle::Invalid;
-        surface.appearanceFlags |= Surface::ApplyBaseTexture;
-        surface.appearanceFlags |= Surface::Emissive;
+        surface.appearanceFlags |= Surface::Flags::ApplyBaseTexture;
+        surface.appearanceFlags |= Surface::Flags::Emissive;
 
         rp.isStar = true;
         rp.surface = &surface;
@@ -4626,17 +4630,17 @@ void Renderer::loadTextures(Body* body)
     {
         m_textureManager->find(surface.baseTexture);
     }
-    if ((surface.appearanceFlags & Surface::ApplyBumpMap) != 0 &&
+    if (util::is_set(surface.appearanceFlags, Surface::Flags::ApplyBumpMap) &&
         surface.bumpTexture != util::TextureHandle::Invalid)
     {
         m_textureManager->find(surface.bumpTexture);
     }
-    if ((surface.appearanceFlags & Surface::ApplyNightMap) != 0 &&
+    if (util::is_set(surface.appearanceFlags, Surface::Flags::ApplyNightMap) &&
         util::is_set(renderFlags, RenderFlags::ShowNightMaps))
     {
         m_textureManager->find(surface.nightTexture);
     }
-    if ((surface.appearanceFlags & Surface::SeparateSpecularMap) != 0 &&
+    if (util::is_set(surface.appearanceFlags, Surface::Flags::SeparateSpecularMap) &&
         surface.specularTexture != util::TextureHandle::Invalid)
     {
         m_textureManager->find(surface.specularTexture);
@@ -5129,7 +5133,7 @@ Renderer::createShadowFBO()
 {
     m_shadowFBO = std::make_unique<FramebufferObject>(m_shadowMapSize,
                                                       m_shadowMapSize,
-                                                      FramebufferObject::DepthAttachment);
+                                                      FramebufferObject::Attachment::Depth);
     if (!m_shadowFBO->isValid())
     {
         GetLogger()->warn("Error creating shadow FBO.\n");
