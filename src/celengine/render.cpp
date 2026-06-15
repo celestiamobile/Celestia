@@ -5526,11 +5526,28 @@ Renderer::buildDepthPartitions()
     // closer to the observer than anything else
     if (!depthSortedAnnotations.empty())
     {
+        // depthSortedAnnotations is sorted by `position.z()` descending, so
+        // forward-facing entries (positive `position.z`) come first and the
+        // closest forward annotation is the last positive entry. Annotations
+        // behind the camera (negative `position.z`) must be ignored; otherwise
+        // `-position.z` becomes a large positive value and pushes the front
+        // partition's near plane behind the camera, breaking the projection
+        // and hiding every body in that partition.
+        float closestForwardZ = 0.0f;
+        for (const auto& a : depthSortedAnnotations)
+        {
+            if (a.position.z() > 0.0f &&
+                (closestForwardZ == 0.0f || a.position.z() < closestForwardZ))
+            {
+                closestForwardZ = a.position.z();
+            }
+        }
+
         // Factor of 0.999 makes sure ensures that the near plane does not fall
         // exactly at the marker's z coordinate (in which case the marker
         // would be susceptible to getting clipped.)
-        if (-depthSortedAnnotations[0].position.z() > zNearest)
-            zNearest = -depthSortedAnnotations[0].position.z() * 0.999f;
+        if (closestForwardZ > 0.0f && -closestForwardZ > zNearest)
+            zNearest = -closestForwardZ * 0.999f;
     }
 
 #if DEBUG_COALESCE
