@@ -1297,7 +1297,7 @@ setupSecondaryLightSources(vector<SecondaryIlluminator>& secondaryIlluminators,
             i.reflectedIrradiance += j.luminosity / ((float) (i.position_v - j.position).squaredNorm() * au2);
         }
 
-        i.reflectedIrradiance *= i.body->getReflectivity();
+        i.reflectedIrradiance *= i.body->getGeomAlbedo();
     }
 }
 
@@ -5211,11 +5211,20 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
             float nearZcoeff = std::cos(math::degToRad(fov / 2.0f)) * (static_cast<float>(viewportHeight) / maxSpan);
             nearZ = -nearZ * nearZcoeff;
 
-            // Floor at 2 ULPs of `radius`: below that, float32 noise in `d`
-            // makes nearZ jump between discrete values and the atmosphere
-            // shell flickers.
-            float ulp = std::nextafter(radius, radius * 2.0f) - radius;
-            float bodyMinNearZ = std::max(MinNearPlaneDistance, ulp * 2.0f);
+            // Floor the near plane: tight 2-ULP for convex bodies, looser
+            // radius/2000 for non-convex ones whose bounding sphere is
+            // conservative and may approach the camera even when the
+            // geometry doesn't.
+            float bodyMinNearZ;
+            if (convex)
+            {
+                float ulp = std::nextafter(radius, radius * 2.0f) - radius;
+                bodyMinNearZ = std::max(MinNearPlaneDistance, ulp * 2.0f);
+            }
+            else
+            {
+                bodyMinNearZ = std::max(MinNearPlaneDistance, radius / 2000.0f);
+            }
             ri.nearZ = std::min(nearZ, -bodyMinNearZ);
 
             if (!convex)
