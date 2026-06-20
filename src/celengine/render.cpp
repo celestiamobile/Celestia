@@ -2669,9 +2669,9 @@ void Renderer::renderObject(const Vector3f& pos,
                 if (shadprop.hasEclipseShadows())
                     prog->setEclipseShadowParameters(ls, scaleFactors, obj.orientation);
 
-                // Sign of the clip-space depth bias flips under reverse-Z: there
-                // "closer to the camera" means LARGER depth (cleared to 0, GEQUAL).
-                prog->floatParam("terrainDepthBias") = gl::reverseZ ? 1.0e-4f : -1.0e-4f;
+                // Nudge terrain depth slightly toward the camera so it wins
+                // depth ties against the smooth base sphere.
+                prog->floatParam("terrainDepthBias") = -1.0e-4f;
 
                 // Bind textures in the order the shader expects them (matches
                 // renderEllipsoid_GLSL): diffuse on TEX0, normal on TEX1,

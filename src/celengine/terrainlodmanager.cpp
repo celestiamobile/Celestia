@@ -707,17 +707,16 @@ void TerrainLODManager::render(CelestiaGLProgram* program)
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
-    // Use the renderer-wide depth comparison (GEQUAL under reverse-Z) so the
-    // function we leave behind matches what later passes (atmosphere, clouds)
-    // expect. Using GREATER here would silently leak a stricter comparison.
-    glDepthFunc(celestia::gl::reverseZ ? GL_GEQUAL : GL_LEQUAL);
+    // Use the renderer-wide depth comparison so the function we leave behind
+    // matches what later passes (atmosphere, clouds) expect. Using GREATER here
+    // would silently leak a stricter comparison.
+    glDepthFunc(GL_LEQUAL);
     glDepthMask(GL_TRUE);
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
 
     // Polygon offset disabled — chord-bulge alone should be enough.
-    // const float offsetSign = celestia::gl::reverseZ ? 1.0f : -1.0f;
     GLboolean polyOffsetWasEnabled = glIsEnabled(GL_POLYGON_OFFSET_FILL);
     GLfloat   prevPolyFactor = 0.0f, prevPolyUnits = 0.0f;
     glGetFloatv(GL_POLYGON_OFFSET_FACTOR, &prevPolyFactor);
