@@ -210,6 +210,40 @@ CubeSphereMesh::getOrCreateIndexBuffer(int n)
                                                         indices.size() * sizeof(unsigned int)),
                        gl::Buffer::BufferUsage::StaticDraw);
     cib.indexCount = static_cast<int>(indices.size());
+
+#if CUBESPHERE_WIREFRAME
+    // GLES-compatible wireframe: one GL_LINES segment per grid edge (each
+    // interior edge is emitted once by only walking +s and +t neighbours).
+    std::vector<unsigned int> lineIndices;
+    for (int face = 0; face < NUM_FACES; ++face)
+    {
+        const auto base = static_cast<unsigned int>(face * stride * stride);
+        for (int i = 0; i <= n; ++i)
+        {
+            for (int j = 0; j <= n; ++j)
+            {
+                unsigned int v = base + static_cast<unsigned int>(i * stride + j);
+                if (j < n)
+                {
+                    lineIndices.push_back(v);
+                    lineIndices.push_back(v + 1u);
+                }
+                if (i < n)
+                {
+                    lineIndices.push_back(v);
+                    lineIndices.push_back(v + static_cast<unsigned int>(stride));
+                }
+            }
+        }
+    }
+    cib.lineBuffer = gl::Buffer(gl::Buffer::TargetHint::ElementArray);
+    cib.lineBuffer.bind();
+    cib.lineBuffer.setData(celestia::util::array_view<void>(lineIndices.data(),
+                                                            lineIndices.size() * sizeof(unsigned int)),
+                           gl::Buffer::BufferUsage::StaticDraw);
+    cib.lineCount = static_cast<int>(lineIndices.size());
+#endif
+
     return &cib;
 }
 
@@ -236,7 +270,6 @@ CubeSphereMesh::render(unsigned int attributes,
     if (!buffersInitialized)
         return;
 
-    // Bind source textures and set identity-on-tile texcoord transforms.
     for (int i = 0; i < nTexturesUsed; ++i)
     {
         tex[i]->beginUsage();
@@ -288,8 +321,13 @@ CubeSphereMesh::render(unsigned int attributes,
                               bufferOffset(texCoordOffset * sizeof(float)));
     }
 
+#if CUBESPHERE_WIREFRAME
+    cib->lineBuffer.bind();
+    glDrawElements(GL_LINES, cib->lineCount, GL_UNSIGNED_INT, nullptr);
+#else
     cib->buffer.bind();
     glDrawElements(GL_TRIANGLES, cib->indexCount, GL_UNSIGNED_INT, nullptr);
+#endif
 
     glDisableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
     if ((attributes & Normals) != 0)
