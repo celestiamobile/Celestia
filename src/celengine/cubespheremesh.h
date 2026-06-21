@@ -26,7 +26,7 @@
 #include <celrender/gl/buffer.h>
 
 // Set to 1 to draw the cube-sphere tessellation as a wireframe.
-#define CUBESPHERE_WIREFRAME 1
+#define CUBESPHERE_WIREFRAME 0
 
 class Texture;
 class CelestiaGLProgram;
@@ -67,11 +67,28 @@ public:
                 CelestiaGLProgram* program);
 
 private:
+    // Per-patch culling data (a patch is one cell of the per-face p x p grid),
+    // precomputed once per level. axis/cosHalfAngle bound the patch as a cone
+    // about its centre direction for the horizon test; centre/radius is its
+    // bounding sphere for the frustum test. All are unit-sphere geometry.
+    struct PatchCull
+    {
+        Eigen::Vector3f axis;
+        Eigen::Vector3f center;
+        float cosHalfAngle;
+        float radius;
+    };
+
     struct CachedIndexBuffer
     {
         celestia::gl::Buffer buffer;
+        // Patches are stored contiguously in the index buffer, ordered
+        // (face, pi, pj), so any run of visible patches draws as one call.
+        int trianglesPerPatch{ 0 };
+        std::vector<PatchCull> patches;
 #if CUBESPHERE_WIREFRAME
         celestia::gl::Buffer lineBuffer;
+        int linesPerPatch{ 0 };
 #endif
     };
 
@@ -79,6 +96,9 @@ private:
     void buildVertices(int n, unsigned int attributes);
     celestia::gl::Buffer* getOrCreateVertexBuffer(int n, unsigned int attributes);
     CachedIndexBuffer* getOrCreateIndexBuffer(int n);
+    static bool patchCulled(const PatchCull& patch,
+                            const celestia::math::Frustum& frustum,
+                            const Eigen::Vector3f& eyePos);
 
     int vertexSize{ 0 };
     int nTexturesUsed{ 0 };
