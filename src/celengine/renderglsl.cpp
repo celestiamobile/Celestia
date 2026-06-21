@@ -359,7 +359,7 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
     auto endTextures = std::remove(textures.begin(), textures.end(), nullptr);
     textures.erase(endTextures, textures.end());
     cubeSphere->render(attributes,
-                       frustum, ri.pixWidth,
+                       frustum, ri.eyePos_obj, ri.pixWidth,
                        textures.data(), static_cast<int>(textures.size()), prog);
 }
 

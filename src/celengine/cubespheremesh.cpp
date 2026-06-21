@@ -20,6 +20,7 @@
 #include <celcompat/numbers.h>
 #include <celengine/shadermanager.h>
 #include <celengine/texture.h>
+#include <celmath/frustum.h>
 #include <celutil/array_view.h>
 
 using namespace Eigen;
@@ -79,6 +80,60 @@ bufferOffset(std::size_t n)
     return reinterpret_cast<void*>(n);
 }
 
+// True if a whole cube face is hidden and can be skipped. Two conservative
+// tests on the face's unit-sphere geometry:
+//   1. Horizon cull: a unit-sphere point P is in front of the horizon from eye
+//      E (|E| = d planet radii) iff dot(P, E) >= 1. A cube face lies entirely
+//      within a cone of half-angle acos(1/sqrt(3)) ~= 54.7 deg about its axis,
+//      so the face's maximum dot(P, E) is bounded by d*cos(max(0, theta - a)),
+//      theta = angle(E, axis). If that bound is < 1 the whole face is over the
+//      horizon (this is the back-face cull).
+//   2. Off-screen cull: the face bounding sphere against the view frustum.
+// eyePos and the frustum are both supplied in the per-axis normalized object
+// space (each axis divided by its semi-axis), where an ellipsoid maps exactly
+// to this unit sphere, so the tests are exact for ellipsoidal bodies too.
+bool
+faceCulled(int face, const celestia::math::Frustum& frustum, const Vector3f& eyePos)
+{
+    const FaceBasis& f = faceBases[face];
+    Vector3f axis = spherePoint(f, 0.5f, 0.5f);
+
+    constexpr float cosHalfAngle = 0.5773502691896258f; // 1/sqrt(3)
+    constexpr float sinHalfAngle = 0.8164965809277260f; // sqrt(2/3)
+    float d = eyePos.norm();
+    if (d > 1.0f)
+    {
+        float cosTheta = axis.dot(eyePos) / d;
+        // Largest dot(P, E) on the face is d*cos(max(0, theta - a)). When the
+        // eye direction already lies inside the cone (theta <= a) the face
+        // reaches straight toward the eye, so the reduced angle is 0 (cos 1).
+        float cosReduced;
+        if (cosTheta >= cosHalfAngle)
+        {
+            cosReduced = 1.0f;
+        }
+        else
+        {
+            float sinTheta = std::sqrt(std::max(0.0f, 1.0f - cosTheta * cosTheta));
+            cosReduced = cosTheta * cosHalfAngle + sinTheta * sinHalfAngle; // cos(theta - a)
+        }
+        if (d * cosReduced < 1.0f)
+            return true;
+    }
+
+    Vector3f c00 = spherePoint(f, 0.0f, 0.0f);
+    Vector3f c10 = spherePoint(f, 1.0f, 0.0f);
+    Vector3f c11 = spherePoint(f, 1.0f, 1.0f);
+    Vector3f c01 = spherePoint(f, 0.0f, 1.0f);
+    Vector3f center = (c00 + c10 + c11 + c01) * 0.25f;
+    float boundingRadius2 = std::max({ (center - c00).squaredNorm(),
+                                       (center - c10).squaredNorm(),
+                                       (center - c11).squaredNorm(),
+                                       (center - c01).squaredNorm() });
+    return frustum.testSphere(center, std::sqrt(boundingRadius2))
+           == celestia::math::FrustumAspect::Outside;
+}
+
 } // anonymous namespace
 
 
@@ -100,8 +155,30 @@ CubeSphereMesh::ensureBuffers()
     if (glGetError() != GL_NO_ERROR)
         return;
 
-    vertexBuffer = gl::Buffer(gl::Buffer::TargetHint::Array);
     buffersInitialized = true;
+}
+
+
+// Camera-independent vertex array for level n and the current vertex layout,
+// built once and cached. The key packs the layout (vertexSize) alongside n
+// because the shared mesh serves planets with different attribute sets.
+gl::Buffer*
+CubeSphereMesh::getOrCreateVertexBuffer(int n, unsigned int attributes)
+{
+    long long key = (static_cast<long long>(n) << 8) | static_cast<long long>(vertexSize);
+    auto it = vertexBufferCache.find(key);
+    if (it != vertexBufferCache.end())
+        return &it->second;
+
+    buildVertices(n, attributes);
+
+    auto [pos, ok] = vertexBufferCache.try_emplace(key, gl::Buffer::TargetHint::Array);
+    gl::Buffer& vbuf = pos->second;
+    vbuf.bind();
+    vbuf.setData(celestia::util::array_view<void>(vertices.data(),
+                                                  vertices.size() * sizeof(float)),
+                 gl::Buffer::BufferUsage::StaticDraw);
+    return &vbuf;
 }
 
 
@@ -209,7 +286,6 @@ CubeSphereMesh::getOrCreateIndexBuffer(int n)
     cib.buffer.setData(celestia::util::array_view<void>(indices.data(),
                                                         indices.size() * sizeof(unsigned int)),
                        gl::Buffer::BufferUsage::StaticDraw);
-    cib.indexCount = static_cast<int>(indices.size());
 
 #if CUBESPHERE_WIREFRAME
     // GLES-compatible wireframe: one GL_LINES segment per grid edge (each
@@ -241,7 +317,6 @@ CubeSphereMesh::getOrCreateIndexBuffer(int n)
     cib.lineBuffer.setData(celestia::util::array_view<void>(lineIndices.data(),
                                                             lineIndices.size() * sizeof(unsigned int)),
                            gl::Buffer::BufferUsage::StaticDraw);
-    cib.lineCount = static_cast<int>(lineIndices.size());
 #endif
 
     return &cib;
@@ -250,7 +325,8 @@ CubeSphereMesh::getOrCreateIndexBuffer(int n)
 
 void
 CubeSphereMesh::render(unsigned int attributes,
-                       const celestia::math::Frustum& /*frustum*/,
+                       const celestia::math::Frustum& frustum,
+                       const Eigen::Vector3f& eyePos,
                        float pixWidth,
                        Texture** tex,
                        int nTextures,
@@ -284,15 +360,12 @@ CubeSphereMesh::render(unsigned int attributes,
         glActiveTexture(GL_TEXTURE0);
 
     int n = chooseLevel(pixWidth);
-    buildVertices(n, attributes);
+    gl::Buffer* vbuf = getOrCreateVertexBuffer(n, attributes);
     CachedIndexBuffer* cib = getOrCreateIndexBuffer(n);
 
     glBindVertexArray(vao);
 
-    vertexBuffer.bind();
-    vertexBuffer.setData(celestia::util::array_view<void>(vertices.data(),
-                                                          vertices.size() * sizeof(float)),
-                         gl::Buffer::BufferUsage::StreamDraw);
+    vbuf->bind();
 
     const auto stride = static_cast<GLsizei>(vertexSize * sizeof(float));
     const int texCoordOffset = ((attributes & Tangents) != 0) ? 6 : 3;
@@ -321,12 +394,29 @@ CubeSphereMesh::render(unsigned int attributes,
                               bufferOffset(texCoordOffset * sizeof(float)));
     }
 
+    // Faces are laid out contiguously in the index buffers, so each visible
+    // face is drawn as one sub-range; off-screen and back-facing faces are
+    // skipped entirely.
 #if CUBESPHERE_WIREFRAME
     cib->lineBuffer.bind();
-    glDrawElements(GL_LINES, cib->lineCount, GL_UNSIGNED_INT, nullptr);
+    const int perFaceLines = 4 * n * (n + 1);
+    for (int face = 0; face < NUM_FACES; ++face)
+    {
+        if (faceCulled(face, frustum, eyePos))
+            continue;
+        glDrawElements(GL_LINES, perFaceLines, GL_UNSIGNED_INT,
+                       bufferOffset(static_cast<std::size_t>(face) * perFaceLines * sizeof(unsigned int)));
+    }
 #else
     cib->buffer.bind();
-    glDrawElements(GL_TRIANGLES, cib->indexCount, GL_UNSIGNED_INT, nullptr);
+    const int perFaceIndices = n * n * 6;
+    for (int face = 0; face < NUM_FACES; ++face)
+    {
+        if (faceCulled(face, frustum, eyePos))
+            continue;
+        glDrawElements(GL_TRIANGLES, perFaceIndices, GL_UNSIGNED_INT,
+                       bufferOffset(static_cast<std::size_t>(face) * perFaceIndices * sizeof(unsigned int)));
+    }
 #endif
 
     glDisableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);

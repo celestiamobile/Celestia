@@ -20,6 +20,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <Eigen/Core>
+
 #include <celengine/glsupport.h>
 #include <celrender/gl/buffer.h>
 
@@ -53,10 +55,12 @@ public:
     CubeSphereMesh(CubeSphereMesh&&) = delete;
     CubeSphereMesh& operator=(CubeSphereMesh&&) = delete;
 
-    // Drop-in for LODSphereMesh::render: same arguments. pixWidth is the
-    // planet's apparent disc size in pixels and drives the global level.
+    // Drop-in for LODSphereMesh::render plus the eye position in object space
+    // (unit-sphere coordinates) for horizon culling. pixWidth is the planet's
+    // apparent disc size in pixels and drives the global level.
     void render(unsigned int attributes,
                 const celestia::math::Frustum& frustum,
+                const Eigen::Vector3f& eyePos,
                 float pixWidth,
                 Texture** tex,
                 int nTextures,
@@ -66,15 +70,14 @@ private:
     struct CachedIndexBuffer
     {
         celestia::gl::Buffer buffer;
-        int indexCount{ 0 };
 #if CUBESPHERE_WIREFRAME
         celestia::gl::Buffer lineBuffer;
-        int lineCount{ 0 };
 #endif
     };
 
     void ensureBuffers();
     void buildVertices(int n, unsigned int attributes);
+    celestia::gl::Buffer* getOrCreateVertexBuffer(int n, unsigned int attributes);
     CachedIndexBuffer* getOrCreateIndexBuffer(int n);
 
     int vertexSize{ 0 };
@@ -83,6 +86,9 @@ private:
 
     bool buffersInitialized{ false };
     GLuint vao{ 0 };
-    celestia::gl::Buffer vertexBuffer{};
+    // Vertex data is camera-independent, so it is built once per (level,
+    // vertex layout) and cached; the key packs both since a single shared mesh
+    // serves planets with differing attribute sets (tangents/textures).
+    std::unordered_map<long long, celestia::gl::Buffer> vertexBufferCache{};
     std::unordered_map<int, CachedIndexBuffer> indexBufferCache{};
 };
