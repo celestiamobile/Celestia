@@ -26,6 +26,7 @@
 #include "glshader.h"
 #include "spheremesh.h"
 #include "lodspheremesh.h"
+#include "cubespheremesh.h"
 #include "geometry.h"
 #include "resourcesystem.h"
 #include "texmanager.h"
@@ -425,6 +426,7 @@ bool Renderer::init(int winWidth, int winHeight,
     m_rectBO = std::make_unique<celestia::gl::Buffer>(celestia::gl::Buffer::TargetHint::Array);
 
     m_lodSphere = std::make_unique<LODSphereMesh>();
+    m_cubeSphere = std::make_unique<CubeSphereMesh>();
 
     m_gaussianDiscTex = BuildGaussianDiscTexture(8);
     m_gaussianGlareTex = BuildGaussianGlareTexture(9);
@@ -2498,7 +2500,8 @@ void Renderer::renderObject(const Vector3f& pos,
                                  viewFrustum,
                                  planetMVP,
                                  this,
-                                 m_lodSphere.get());
+                                 m_lodSphere.get(),
+                                 m_cubeSphere.get());
         }
         else
         {

@@ -33,6 +33,7 @@
 #include "geometry.h"
 #include "glsupport.h"
 #include "lodspheremesh.h"
+#include "cubespheremesh.h"
 #include "rendcontext.h"
 #include "render.h"
 #include "renderglsl.h"
@@ -137,14 +138,15 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
                           const math::Frustum& frustum,
                           const Matrices &m,
                           Renderer* renderer,
-                          LODSphereMesh* lodSphere)
+                          LODSphereMesh* lodSphere,
+                          CubeSphereMesh* cubeSphere)
 {
     float radius = semiAxes.maxCoeff();
 
     boost::container::static_vector<Texture*, LODSphereMesh::MAX_SPHERE_MESH_TEXTURES> textures;
 
     ShaderProperties shadprop;
-    shadprop.texUsage = TexUsage::TextureCoordTransform;
+    shadprop.texUsage = TexUsage::TextureCoordTransform | TexUsage::SphericalTextureCoord;
     shadprop.nLights = std::min(ls.nLights, MaxShaderLights);
 
     // Set up the textures used by this object
@@ -356,9 +358,9 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
 
     auto endTextures = std::remove(textures.begin(), textures.end(), nullptr);
     textures.erase(endTextures, textures.end());
-    lodSphere->render(attributes,
-                      frustum, ri.pixWidth,
-                      textures.data(), static_cast<int>(textures.size()), prog);
+    cubeSphere->render(attributes,
+                       frustum, ri.pixWidth,
+                       textures.data(), static_cast<int>(textures.size()), prog);
 }
 
 

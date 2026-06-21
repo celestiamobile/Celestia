@@ -39,6 +39,7 @@
 class RendererWatcher;
 class FrameTree;
 class LODSphereMesh;
+class CubeSphereMesh;
 class ReferenceMark;
 class CurvePlot;
 class CurvePlotVertexBuffer;
@@ -776,6 +777,7 @@ class Renderer
     float satPoint;
 
     std::unique_ptr<LODSphereMesh> m_lodSphere;
+    std::unique_ptr<CubeSphereMesh> m_cubeSphere;
     std::unique_ptr<Texture> m_gaussianDiscTex;
     std::unique_ptr<Texture> m_gaussianGlareTex;
 

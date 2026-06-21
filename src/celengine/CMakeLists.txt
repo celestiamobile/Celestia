@@ -58,6 +58,8 @@ set(CELENGINE_SOURCES
   location.h
   lodspheremesh.cpp
   lodspheremesh.h
+  cubespheremesh.cpp
+  cubespheremesh.h
   marker.cpp
   marker.h
   meshmanager.cpp

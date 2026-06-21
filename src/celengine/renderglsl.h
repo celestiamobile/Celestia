@@ -23,6 +23,7 @@
 struct Atmosphere;
 class LightingState;
 class LODSphereMesh;
+class CubeSphereMesh;
 struct Matrices;
 class Renderer;
 class RenderGeometry;
@@ -44,7 +45,8 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
                           const celestia::math::Frustum& frustum,
                           const Matrices &m,
                           Renderer* renderer,
-                          LODSphereMesh* lodSphere);
+                          LODSphereMesh* lodSphere,
+                          CubeSphereMesh* cubeSphere);
 
 void renderGeometry_GLSL(RenderGeometry* geometry,
                          const RenderInfo& ri,

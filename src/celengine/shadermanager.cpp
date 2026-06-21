@@ -930,12 +930,75 @@ TextureSamplerDeclarations(const ShaderProperties& props)
 
 
 std::string
+SphericalTexCoordComputation(const ShaderProperties& props)
+{
+    // Equirectangular texture coordinates derived per-fragment from the
+    // object-space normal (which equals the unit-sphere radial direction).
+    // Computing these here instead of interpolating baked vertex UVs avoids
+    // the longitude-seam and pole-convergence smearing that an equirectangular
+    // map suffers when sampled across a cube-sphere's polar quads.
+    std::string source;
+    source += DeclareLocal("sphTexN", Shader_Vector3, "normalize(normal)");
+    source += DeclareLocal("sphTexCoord", Shader_Vector2,
+                           "vec2(1.0 - atan(sphTexN.z, sphTexN.x) * 0.1591549430919, "
+                           "acos(clamp(sphTexN.y, -1.0, 1.0)) * 0.3183098861838)");
+    // The longitude wraps by 1.0 across the antimeridian; left uncorrected its
+    // screen-space derivative spikes there and the mip selection blurs a seam.
+    // Unwrap the u derivative into [-0.5, 0.5] for textureGrad sampling.
+    source += DeclareLocal("sphTexDx", Shader_Vector2, "dFdx(sphTexCoord)");
+    source += DeclareLocal("sphTexDy", Shader_Vector2, "dFdy(sphTexCoord)");
+    source += "sphTexDx.x -= floor(sphTexDx.x + 0.5);\n";
+    source += "sphTexDy.x -= floor(sphTexDy.x + 0.5);\n";
+
+    auto define = [&source](std::string_view name) {
+        source += DeclareLocal(name, Shader_Vector2, "sphTexCoord");
+    };
+
+    if (props.hasSharedTextureCoords())
+    {
+        if (util::is_set(props.texUsage, TexUsage::DiffuseTexture  |
+                                         TexUsage::NormalTexture   |
+                                         TexUsage::SpecularTexture |
+                                         TexUsage::NightTexture    |
+                                         TexUsage::EmissiveTexture |
+                                         TexUsage::OverlayTexture))
+            define("diffTexCoord");
+    }
+    else
+    {
+        if (util::is_set(props.texUsage, TexUsage::DiffuseTexture))
+            define("diffTexCoord");
+        if (util::is_set(props.texUsage, TexUsage::NormalTexture))
+            define("normTexCoord");
+        if (util::is_set(props.texUsage, TexUsage::SpecularTexture))
+            define("specTexCoord");
+        if (util::is_set(props.texUsage, TexUsage::NightTexture))
+            define("nightTexCoord");
+        if (util::is_set(props.texUsage, TexUsage::EmissiveTexture))
+            define("emissiveTexCoord");
+        if (util::is_set(props.texUsage, TexUsage::OverlayTexture))
+            define("overlayTexCoord");
+    }
+
+    return source;
+}
+
+
+std::string
 TextureCoordDeclarations(const ShaderProperties& props, ShaderInOut inOut)
 {
     std::string source;
 
     auto declare = inOut == Shader_In ? DeclareInput : DeclareOutput;
 
+    // With per-fragment spherical texture coordinates the fragment shader
+    // computes diffTexCoord (and the maps sharing it) from the object-space
+    // normal, so they must not be declared as interpolated inputs there.
+    const bool perFragmentSpherical =
+        inOut == Shader_In && util::is_set(props.texUsage, TexUsage::SphericalTextureCoord);
+
+    if (!perFragmentSpherical)
+    {
     if (props.hasSharedTextureCoords())
     {
         // If the shared texture coords flag is set, use the diffuse texture
@@ -965,6 +1028,7 @@ TextureCoordDeclarations(const ShaderProperties& props, ShaderInOut inOut)
         if (util::is_set(props.texUsage, TexUsage::OverlayTexture))
             source += declare("overlayTexCoord", Shader_Vector2);
     }
+    } // !perFragmentSpherical
 
     if (util::is_set(props.texUsage, TexUsage::ShadowMapTexture))
     {
@@ -1413,6 +1477,18 @@ R"glsl(
 }
 
 
+// Sample a sphere-mapped texture. With per-fragment spherical texture
+// coordinates the mip level must be selected from wrap-corrected derivatives,
+// so sampling goes through textureGrad (see SphericalTexCoordComputation).
+std::string
+SampleSphereTexture(const ShaderProperties& props, std::string_view sampler, const std::string& coord)
+{
+    if (util::is_set(props.texUsage, TexUsage::SphericalTextureCoord))
+        return fmt::format("textureGrad({}, {}, sphTexDx, sphTexDy)", sampler, coord);
+    return fmt::format("texture({}, {})", sampler, coord);
+}
+
+
 GLFragmentShader
 buildFragmentShader(const ShaderProperties& props)
 {
@@ -1523,6 +1599,9 @@ buildFragmentShader(const ShaderProperties& props)
     if (props.lightModel != LightingModel::ParticleDiffuseModel)
         source += "vec3 N = normalize(normal);\n";
 
+    if (util::is_set(props.texUsage, TexUsage::SphericalTextureCoord))
+        source += SphericalTexCoordComputation(props);
+
     if (props.isViewDependent() || props.hasScattering() || props.hasEclipseShadows())
         source += "vec3 nposition = normalize(position);\n";
 
@@ -1606,7 +1685,7 @@ buildFragmentShader(const ShaderProperties& props)
             if (util::is_set(props.texUsage, TexUsage::CompressedNormalTexture))
             {
                 source += "vec3 n;\n";
-                source += "n.xy = texture(normTex, " + normTexCoord + ".st).ag * 2.0 - vec2(1.0);\n";
+                source += "n.xy = " + SampleSphereTexture(props, "normTex", normTexCoord + ".st") + ".ag * 2.0 - vec2(1.0);\n";
                 source += "n.z = sqrt(1.0 - n.x * n.x - n.y * n.y);\n";
             }
             else
@@ -1614,7 +1693,7 @@ buildFragmentShader(const ShaderProperties& props)
                 // TODO: normalizing the filtered normal texture value noticeably improves the appearance; add
                 // an option for this.
                 //source += "vec3 n = normalize(texture(normTex, " + normTexCoord + ".st).xyz * 2.0 - vec3(1.0));\n";
-                source += "vec3 n = texture(normTex, " + normTexCoord + ".st).xyz * 2.0 - vec3(1.0);\n";
+                source += "vec3 n = " + SampleSphereTexture(props, "normTex", normTexCoord + ".st") + ".xyz * 2.0 - vec3(1.0);\n";
             }
         }
         else
@@ -1709,7 +1788,7 @@ buildFragmentShader(const ShaderProperties& props)
         if (props.usePointSize())
             source += "color = texture(diffTex, gl_PointCoord);\n";
         else
-            source += "color = texture(diffTex, " + diffTexCoord + ".st);\n";
+            source += "color = " + SampleSphereTexture(props, "diffTex", diffTexCoord + ".st") + ";\n";
     }
     else
     {
@@ -1726,7 +1805,7 @@ buildFragmentShader(const ShaderProperties& props)
     // Mix in the overlay color with the base color
     if (util::is_set(props.texUsage, TexUsage::OverlayTexture))
     {
-        source += "vec4 overlayColor = texture(overlayTex, overlayTexCoord.st);\n";
+        source += "vec4 overlayColor = " + SampleSphereTexture(props, "overlayTex", "overlayTexCoord.st") + ";\n";
         source += "color.rgb = mix(color.rgb, overlayColor.rgb, overlayColor.a);\n";
     }
 
@@ -1736,7 +1815,7 @@ buildFragmentShader(const ShaderProperties& props)
         if (util::is_set(props.texUsage, TexUsage::SpecularInDiffuseAlpha))
             source += "fragColor = vec4(color.rgb, 1.0) * diff + float(color.a) * spec;\n";
         else if (util::is_set(props.texUsage, TexUsage::SpecularTexture))
-            source += "fragColor = color * diff + texture(specTex, " + specTexCoord + ".st) * spec;\n";
+            source += "fragColor = color * diff + " + SampleSphereTexture(props, "specTex", specTexCoord + ".st") + " * spec;\n";
         else
             source += "fragColor = color * diff + spec;\n";
     }
@@ -1755,14 +1834,14 @@ buildFragmentShader(const ShaderProperties& props)
         }
 
         source += NightTextureBlend();
-        source += "fragColor += texture(nightTex, " + nightTexCoord + ".st) * totalLight;\n";
+        source += "fragColor += " + SampleSphereTexture(props, "nightTex", nightTexCoord + ".st") + " * totalLight;\n";
     }
 
     // Add in the emissive color
     // TODO: support a constant emissive color, not just an emissive texture
     if (util::is_set(props.texUsage, TexUsage::EmissiveTexture))
     {
-        source += "fragColor += texture(emissiveTex, " + emissiveTexCoord + ".st);\n";
+        source += "fragColor += " + SampleSphereTexture(props, "emissiveTex", emissiveTexCoord + ".st") + ";\n";
     }
 
     // Include the effect of atmospheric scattering.
