@@ -685,7 +685,7 @@ msgstr "فشل في انشاء الممثل"
 
 #: ../src/celestia/celestiacore.cpp:2801
 msgid "DEFAULT_MAIN_FONT"
-msgstr ""
+msgstr "NotoSansArabic-Regular.ttf,9"
 
 #: ../src/celestia/celestiacore.cpp:2805
 msgid "Error loading font; text will not be visible.\n"
@@ -693,11 +693,11 @@ msgstr "خطأ في تحميل الخط; النص سيكون غير مرئي.\n"
 
 #: ../src/celestia/celestiacore.cpp:2807
 msgid "DEFAULT_TITLE_FONT"
-msgstr ""
+msgstr "NotoSansArabic-Bold.ttf,15"
 
 #: ../src/celestia/celestiacore.cpp:2833
 msgid "DEFAULT_LABEL_FONT"
-msgstr ""
+msgstr "NotoSansArabic-Regular.ttf,9"
 
 #: ../src/celestia/celestiacore.cpp:3131
 msgid "Invalid URL"
@@ -4492,18 +4492,6 @@ msgstr "التحميل قائم "
 #: ../src/celscript/lua/celx_celestia.cpp:2905 ../src/celutil/fsutils.cpp:103
 msgid "LANGUAGE"
 msgstr "ar"
-
-#: ../src/celestia/celestiacore.cpp:2754
-msgid "DEFAULT_MAIN_FONT"
-msgstr "NotoSansArabic-Regular.ttf,9"
-
-#: ../src/celestia/celestiacore.cpp:2760
-msgid "DEFAULT_TITLE_FONT"
-msgstr "NotoSansArabic-Bold.ttf,15"
-
-#: ../src/celestia/celestiacore.cpp:2786
-msgid "DEFAULT_LABEL_FONT"
-msgstr "NotoSansArabic-Regular.ttf,9"
 
 #: ../src/celestia/win32/winmain.cpp:648
 #, c++-format

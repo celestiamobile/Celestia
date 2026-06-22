@@ -670,7 +670,7 @@ msgstr "渲染器初始化失败"
 
 #: ../src/celestia/celestiacore.cpp:2801
 msgid "DEFAULT_MAIN_FONT"
-msgstr ""
+msgstr "NotoSansCJK-Regular.ttc,2,9"
 
 #: ../src/celestia/celestiacore.cpp:2805
 msgid "Error loading font; text will not be visible.\n"
@@ -678,11 +678,11 @@ msgstr "读取字体时出错，文字将无法显示。\n"
 
 #: ../src/celestia/celestiacore.cpp:2807
 msgid "DEFAULT_TITLE_FONT"
-msgstr ""
+msgstr "NotoSansCJK-Bold.ttc,2,15"
 
 #: ../src/celestia/celestiacore.cpp:2833
 msgid "DEFAULT_LABEL_FONT"
-msgstr ""
+msgstr "NotoSansCJK-Regular.ttc,2,9"
 
 #: ../src/celestia/celestiacore.cpp:3131
 msgid "Invalid URL"
@@ -4229,18 +4229,6 @@ msgstr "正在加载数据文件..."
 #: ../src/celscript/lua/celx_celestia.cpp:2905 ../src/celutil/fsutils.cpp:103
 msgid "LANGUAGE"
 msgstr "zh_CN"
-
-#: ../src/celestia/celestiacore.cpp:2754
-msgid "DEFAULT_MAIN_FONT"
-msgstr "NotoSansCJK-Regular.ttc,2,9"
-
-#: ../src/celestia/celestiacore.cpp:2760
-msgid "DEFAULT_TITLE_FONT"
-msgstr "NotoSansCJK-Bold.ttc,2,15"
-
-#: ../src/celestia/celestiacore.cpp:2786
-msgid "DEFAULT_LABEL_FONT"
-msgstr "NotoSansCJK-Regular.ttc,2,9"
 
 #: ../src/celestia/win32/winmain.cpp:648
 #, c++-format

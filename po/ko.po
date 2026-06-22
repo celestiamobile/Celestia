@@ -679,7 +679,7 @@ msgstr "렌더링 엔진 초기화 실패"
 
 #: ../src/celestia/celestiacore.cpp:2801
 msgid "DEFAULT_MAIN_FONT"
-msgstr ""
+msgstr "NotoSansCJK-Regular.ttc,1,9"
 
 #: ../src/celestia/celestiacore.cpp:2805
 msgid "Error loading font; text will not be visible.\n"
@@ -687,11 +687,11 @@ msgstr "폰트 읽기 에러, 텍스트가 표시되지 않습니다.\n"
 
 #: ../src/celestia/celestiacore.cpp:2807
 msgid "DEFAULT_TITLE_FONT"
-msgstr ""
+msgstr "NotoSansCJK-Bold.ttc,1,15"
 
 #: ../src/celestia/celestiacore.cpp:2833
 msgid "DEFAULT_LABEL_FONT"
-msgstr ""
+msgstr "NotoSansCJK-Regular.ttc,1,9"
 
 #: ../src/celestia/celestiacore.cpp:3131
 msgid "Invalid URL"
@@ -4464,18 +4464,6 @@ msgstr "로딩중: "
 #: ../src/celscript/lua/celx_celestia.cpp:2905 ../src/celutil/fsutils.cpp:103
 msgid "LANGUAGE"
 msgstr "ko"
-
-#: ../src/celestia/celestiacore.cpp:2754
-msgid "DEFAULT_MAIN_FONT"
-msgstr "NotoSansCJK-Regular.ttc,1,9"
-
-#: ../src/celestia/celestiacore.cpp:2760
-msgid "DEFAULT_TITLE_FONT"
-msgstr "NotoSansCJK-Bold.ttc,1,15"
-
-#: ../src/celestia/celestiacore.cpp:2786
-msgid "DEFAULT_LABEL_FONT"
-msgstr "NotoSansCJK-Regular.ttc,1,9"
 
 #: ../src/celestia/win32/winmain.cpp:648
 #, c++-format

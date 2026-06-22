@@ -673,7 +673,7 @@ msgstr "რენდერერის ინიციალიზაცია �
 
 #: ../src/celestia/celestiacore.cpp:2801
 msgid "DEFAULT_MAIN_FONT"
-msgstr ""
+msgstr "NotoSansGeorgian-Regular.ttf,9"
 
 #: ../src/celestia/celestiacore.cpp:2805
 msgid "Error loading font; text will not be visible.\n"
@@ -681,11 +681,11 @@ msgstr "ფონტის ჩატვირთვა ცავარდა. �
 
 #: ../src/celestia/celestiacore.cpp:2807
 msgid "DEFAULT_TITLE_FONT"
-msgstr ""
+msgstr "NotoSansGeorgian-Bold.ttf,15"
 
 #: ../src/celestia/celestiacore.cpp:2833
 msgid "DEFAULT_LABEL_FONT"
-msgstr ""
+msgstr "NotoSansGeorgian-Regular.ttf,9"
 
 #: ../src/celestia/celestiacore.cpp:3131
 msgid "Invalid URL"
@@ -4218,18 +4218,6 @@ msgstr ""
 #: ../src/celscript/lua/celx_celestia.cpp:2905 ../src/celutil/fsutils.cpp:103
 msgid "LANGUAGE"
 msgstr "ka"
-
-#: ../src/celestia/celestiacore.cpp:2754
-msgid "DEFAULT_MAIN_FONT"
-msgstr "NotoSansGeorgian-Regular.ttf,9"
-
-#: ../src/celestia/celestiacore.cpp:2760
-msgid "DEFAULT_TITLE_FONT"
-msgstr "NotoSansGeorgian-Bold.ttf,15"
-
-#: ../src/celestia/celestiacore.cpp:2786
-msgid "DEFAULT_LABEL_FONT"
-msgstr "NotoSansGeorgian-Regular.ttf,9"
 
 #: ../src/celestia/win32/winmain.cpp:648
 #, c++-format

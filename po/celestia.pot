@@ -4197,18 +4197,6 @@ msgstr ""
 msgid "LANGUAGE"
 msgstr ""
 
-#: ../src/celestia/celestiacore.cpp:2754
-msgid "DEFAULT_MAIN_FONT"
-msgstr ""
-
-#: ../src/celestia/celestiacore.cpp:2760
-msgid "DEFAULT_TITLE_FONT"
-msgstr ""
-
-#: ../src/celestia/celestiacore.cpp:2786
-msgid "DEFAULT_LABEL_FONT"
-msgstr ""
-
 #: ../src/celestia/win32/winmain.cpp:648
 #, c++-format
 msgid "Could not load localized resources: {}\n"
