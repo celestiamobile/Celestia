@@ -252,9 +252,9 @@ CubeSphereMesh::getOrCreateIndexBuffer(int n)
     if (it != indexBufferCache.end())
         return &it->second;
 
-    const int p = patchesPerEdge(n);
-    const int q = n / p; // quads per patch edge
-    const int stride = n + 1;
+    int p = patchesPerEdge(n);
+    int q = n / p; // quads per patch edge
+    int stride = n + 1;
 
     auto [pos, ok] = indexBufferCache.try_emplace(n);
     CachedIndexBuffer& cib = pos->second;
@@ -271,13 +271,13 @@ CubeSphereMesh::getOrCreateIndexBuffer(int n)
     for (int face = 0; face < NUM_FACES; ++face)
     {
         const FaceBasis& f = faceBases[face];
-        const auto base = static_cast<unsigned int>(face * stride * stride);
+        auto base = static_cast<unsigned int>(face * stride * stride);
         for (int pi = 0; pi < p; ++pi)
         {
             for (int pj = 0; pj < p; ++pj)
             {
-                const int i0 = pi * q;
-                const int j0 = pj * q;
+                int i0 = pi * q;
+                int j0 = pj * q;
 
                 for (int i = i0; i < i0 + q; ++i)
                 {
@@ -434,15 +434,15 @@ CubeSphereMesh::render(unsigned int attributes,
     // Patches are stored contiguously (face, pi, pj). Each visible patch is
     // accumulated into a run of adjacent patches and flushed as a single draw
     // call when a culled patch (or the end) breaks the run.
-    const int patchCount = static_cast<int>(cib->patches.size());
+    int patchCount = static_cast<int>(cib->patches.size());
 #if CUBESPHERE_WIREFRAME
     cib->lineBuffer.bind();
-    const int perPatch = cib->linesPerPatch;
-    const GLenum primitive = GL_LINES;
+    int perPatch = cib->linesPerPatch;
+    GLenum primitive = GL_LINES;
 #else
     cib->buffer.bind();
-    const int perPatch = cib->trianglesPerPatch;
-    const GLenum primitive = GL_TRIANGLES;
+    int perPatch = cib->trianglesPerPatch;
+    GLenum primitive = GL_TRIANGLES;
 #endif
 
     int runStart = -1;
