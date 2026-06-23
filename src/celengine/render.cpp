@@ -2406,6 +2406,7 @@ void Renderer::renderObject(const Vector3f& pos,
     ri.orientation = getCameraOrientationf() * obj.orientation.conjugate();
 
     ri.pixWidth = discSizeInPixels;
+    ri.pixelSize = pixelSize;
 
     // Set up the colors
     if (ri.baseTex == nullptr ||

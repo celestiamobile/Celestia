@@ -2,11 +2,14 @@
 //
 // Copyright (C) 2001-present, Celestia Development Team
 //
-// Uniform cube-sphere planet mesh: six cube faces, each a regular
-// (N+1)x(N+1) grid projected to the unit sphere. Even vertex distribution
-// (no pole pinch, unlike the lat/long LODSphereMesh) and a single global
-// subdivision level chosen from apparent size, so adjacent faces share edge
-// vertices and the mesh is watertight by construction (no stitching).
+// Chunked-LOD cube-sphere planet mesh. Each of the six cube faces is the root
+// of a quadtree; every node ("chunk") is a fixed-resolution CHUNK_RES x CHUNK_RES
+// grid covering a square sub-region of the face, projected to the unit sphere.
+// The tree is descended each frame and refined toward the camera by screen-space
+// error, so the mesh density stays roughly constant on screen from orbit down to
+// the surface. Cracks between chunks of differing depth are removed by stitching
+// the higher-resolution edge down to its coarser neighbour (watertight, so it
+// also works for the translucent cloud and atmosphere shells).
 //
 // This program is free software; you can redistribute it and/or
 // modify it under the terms of the GNU General Public License
@@ -15,8 +18,8 @@
 
 #pragma once
 
-#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -55,60 +58,85 @@ public:
     CubeSphereMesh(CubeSphereMesh&&) = delete;
     CubeSphereMesh& operator=(CubeSphereMesh&&) = delete;
 
-    // Drop-in for LODSphereMesh::render plus the eye position in object space
-    // (unit-sphere coordinates) for horizon culling. pixWidth is the planet's
-    // apparent disc size in pixels and drives the global level.
+    // Drop-in for LODSphereMesh::render. eyePos is the eye in object space
+    // (per-axis normalized so an ellipsoid maps to the unit sphere) for culling
+    // and LOD; pixWidth is the planet's apparent disc size in pixels; pixelSize
+    // is the projected world size per pixel at unit distance (≈ radians/pixel),
+    // which drives the screen-space-error refinement.
     void render(unsigned int attributes,
                 const celestia::math::Frustum& frustum,
                 const Eigen::Vector3f& eyePos,
                 float pixWidth,
+                float pixelSize,
                 Texture** tex,
                 int nTextures,
                 CelestiaGLProgram* program);
 
 private:
-    // Per-patch culling data (a patch is one cell of the per-face p x p grid),
-    // precomputed once per level. axis/cosHalfAngle bound the patch as a cone
-    // about its centre direction for the horizon test; centre/radius is its
-    // bounding sphere for the frustum test. All are unit-sphere geometry.
-    struct PatchCull
+    // Identifies a quadtree node: at the given depth a face is split into
+    // (1<<depth) cells per edge, (i,j) selects the cell. vertexSize is part of
+    // the key because the shared mesh serves planets with differing layouts.
+    struct ChunkKey
     {
-        Eigen::Vector3f axis;
-        Eigen::Vector3f center;
-        float cosHalfAngle;
-        float radius;
+        int face;
+        int depth;
+        std::uint32_t i;
+        std::uint32_t j;
+        int vertexSize;
+
+        bool operator==(const ChunkKey& o) const
+        {
+            return face == o.face && depth == o.depth && i == o.i && j == o.j
+                   && vertexSize == o.vertexSize;
+        }
     };
 
-    struct CachedIndexBuffer
+    struct ChunkKeyHash
     {
-        celestia::gl::Buffer buffer;
-        // Patches are stored contiguously in the index buffer, ordered
-        // (face, pi, pj), so any run of visible patches draws as one call.
-        int trianglesPerPatch{ 0 };
-        std::vector<PatchCull> patches;
+        std::size_t operator()(const ChunkKey& k) const
+        {
+            std::size_t h = static_cast<std::size_t>(k.face);
+            h = h * 1000003u + static_cast<std::size_t>(k.depth);
+            h = h * 1000003u + k.i;
+            h = h * 1000003u + k.j;
+            h = h * 1000003u + static_cast<std::size_t>(k.vertexSize);
+            return h;
+        }
+    };
+
+    // A generated, GPU-resident chunk mesh plus its unit-sphere cull bounds:
+    // a cone (axis, cosHalfAngle) about the chunk centre for the horizon test
+    // and a bounding sphere (center, radius) for the frustum test.
+    struct ChunkMesh
+    {
+        celestia::gl::Buffer vbuf{ celestia::gl::Buffer::TargetHint::Array };
+        celestia::gl::Buffer ibuf{ celestia::gl::Buffer::TargetHint::ElementArray };
+        GLsizei indexCount{ 0 };
+        Eigen::Vector3f axis{ Eigen::Vector3f::UnitZ() };
+        Eigen::Vector3f center{ Eigen::Vector3f::Zero() };
+        float cosHalfAngle{ 1.0f };
+        float radius{ 0.0f };
 #if CUBESPHERE_WIREFRAME
-        celestia::gl::Buffer lineBuffer;
-        int linesPerPatch{ 0 };
+        celestia::gl::Buffer lineBuffer{ celestia::gl::Buffer::TargetHint::ElementArray };
+        GLsizei lineCount{ 0 };
 #endif
     };
 
     void ensureBuffers();
-    void buildVertices(int n, unsigned int attributes);
-    celestia::gl::Buffer* getOrCreateVertexBuffer(int n, unsigned int attributes);
-    CachedIndexBuffer* getOrCreateIndexBuffer(int n);
-    static bool patchCulled(const PatchCull& patch,
-                            const celestia::math::Frustum& frustum,
-                            const Eigen::Vector3f& eyePos);
+    ChunkMesh* getOrCreateChunk(const ChunkKey& key, unsigned int attributes);
+    void drawChunk(ChunkMesh& chunk, unsigned int attributes);
+    bool shouldSplit(int face, int depth, std::uint32_t i, std::uint32_t j,
+                     const Eigen::Vector3f& eyePos) const;
+    void renderNode(int face, int depth, std::uint32_t i, std::uint32_t j,
+                    unsigned int attributes,
+                    const celestia::math::Frustum& frustum,
+                    const Eigen::Vector3f& eyePos);
 
     int vertexSize{ 0 };
     int nTexturesUsed{ 0 };
-    std::vector<float> vertices{};
+    float lodPixelSize{ 1.0f };
 
     bool buffersInitialized{ false };
     GLuint vao{ 0 };
-    // Vertex data is camera-independent, so it is built once per (level,
-    // vertex layout) and cached; the key packs both since a single shared mesh
-    // serves planets with differing attribute sets (tangents/textures).
-    std::unordered_map<long long, celestia::gl::Buffer> vertexBufferCache{};
-    std::unordered_map<int, CachedIndexBuffer> indexBufferCache{};
+    std::unordered_map<ChunkKey, ChunkMesh, ChunkKeyHash> chunkCache{};
 };

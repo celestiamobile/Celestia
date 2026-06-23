@@ -2,8 +2,11 @@
 //
 // Copyright (C) 2001-present, Celestia Development Team
 //
-// See cubespheremesh.h. Uniform cube-sphere: one global subdivision level for
-// all six faces, so the whole sphere is a single watertight indexed mesh.
+// See cubespheremesh.h. Chunked-LOD cube-sphere: six quadtrees (one per cube
+// face) refined toward the camera, each node a CHUNK_RES grid generated on
+// demand and cached. This stage refines each face by screen-space error (no
+// culling yet); leaves of differing depth do not share edge vertices, so cracks
+// appear at LOD boundaries and face seams until edge stitching is added.
 //
 // This program is free software; you can redistribute it and/or
 // modify it under the terms of the GNU General Public License
@@ -13,7 +16,9 @@
 #include "cubespheremesh.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <vector>
 
 #include <Eigen/Core>
 
@@ -40,6 +45,21 @@ struct FaceBasis
 
 constexpr int NUM_FACES = 6;
 
+// Grid resolution (quads per edge) of a single chunk. Smaller chunks mean a
+// deeper quadtree but more, lighter draw calls.
+constexpr int CHUNK_RES = 16;
+
+// Maximum quadtree depth, a safety cap on refinement near the surface. At depth
+// d a face edge is split into 2^d cells, so this bounds how small a chunk can get.
+constexpr int MAX_DEPTH = 20;
+
+// Maximum tolerated screen-space geometric error, in pixels. A node is split
+// while the projection of its mesh-to-sphere deviation (the per-quad sagitta)
+// exceeds this, which is the canonical chunked-LOD criterion: it bounds the
+// visible error directly rather than the chunk's on-screen size, so it neither
+// over-refines foreshortened chunks nor needs a view-angle fudge factor.
+constexpr float CHUNK_PIXEL_ERROR = 2.0f;
+
 const std::array<FaceBasis, NUM_FACES> faceBases = { {
     // +X
     { Vector3f( 1.f, -1.f, -1.f), Vector3f(0.f, 2.f, 0.f), Vector3f(0.f, 0.f, 2.f) },
@@ -61,70 +81,13 @@ spherePoint(const FaceBasis& f, float s, float t)
     return (f.origin + s * f.du + t * f.dv).normalized();
 }
 
-// Quads per face edge, from the planet's apparent disc size. The equator
-// crosses 4 faces, so 4*n segments span it; snapping to powers of two keeps a
-// handful of distinct index buffers in the cache. Range tuned to roughly match
-// LODSphereMesh's density from a tiny disc to a full-screen close-up.
-int
-chooseLevel(float pixWidth)
-{
-    float target = pixWidth / 30.0f;
-    int p = static_cast<int>(std::lround(std::log2(std::max(target, 1.0f))));
-    p = std::clamp(p, 3, 8); // 2^3=8 .. 2^8=256 quads per face edge
-    return 1 << p;
-}
-
 inline void*
 bufferOffset(std::size_t n)
 {
     return reinterpret_cast<void*>(n);
 }
 
-// Patches per face edge for culling granularity. Distant low-resolution
-// planets get a single patch (the whole face); close, highly tessellated ones
-// get up to 8x8 patches so that off-horizon and off-screen regions are skipped
-// at finer grain. Always a power of two that divides n.
-int
-patchesPerEdge(int n)
-{
-    return std::clamp(n / 8, 1, 8);
-}
-
 } // anonymous namespace
-
-
-// Horizon + frustum cull for one patch, in the per-axis normalized object space
-// (where an ellipsoid maps exactly to this unit sphere). See the level builder
-// for how the cone (axis, cosHalfAngle) and bounding sphere are derived.
-bool
-CubeSphereMesh::patchCulled(const PatchCull& patch,
-                            const celestia::math::Frustum& frustum,
-                            const Eigen::Vector3f& eyePos)
-{
-    float d = eyePos.norm();
-    if (d > 1.0f)
-    {
-        float cosTheta = patch.axis.dot(eyePos) / d;
-        // Largest dot(P, E) on the patch is d*cos(max(0, theta - a)); when the
-        // eye direction lies inside the patch cone the reduced angle is 0.
-        float cosReduced;
-        if (cosTheta >= patch.cosHalfAngle)
-        {
-            cosReduced = 1.0f;
-        }
-        else
-        {
-            float sinTheta = std::sqrt(std::max(0.0f, 1.0f - cosTheta * cosTheta));
-            float sinHalf = std::sqrt(std::max(0.0f, 1.0f - patch.cosHalfAngle * patch.cosHalfAngle));
-            cosReduced = cosTheta * patch.cosHalfAngle + sinTheta * sinHalf; // cos(theta - a)
-        }
-        if (d * cosReduced < 1.0f)
-            return true;
-    }
-
-    return frustum.testSphere(patch.center, patch.radius)
-           == celestia::math::FrustumAspect::Outside;
-}
 
 
 CubeSphereMesh::~CubeSphereMesh()
@@ -149,214 +112,264 @@ CubeSphereMesh::ensureBuffers()
 }
 
 
-// Camera-independent vertex array for level n and the current vertex layout,
-// built once and cached. The key packs the layout (vertexSize) alongside n
-// because the shared mesh serves planets with different attribute sets.
-gl::Buffer*
-CubeSphereMesh::getOrCreateVertexBuffer(int n, unsigned int attributes)
+// Generate (or fetch from cache) the GPU mesh for one quadtree node. The node
+// covers the face sub-region [s0,s1]x[t0,t1] determined by (depth,i,j); it is a
+// plain CHUNK_RES grid on the unit sphere. The shader derives the normal and
+// texture coordinates from the position, so only positions (and an optional
+// tangent) are stored.
+CubeSphereMesh::ChunkMesh*
+CubeSphereMesh::getOrCreateChunk(const ChunkKey& key, unsigned int attributes)
 {
-    long long key = (static_cast<long long>(n) << 8) | static_cast<long long>(vertexSize);
-    auto it = vertexBufferCache.find(key);
-    if (it != vertexBufferCache.end())
+    auto it = chunkCache.find(key);
+    if (it != chunkCache.end())
         return &it->second;
 
-    buildVertices(n, attributes);
-
-    auto [pos, ok] = vertexBufferCache.try_emplace(key, gl::Buffer::TargetHint::Array);
-    gl::Buffer& vbuf = pos->second;
-    vbuf.bind();
-    vbuf.setData(celestia::util::array_view<void>(vertices.data(),
-                                                  vertices.size() * sizeof(float)),
-                 gl::Buffer::BufferUsage::StaticDraw);
-    return &vbuf;
-}
-
-
-// Build the interleaved vertex array for an n x n quad grid on every face.
-// Layout per vertex: position(3) [+ tangent(3) if Tangents] [+ uv(2) if textured].
-// The normal aliases the position (unit sphere) so it needs no storage.
-void
-CubeSphereMesh::buildVertices(int n, unsigned int attributes)
-{
     const bool wantTangents = (attributes & Tangents) != 0;
     const bool wantTex = nTexturesUsed > 0;
+
+    const FaceBasis& f = faceBases[key.face];
+
+    float cells = static_cast<float>(1u << key.depth);
+    float s0 = static_cast<float>(key.i) / cells;
+    float s1 = static_cast<float>(key.i + 1) / cells;
+    float t0 = static_cast<float>(key.j) / cells;
+    float t1 = static_cast<float>(key.j + 1) / cells;
+    float ds = s1 - s0;
+    float dt = t1 - t0;
 
     const float twoPi = 2.0f * static_cast<float>(celestia::numbers::pi);
     const float invTwoPi = 1.0f / twoPi;
     const float invPi = 1.0f / static_cast<float>(celestia::numbers::pi);
 
-    vertices.clear();
-    vertices.reserve(static_cast<std::size_t>(NUM_FACES) * (n + 1) * (n + 1) * vertexSize);
+    // Unwrap the equirectangular longitude seam relative to the face centre so
+    // texture coordinates stay continuous across the face.
+    Vector3f fc = spherePoint(f, 0.5f, 0.5f);
+    float centerLon = std::atan2(fc.z(), fc.x());
 
-    for (int face = 0; face < NUM_FACES; ++face)
+    std::vector<float> vertices;
+    vertices.reserve(static_cast<std::size_t>(CHUNK_RES + 1) * (CHUNK_RES + 1) * key.vertexSize);
+
+    for (int ii = 0; ii <= CHUNK_RES; ++ii)
     {
-        const FaceBasis& f = faceBases[face];
-
-        // Unwrap the equirectangular longitude seam relative to the face centre
-        // so texture coordinates stay continuous across each face.
-        Vector3f cc = spherePoint(f, 0.5f, 0.5f);
-        float centerLon = std::atan2(cc.z(), cc.x());
-
-        for (int i = 0; i <= n; ++i)
+        float s = s0 + ds * (static_cast<float>(ii) / CHUNK_RES);
+        for (int jj = 0; jj <= CHUNK_RES; ++jj)
         {
-            float s = static_cast<float>(i) / n;
-            for (int j = 0; j <= n; ++j)
+            float t = t0 + dt * (static_cast<float>(jj) / CHUNK_RES);
+            Vector3f p = spherePoint(f, s, t);
+
+            vertices.push_back(p.x());
+            vertices.push_back(p.y());
+            vertices.push_back(p.z());
+
+            if (wantTangents)
             {
-                float t = static_cast<float>(j) / n;
-                Vector3f p = spherePoint(f, s, t);
+                Vector3f tang(p.z(), 0.0f, -p.x());
+                float len = tang.norm();
+                if (len > 1.0e-6f)
+                    tang /= len;
+                else
+                    tang = Vector3f(1.0f, 0.0f, 0.0f);
+                vertices.push_back(tang.x());
+                vertices.push_back(tang.y());
+                vertices.push_back(tang.z());
+            }
 
-                vertices.push_back(p.x());
-                vertices.push_back(p.y());
-                vertices.push_back(p.z());
-
-                if (wantTangents)
-                {
-                    // East-pointing tangent (matches LODSphereMesh convention).
-                    Vector3f tang(p.z(), 0.0f, -p.x());
-                    float len = tang.norm();
-                    if (len > 1.0e-6f)
-                        tang /= len;
-                    else
-                        tang = Vector3f(1.0f, 0.0f, 0.0f);
-                    vertices.push_back(tang.x());
-                    vertices.push_back(tang.y());
-                    vertices.push_back(tang.z());
-                }
-
-                if (wantTex)
-                {
-                    float lon = std::atan2(p.z(), p.x());
-                    while (lon - centerLon > celestia::numbers::pi) lon -= twoPi;
-                    while (centerLon - lon > celestia::numbers::pi) lon += twoPi;
-                    float u = 1.0f - lon * invTwoPi;
-                    float v = std::acos(std::clamp(p.y(), -1.0f, 1.0f)) * invPi;
-                    vertices.push_back(u);
-                    vertices.push_back(v);
-                }
+            if (wantTex)
+            {
+                float lon = std::atan2(p.z(), p.x());
+                while (lon - centerLon > celestia::numbers::pi) lon -= twoPi;
+                while (centerLon - lon > celestia::numbers::pi) lon += twoPi;
+                float u = 1.0f - lon * invTwoPi;
+                float v = std::acos(std::clamp(p.y(), -1.0f, 1.0f)) * invPi;
+                vertices.push_back(u);
+                vertices.push_back(v);
             }
         }
     }
+
+    auto stride = static_cast<unsigned int>(CHUNK_RES + 1);
+    auto idx = [stride](int ii, int jj) {
+        return static_cast<unsigned int>(ii * stride + jj);
+    };
+
+    std::vector<unsigned int> indices;
+    indices.reserve(static_cast<std::size_t>(CHUNK_RES) * CHUNK_RES * 6);
+
+    for (int ii = 0; ii < CHUNK_RES; ++ii)
+    {
+        for (int jj = 0; jj < CHUNK_RES; ++jj)
+        {
+            unsigned int v00 = idx(ii, jj);
+            unsigned int v10 = idx(ii + 1, jj);
+            unsigned int v01 = idx(ii, jj + 1);
+            unsigned int v11 = idx(ii + 1, jj + 1);
+            indices.push_back(v00); indices.push_back(v10); indices.push_back(v11);
+            indices.push_back(v00); indices.push_back(v11); indices.push_back(v01);
+        }
+    }
+
+#if CUBESPHERE_WIREFRAME
+    std::vector<unsigned int> lineIndices;
+    for (int ii = 0; ii <= CHUNK_RES; ++ii)
+    {
+        for (int jj = 0; jj <= CHUNK_RES; ++jj)
+        {
+            unsigned int v = idx(ii, jj);
+            if (jj < CHUNK_RES) { lineIndices.push_back(v); lineIndices.push_back(idx(ii, jj + 1)); }
+            if (ii < CHUNK_RES) { lineIndices.push_back(v); lineIndices.push_back(idx(ii + 1, jj)); }
+        }
+    }
+#endif
+
+    auto [pos, ok] = chunkCache.try_emplace(key);
+    ChunkMesh& chunk = pos->second;
+
+    chunk.vbuf.bind();
+    chunk.vbuf.setData(celestia::util::array_view<void>(vertices.data(),
+                                                        vertices.size() * sizeof(float)),
+                       gl::Buffer::BufferUsage::StaticDraw);
+
+    chunk.ibuf.bind();
+    chunk.ibuf.setData(celestia::util::array_view<void>(indices.data(),
+                                                        indices.size() * sizeof(unsigned int)),
+                       gl::Buffer::BufferUsage::StaticDraw);
+    chunk.indexCount = static_cast<GLsizei>(indices.size());
+
+#if CUBESPHERE_WIREFRAME
+    chunk.lineBuffer.bind();
+    chunk.lineBuffer.setData(celestia::util::array_view<void>(lineIndices.data(),
+                                                              lineIndices.size() * sizeof(unsigned int)),
+                             gl::Buffer::BufferUsage::StaticDraw);
+    chunk.lineCount = static_cast<GLsizei>(lineIndices.size());
+#endif
+
+    // Cull bounds: cone about the chunk centre direction plus a bounding sphere
+    // over the four corners.
+    Vector3f corners[4] = {
+        spherePoint(f, s0, t0), spherePoint(f, s1, t0),
+        spherePoint(f, s1, t1), spherePoint(f, s0, t1),
+    };
+    chunk.axis = spherePoint(f, 0.5f * (s0 + s1), 0.5f * (t0 + t1));
+    chunk.center = (corners[0] + corners[1] + corners[2] + corners[3]) * 0.25f;
+    float cosHalf = 1.0f;
+    float radius2 = 0.0f;
+    for (const Vector3f& c : corners)
+    {
+        cosHalf = std::min(cosHalf, chunk.axis.dot(c));
+        radius2 = std::max(radius2, (chunk.center - c).squaredNorm());
+    }
+    chunk.cosHalfAngle = cosHalf;
+    chunk.radius = std::sqrt(radius2);
+
+    return &chunk;
 }
 
 
-// Triangle index buffer for an n x n grid on all six faces. Vertex (i,j) of a
-// face is at face*(n+1)^2 + i*(n+1) + j. Independent of the camera, so it is
-// built once per level and cached.
-// Index buffers and per-patch cull data for level n. Triangles (and wireframe
-// lines) are grouped patch-by-patch in (face, pi, pj) order so a run of visible
-// patches can be drawn in a single call. Camera-independent, built once per n.
-CubeSphereMesh::CachedIndexBuffer*
-CubeSphereMesh::getOrCreateIndexBuffer(int n)
+// Bind one chunk's buffers, point the vertex attributes at them (each chunk owns
+// its own VBO, so the pointers must be set per draw) and issue the draw. The
+// attribute arrays are enabled once by the caller.
+void
+CubeSphereMesh::drawChunk(ChunkMesh& chunk, unsigned int attributes)
 {
-    auto it = indexBufferCache.find(n);
-    if (it != indexBufferCache.end())
-        return &it->second;
+    chunk.vbuf.bind();
 
-    int p = patchesPerEdge(n);
-    int q = n / p; // quads per patch edge
-    int stride = n + 1;
+    const auto stride = static_cast<GLsizei>(vertexSize * sizeof(float));
+    const int texCoordOffset = ((attributes & Tangents) != 0) ? 6 : 3;
 
-    auto [pos, ok] = indexBufferCache.try_emplace(n);
-    CachedIndexBuffer& cib = pos->second;
-    cib.trianglesPerPatch = q * q * 6;
-    cib.patches.reserve(static_cast<std::size_t>(NUM_FACES) * p * p);
+    glVertexAttribPointer(CelestiaGLProgram::VertexCoordAttributeIndex,
+                          3, GL_FLOAT, GL_FALSE, stride, bufferOffset(0));
+    if ((attributes & Normals) != 0)
+        glVertexAttribPointer(CelestiaGLProgram::NormalAttributeIndex,
+                              3, GL_FLOAT, GL_FALSE, stride, bufferOffset(0));
+    if ((attributes & Tangents) != 0)
+        glVertexAttribPointer(CelestiaGLProgram::TangentAttributeIndex,
+                              3, GL_FLOAT, GL_FALSE, stride, bufferOffset(3 * sizeof(float)));
+    for (int tc = 0; tc < nTexturesUsed; ++tc)
+        glVertexAttribPointer(CelestiaGLProgram::TextureCoord0AttributeIndex + tc,
+                              2, GL_FLOAT, GL_FALSE, stride,
+                              bufferOffset(texCoordOffset * sizeof(float)));
 
-    std::vector<unsigned int> indices;
-    indices.reserve(static_cast<std::size_t>(NUM_FACES) * n * n * 6);
 #if CUBESPHERE_WIREFRAME
-    cib.linesPerPatch = 4 * q * (q + 1);
-    std::vector<unsigned int> lineIndices;
+    chunk.lineBuffer.bind();
+    glDrawElements(GL_LINES, chunk.lineCount, GL_UNSIGNED_INT, bufferOffset(0));
+#else
+    chunk.ibuf.bind();
+    glDrawElements(GL_TRIANGLES, chunk.indexCount, GL_UNSIGNED_INT, bufferOffset(0));
 #endif
+}
 
-    for (int face = 0; face < NUM_FACES; ++face)
+
+// Decide whether a node should be refined into its four children. Uses a
+// screen-space geometric error metric: the chunk's mesh deviates from the true
+// sphere by at most the sagitta of one of its quads; projecting that deviation
+// to the screen and comparing against CHUNK_PIXEL_ERROR bounds the visible error
+// directly. Working in normalized object space (planet = unit sphere) the error
+// and the distance are both in radius units, so the planet radius cancels and the
+// test is identical from orbit to ground. Distance is taken to the nearest point
+// of the chunk (not its centre) so large chunks whose near edge is close are not
+// under-refined.
+bool
+CubeSphereMesh::shouldSplit(int face, int depth, std::uint32_t i, std::uint32_t j,
+                            const Eigen::Vector3f& eyePos) const
+{
+    if (depth >= MAX_DEPTH)
+        return false;
+
+    const FaceBasis& f = faceBases[face];
+    float cells = static_cast<float>(1u << depth);
+    float s0 = static_cast<float>(i) / cells;
+    float s1 = static_cast<float>(i + 1) / cells;
+    float t0 = static_cast<float>(j) / cells;
+    float t1 = static_cast<float>(j + 1) / cells;
+
+    Vector3f c00 = spherePoint(f, s0, t0);
+    Vector3f c10 = spherePoint(f, s1, t0);
+    Vector3f c11 = spherePoint(f, s1, t1);
+    Vector3f c01 = spherePoint(f, s0, t1);
+
+    Vector3f center = (c00 + c10 + c11 + c01) * 0.25f;
+    float chunkRadius = std::sqrt(std::max(std::max((c00 - center).squaredNorm(),
+                                                    (c10 - center).squaredNorm()),
+                                           std::max((c11 - center).squaredNorm(),
+                                                    (c01 - center).squaredNorm())));
+
+    float edge = std::max(std::max((c10 - c00).norm(), (c01 - c00).norm()),
+                          std::max((c11 - c10).norm(), (c11 - c01).norm()));
+
+    // Per-quad sagitta: chord c subtends arc ~c on the unit sphere, deviating
+    // from it by ~c^2/8. This is the residual error of the chunk's fixed grid.
+    float quadChord = edge / static_cast<float>(CHUNK_RES);
+    float geoError = quadChord * quadChord * 0.125f;
+
+    float dist = std::max((eyePos - center).norm() - chunkRadius, 1.0e-6f);
+    float screenError = geoError / (dist * lodPixelSize);
+    return screenError > CHUNK_PIXEL_ERROR;
+}
+
+
+// Descend the quadtree for one face, refining by screen-space error. Cracks
+// appear where neighbouring leaves differ in depth (and across face seams); they
+// are removed by edge stitching in a later stage. Culling is also added later.
+void
+CubeSphereMesh::renderNode(int face, int depth, std::uint32_t i, std::uint32_t j,
+                           unsigned int attributes,
+                           const celestia::math::Frustum& frustum,
+                           const Eigen::Vector3f& eyePos)
+{
+    (void)frustum;
+
+    if (shouldSplit(face, depth, i, j, eyePos))
     {
-        const FaceBasis& f = faceBases[face];
-        auto base = static_cast<unsigned int>(face * stride * stride);
-        for (int pi = 0; pi < p; ++pi)
-        {
-            for (int pj = 0; pj < p; ++pj)
-            {
-                int i0 = pi * q;
-                int j0 = pj * q;
-
-                for (int i = i0; i < i0 + q; ++i)
-                {
-                    for (int j = j0; j < j0 + q; ++j)
-                    {
-                        unsigned int v00 = base + static_cast<unsigned int>(i * stride + j);
-                        unsigned int v10 = v00 + static_cast<unsigned int>(stride);
-                        unsigned int v01 = v00 + 1u;
-                        unsigned int v11 = v10 + 1u;
-                        indices.push_back(v00); indices.push_back(v10); indices.push_back(v11);
-                        indices.push_back(v00); indices.push_back(v11); indices.push_back(v01);
-                    }
-                }
-
-#if CUBESPHERE_WIREFRAME
-                // Each patch draws its own (q+1)x(q+1) grid edges; borders
-                // shared with neighbours are drawn twice, which is harmless for
-                // the debug wireframe and keeps patches independently drawable.
-                for (int i = i0; i <= i0 + q; ++i)
-                {
-                    for (int j = j0; j <= j0 + q; ++j)
-                    {
-                        unsigned int v = base + static_cast<unsigned int>(i * stride + j);
-                        if (j < j0 + q)
-                        {
-                            lineIndices.push_back(v);
-                            lineIndices.push_back(v + 1u);
-                        }
-                        if (i < i0 + q)
-                        {
-                            lineIndices.push_back(v);
-                            lineIndices.push_back(v + static_cast<unsigned int>(stride));
-                        }
-                    }
-                }
-#endif
-
-                // Cull data: cone about the patch centre direction, plus a 3D
-                // bounding sphere over the patch corners.
-                float s0 = static_cast<float>(pi) / p;
-                float s1 = static_cast<float>(pi + 1) / p;
-                float t0 = static_cast<float>(pj) / p;
-                float t1 = static_cast<float>(pj + 1) / p;
-                Vector3f corners[4] = {
-                    spherePoint(f, s0, t0), spherePoint(f, s1, t0),
-                    spherePoint(f, s1, t1), spherePoint(f, s0, t1),
-                };
-                PatchCull pc;
-                pc.axis = spherePoint(f, 0.5f * (s0 + s1), 0.5f * (t0 + t1));
-                pc.center = (corners[0] + corners[1] + corners[2] + corners[3]) * 0.25f;
-                float cosHalf = 1.0f;
-                float radius2 = 0.0f;
-                for (const Vector3f& c : corners)
-                {
-                    cosHalf = std::min(cosHalf, pc.axis.dot(c));
-                    radius2 = std::max(radius2, (pc.center - c).squaredNorm());
-                }
-                pc.cosHalfAngle = cosHalf;
-                pc.radius = std::sqrt(radius2);
-                cib.patches.push_back(pc);
-            }
-        }
+        for (std::uint32_t c = 0; c < 4; ++c)
+            renderNode(face, depth + 1, i * 2 + (c & 1u), j * 2 + ((c >> 1) & 1u),
+                       attributes, frustum, eyePos);
+        return;
     }
 
-    cib.buffer = gl::Buffer(gl::Buffer::TargetHint::ElementArray);
-    cib.buffer.bind();
-    cib.buffer.setData(celestia::util::array_view<void>(indices.data(),
-                                                        indices.size() * sizeof(unsigned int)),
-                       gl::Buffer::BufferUsage::StaticDraw);
-
-#if CUBESPHERE_WIREFRAME
-    cib.lineBuffer = gl::Buffer(gl::Buffer::TargetHint::ElementArray);
-    cib.lineBuffer.bind();
-    cib.lineBuffer.setData(celestia::util::array_view<void>(lineIndices.data(),
-                                                            lineIndices.size() * sizeof(unsigned int)),
-                           gl::Buffer::BufferUsage::StaticDraw);
-#endif
-
-    return &cib;
+    ChunkKey key{ face, depth, i, j, vertexSize };
+    ChunkMesh* chunk = getOrCreateChunk(key, attributes);
+    if (chunk != nullptr)
+        drawChunk(*chunk, attributes);
 }
 
 
@@ -365,10 +378,15 @@ CubeSphereMesh::render(unsigned int attributes,
                        const celestia::math::Frustum& frustum,
                        const Eigen::Vector3f& eyePos,
                        float pixWidth,
+                       float pixelSize,
                        Texture** tex,
                        int nTextures,
                        CelestiaGLProgram* program)
 {
+    (void)pixWidth;
+
+    lodPixelSize = pixelSize;
+
     if (tex == nullptr)
         nTextures = 0;
     nTexturesUsed = std::min(nTextures, static_cast<int>(MAX_TEXTURES));
@@ -396,72 +414,18 @@ CubeSphereMesh::render(unsigned int attributes,
     if (nTexturesUsed > 1)
         glActiveTexture(GL_TEXTURE0);
 
-    int n = chooseLevel(pixWidth);
-    gl::Buffer* vbuf = getOrCreateVertexBuffer(n, attributes);
-    CachedIndexBuffer* cib = getOrCreateIndexBuffer(n);
-
     glBindVertexArray(vao);
 
-    vbuf->bind();
-
-    const auto stride = static_cast<GLsizei>(vertexSize * sizeof(float));
-    const int texCoordOffset = ((attributes & Tangents) != 0) ? 6 : 3;
-
     glEnableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
-    glVertexAttribPointer(CelestiaGLProgram::VertexCoordAttributeIndex,
-                          3, GL_FLOAT, GL_FALSE, stride, bufferOffset(0));
     if ((attributes & Normals) != 0)
-    {
         glEnableVertexAttribArray(CelestiaGLProgram::NormalAttributeIndex);
-        // Unit-sphere normal aliases position.
-        glVertexAttribPointer(CelestiaGLProgram::NormalAttributeIndex,
-                              3, GL_FLOAT, GL_FALSE, stride, bufferOffset(0));
-    }
     if ((attributes & Tangents) != 0)
-    {
         glEnableVertexAttribArray(CelestiaGLProgram::TangentAttributeIndex);
-        glVertexAttribPointer(CelestiaGLProgram::TangentAttributeIndex,
-                              3, GL_FLOAT, GL_FALSE, stride, bufferOffset(3 * sizeof(float)));
-    }
     for (int tc = 0; tc < nTexturesUsed; ++tc)
-    {
         glEnableVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex + tc);
-        glVertexAttribPointer(CelestiaGLProgram::TextureCoord0AttributeIndex + tc,
-                              2, GL_FLOAT, GL_FALSE, stride,
-                              bufferOffset(texCoordOffset * sizeof(float)));
-    }
 
-    // Patches are stored contiguously (face, pi, pj). Each visible patch is
-    // accumulated into a run of adjacent patches and flushed as a single draw
-    // call when a culled patch (or the end) breaks the run.
-    int patchCount = static_cast<int>(cib->patches.size());
-#if CUBESPHERE_WIREFRAME
-    cib->lineBuffer.bind();
-    int perPatch = cib->linesPerPatch;
-    GLenum primitive = GL_LINES;
-#else
-    cib->buffer.bind();
-    int perPatch = cib->trianglesPerPatch;
-    GLenum primitive = GL_TRIANGLES;
-#endif
-
-    int runStart = -1;
-    for (int l = 0; l <= patchCount; ++l)
-    {
-        bool visible = l < patchCount && !patchCulled(cib->patches[l], frustum, eyePos);
-        if (visible)
-        {
-            if (runStart < 0)
-                runStart = l;
-        }
-        else if (runStart >= 0)
-        {
-            int count = (l - runStart) * perPatch;
-            glDrawElements(primitive, count, GL_UNSIGNED_INT,
-                           bufferOffset(static_cast<std::size_t>(runStart) * perPatch * sizeof(unsigned int)));
-            runStart = -1;
-        }
-    }
+    for (int face = 0; face < NUM_FACES; ++face)
+        renderNode(face, 0, 0, 0, attributes, frustum, eyePos);
 
     glDisableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
     if ((attributes & Normals) != 0)
