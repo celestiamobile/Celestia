@@ -31,7 +31,7 @@
 #include <celrender/gl/buffer.h>
 
 // Set to 1 to draw the cube-sphere tessellation as a wireframe.
-#define CUBESPHERE_WIREFRAME 1
+#define CUBESPHERE_WIREFRAME 0
 
 class Texture;
 class CelestiaGLProgram;

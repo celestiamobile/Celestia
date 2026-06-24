@@ -117,6 +117,141 @@ unpackCell(std::uint64_t p, int& face, int& depth, std::uint32_t& i, std::uint32
     j     = static_cast<std::uint32_t>(p & 0x7ffffffu);
 }
 
+constexpr unsigned int edgeFromIndex[4] = { EDGE_LEFT, EDGE_RIGHT, EDGE_BOTTOM, EDGE_TOP };
+
+inline int
+edgeToIndex(unsigned int edge)
+{
+    switch (edge)
+    {
+    case EDGE_LEFT:   return 0;
+    case EDGE_RIGHT:  return 1;
+    case EDGE_BOTTOM: return 2;
+    default:          return 3;
+    }
+}
+
+// How a face edge connects to its neighbour across a shared cube edge. reversed
+// records whether the along-edge parameter runs opposite on the two faces.
+struct FaceAdjacency
+{
+    int neighborFace;
+    unsigned int neighborEdge;
+    bool reversed;
+};
+
+// Derive the 6x4 face adjacency from the cube geometry by matching the 3D
+// endpoints of each face edge, so the table cannot drift out of sync with
+// faceBases. Each edge's endpoints are taken in a fixed (P0,P1) order keyed to
+// the along-edge parameter; a neighbour whose endpoints match in the same order
+// shares the edge with the same parameter direction, reversed order means the
+// parameter is flipped.
+std::array<std::array<FaceAdjacency, 4>, NUM_FACES>
+buildAdjacencyTable()
+{
+    auto corner = [](int f, int sc, int tc) {
+        return (faceBases[f].origin
+                + static_cast<float>(sc) * faceBases[f].du
+                + static_cast<float>(tc) * faceBases[f].dv).eval();
+    };
+    auto edgePoints = [&](int f, int idx, Vector3f& p0, Vector3f& p1) {
+        switch (edgeFromIndex[idx])
+        {
+        case EDGE_LEFT:   p0 = corner(f, 0, 0); p1 = corner(f, 0, 1); break;
+        case EDGE_RIGHT:  p0 = corner(f, 1, 0); p1 = corner(f, 1, 1); break;
+        case EDGE_BOTTOM: p0 = corner(f, 0, 0); p1 = corner(f, 1, 0); break;
+        default:          p0 = corner(f, 0, 1); p1 = corner(f, 1, 1); break;
+        }
+    };
+    auto same = [](const Vector3f& a, const Vector3f& b) {
+        return (a - b).squaredNorm() < 1.0e-6f;
+    };
+
+    std::array<std::array<FaceAdjacency, 4>, NUM_FACES> table{};
+    for (int f = 0; f < NUM_FACES; ++f)
+    {
+        for (int e = 0; e < 4; ++e)
+        {
+            Vector3f p0, p1;
+            edgePoints(f, e, p0, p1);
+            FaceAdjacency found{ -1, 0u, false };
+            for (int f2 = 0; f2 < NUM_FACES && found.neighborFace < 0; ++f2)
+            {
+                if (f2 == f)
+                    continue;
+                for (int e2 = 0; e2 < 4; ++e2)
+                {
+                    Vector3f q0, q1;
+                    edgePoints(f2, e2, q0, q1);
+                    if (same(p0, q0) && same(p1, q1))
+                    {
+                        found = { f2, edgeFromIndex[e2], false };
+                        break;
+                    }
+                    if (same(p0, q1) && same(p1, q0))
+                    {
+                        found = { f2, edgeFromIndex[e2], true };
+                        break;
+                    }
+                }
+            }
+            table[f][e] = found;
+        }
+    }
+    return table;
+}
+
+const FaceAdjacency&
+faceAdjacency(int face, unsigned int edge)
+{
+    static const auto table = buildAdjacencyTable();
+    return table[face][edgeToIndex(edge)];
+}
+
+// A cell's neighbour across one edge, valid both in-face and across a cube edge.
+// edge names which of the neighbour's own edges is the shared one, so its
+// adjacent children can be located for the 2:1-balance test.
+struct NeighborCell
+{
+    int face;
+    std::uint32_t i;
+    std::uint32_t j;
+    unsigned int edge;
+};
+
+NeighborCell
+neighborOf(int face, unsigned int edge, int depth, std::uint32_t i, std::uint32_t j)
+{
+    std::uint32_t cells = 1u << depth;
+    bool boundary =
+        (edge == EDGE_LEFT   && i == 0) ||
+        (edge == EDGE_RIGHT  && i + 1 == cells) ||
+        (edge == EDGE_BOTTOM && j == 0) ||
+        (edge == EDGE_TOP    && j + 1 == cells);
+
+    if (!boundary)
+    {
+        switch (edge)
+        {
+        case EDGE_LEFT:   return { face, i - 1, j, EDGE_RIGHT };
+        case EDGE_RIGHT:  return { face, i + 1, j, EDGE_LEFT };
+        case EDGE_BOTTOM: return { face, i, j - 1, EDGE_TOP };
+        default:          return { face, i, j + 1, EDGE_BOTTOM };
+        }
+    }
+
+    const FaceAdjacency& adj = faceAdjacency(face, edge);
+    std::uint32_t along = (edge == EDGE_LEFT || edge == EDGE_RIGHT) ? j : i;
+    std::uint32_t a = adj.reversed ? (cells - 1 - along) : along;
+    switch (adj.neighborEdge)
+    {
+    case EDGE_LEFT:   return { adj.neighborFace, 0u,          a,           EDGE_LEFT };
+    case EDGE_RIGHT:  return { adj.neighborFace, cells - 1,   a,           EDGE_RIGHT };
+    case EDGE_BOTTOM: return { adj.neighborFace, a,           0u,          EDGE_BOTTOM };
+    default:          return { adj.neighborFace, a,           cells - 1,   EDGE_TOP };
+    }
+}
+
 } // anonymous namespace
 
 
@@ -459,33 +594,42 @@ CubeSphereMesh::coveringDepth(int face, int depth, std::uint32_t i, std::uint32_
 }
 
 
-// 2:1-balance helper: does this leaf have a same-face neighbour split two or more
-// levels finer? Such a neighbour exposes a leaf at depth >= depth+2 along the
-// shared edge, which the one-level stitch templates cannot match. We detect it by
-// asking whether the neighbour's child cell adjacent to the edge (at depth+1) is
-// itself split (coveringDepth < 0). Coarser or one-level-finer neighbours never
-// trigger a split.
+// 2:1-balance helper: does this leaf have a neighbour (in-face or across a cube
+// edge) split two or more levels finer? Such a neighbour exposes a leaf at depth
+// >= depth+2 along the shared edge, which the one-level stitch templates cannot
+// match. We detect it by asking whether either of the neighbour's two children
+// adjacent to the shared edge (at depth+1) is itself split (coveringDepth < 0).
+// Coarser or one-level-finer neighbours never trigger a split.
 bool
 CubeSphereMesh::needsBalanceSplit(int face, int depth,
                                   std::uint32_t i, std::uint32_t j) const
 {
-    std::uint32_t cells = 1u << depth;
-    auto splitFiner = [&](std::uint32_t ci, std::uint32_t cj) {
-        return coveringDepth(face, depth + 1, ci, cj) < 0;
-    };
+    for (unsigned int edge : edgeFromIndex)
+    {
+        NeighborCell n = neighborOf(face, edge, depth, i, j);
 
-    if (i > 0 &&
-        (splitFiner(2 * i - 1, 2 * j) || splitFiner(2 * i - 1, 2 * j + 1)))
-        return true;
-    if (i + 1 < cells &&
-        (splitFiner(2 * i + 2, 2 * j) || splitFiner(2 * i + 2, 2 * j + 1)))
-        return true;
-    if (j > 0 &&
-        (splitFiner(2 * i, 2 * j - 1) || splitFiner(2 * i + 1, 2 * j - 1)))
-        return true;
-    if (j + 1 < cells &&
-        (splitFiner(2 * i, 2 * j + 2) || splitFiner(2 * i + 1, 2 * j + 2)))
-        return true;
+        // The two depth+1 children of the neighbour that touch the shared edge.
+        std::uint32_t c0i, c0j, c1i, c1j;
+        switch (n.edge)
+        {
+        case EDGE_LEFT:
+            c0i = 2 * n.i;     c0j = 2 * n.j;     c1i = 2 * n.i;     c1j = 2 * n.j + 1;
+            break;
+        case EDGE_RIGHT:
+            c0i = 2 * n.i + 1; c0j = 2 * n.j;     c1i = 2 * n.i + 1; c1j = 2 * n.j + 1;
+            break;
+        case EDGE_BOTTOM:
+            c0i = 2 * n.i;     c0j = 2 * n.j;     c1i = 2 * n.i + 1; c1j = 2 * n.j;
+            break;
+        default:
+            c0i = 2 * n.i;     c0j = 2 * n.j + 1; c1i = 2 * n.i + 1; c1j = 2 * n.j + 1;
+            break;
+        }
+
+        if (coveringDepth(n.face, depth + 1, c0i, c0j) < 0 ||
+            coveringDepth(n.face, depth + 1, c1i, c1j) < 0)
+            return true;
+    }
     return false;
 }
 
@@ -534,24 +678,21 @@ CubeSphereMesh::balanceLeaves()
 }
 
 
-// Pass 2 helper: set an edge's stitch bit when its same-face neighbour is covered
-// by a coarser leaf. Out-of-face edges are left unstitched here; cross-face
-// stitching is handled separately.
+// Pass 2 helper: set an edge's stitch bit when the neighbour across it (in-face
+// or across a cube edge) is covered by a coarser leaf, so that edge drops to the
+// neighbour's resolution. With 2:1 balance enforced the gap is always one level.
 unsigned int
 CubeSphereMesh::computeEdgeMask(int face, int depth,
                                std::uint32_t i, std::uint32_t j) const
 {
     unsigned int mask = 0;
-    std::uint32_t cells = 1u << depth;
-    auto coarser = [&](std::uint32_t ni, std::uint32_t nj) {
-        int cd = coveringDepth(face, depth, ni, nj);
-        return cd >= 0 && cd < depth;
-    };
-
-    if (i > 0             && coarser(i - 1, j)) mask |= EDGE_LEFT;
-    if (i + 1 < cells     && coarser(i + 1, j)) mask |= EDGE_RIGHT;
-    if (j > 0             && coarser(i, j - 1)) mask |= EDGE_BOTTOM;
-    if (j + 1 < cells     && coarser(i, j + 1)) mask |= EDGE_TOP;
+    for (unsigned int edge : edgeFromIndex)
+    {
+        NeighborCell n = neighborOf(face, edge, depth, i, j);
+        int cd = coveringDepth(n.face, depth, n.i, n.j);
+        if (cd >= 0 && cd < depth)
+            mask |= edge;
+    }
     return mask;
 }
 
