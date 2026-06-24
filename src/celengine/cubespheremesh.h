@@ -18,9 +18,11 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <Eigen/Core>
@@ -29,7 +31,7 @@
 #include <celrender/gl/buffer.h>
 
 // Set to 1 to draw the cube-sphere tessellation as a wireframe.
-#define CUBESPHERE_WIREFRAME 0
+#define CUBESPHERE_WIREFRAME 1
 
 class Texture;
 class CelestiaGLProgram;
@@ -106,37 +108,64 @@ private:
 
     // A generated, GPU-resident chunk mesh plus its unit-sphere cull bounds:
     // a cone (axis, cosHalfAngle) about the chunk centre for the horizon test
-    // and a bounding sphere (center, radius) for the frustum test.
+    // and a bounding sphere (center, radius) for the frustum test. The triangle
+    // indices live in shared stitch templates (see stitchIB), not here, since
+    // every chunk has the same grid topology; only the vertices differ.
     struct ChunkMesh
     {
         celestia::gl::Buffer vbuf{ celestia::gl::Buffer::TargetHint::Array };
-        celestia::gl::Buffer ibuf{ celestia::gl::Buffer::TargetHint::ElementArray };
-        GLsizei indexCount{ 0 };
         Eigen::Vector3f axis{ Eigen::Vector3f::UnitZ() };
         Eigen::Vector3f center{ Eigen::Vector3f::Zero() };
         float cosHalfAngle{ 1.0f };
         float radius{ 0.0f };
-#if CUBESPHERE_WIREFRAME
-        celestia::gl::Buffer lineBuffer{ celestia::gl::Buffer::TargetHint::ElementArray };
-        GLsizei lineCount{ 0 };
-#endif
     };
 
     void ensureBuffers();
+    void ensureStitchTemplates();
     ChunkMesh* getOrCreateChunk(const ChunkKey& key, unsigned int attributes);
-    void drawChunk(ChunkMesh& chunk, unsigned int attributes);
+    void drawChunk(ChunkMesh& chunk, unsigned int attributes, unsigned int edgeMask);
     bool shouldSplit(int face, int depth, std::uint32_t i, std::uint32_t j,
                      const Eigen::Vector3f& eyePos) const;
-    void renderNode(int face, int depth, std::uint32_t i, std::uint32_t j,
-                    unsigned int attributes,
-                    const celestia::math::Frustum& frustum,
-                    const Eigen::Vector3f& eyePos);
+    // Pass 1: descend the quadtree by screen-space error, recording the active
+    // leaves (both as a draw list and as a membership set for neighbour queries).
+    void collectLeaves(int face, int depth, std::uint32_t i, std::uint32_t j,
+                       const Eigen::Vector3f& eyePos);
+    // Depth of the leaf covering a same-face cell, or -1 if that region is split
+    // finer than the cell (no single covering leaf).
+    int coveringDepth(int face, int depth, std::uint32_t i, std::uint32_t j) const;
+    // Pass 1b: restricted-quadtree 2:1 balance. needsBalanceSplit reports a leaf
+    // with a same-face neighbour two or more levels finer; balanceLeaves force-
+    // splits such leaves to a fixpoint, then rebuilds the draw list.
+    bool needsBalanceSplit(int face, int depth,
+                           std::uint32_t i, std::uint32_t j) const;
+    void balanceLeaves();
+    // Edge-stitch mask for a leaf: a bit is set when the neighbour across that
+    // edge is covered by a coarser leaf, so this edge must drop to match it.
+    unsigned int computeEdgeMask(int face, int depth,
+                                 std::uint32_t i, std::uint32_t j) const;
+
+    // One pre-built index buffer per 4-bit edge mask: bit set means that edge is
+    // stitched down to a coarser (one level lower) neighbour by dropping its odd
+    // boundary vertices. Shared by all chunks of any planet.
+    static constexpr int NUM_STITCH_TEMPLATES = 16;
 
     int vertexSize{ 0 };
     int nTexturesUsed{ 0 };
     float lodPixelSize{ 1.0f };
 
     bool buffersInitialized{ false };
+    bool stitchTemplatesBuilt{ false };
     GLuint vao{ 0 };
+    std::array<celestia::gl::Buffer, NUM_STITCH_TEMPLATES> stitchIB{};
+    std::array<GLsizei, NUM_STITCH_TEMPLATES> stitchCount{};
+#if CUBESPHERE_WIREFRAME
+    std::array<celestia::gl::Buffer, NUM_STITCH_TEMPLATES> stitchLineIB{};
+    std::array<GLsizei, NUM_STITCH_TEMPLATES> stitchLineCount{};
+#endif
     std::unordered_map<ChunkKey, ChunkMesh, ChunkKeyHash> chunkCache{};
+
+    // Active leaves for the current frame: a draw list and a packed-key set used
+    // to look up neighbour depths when computing edge-stitch masks.
+    std::vector<ChunkKey> frameLeaves{};
+    std::unordered_set<std::uint64_t> frameLeafSet{};
 };

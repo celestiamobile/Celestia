@@ -18,6 +18,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <set>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Core>
@@ -60,6 +62,14 @@ constexpr int MAX_DEPTH = 20;
 // over-refines foreshortened chunks nor needs a view-angle fudge factor.
 constexpr float CHUNK_PIXEL_ERROR = 2.0f;
 
+// Edge identifiers for the stitch mask. A face-parameter vertex (a,b) has a as
+// the s-grid index and b as the t-grid index, so the left/right edges are a==0
+// and a==CHUNK_RES, the bottom/top edges are b==0 and b==CHUNK_RES.
+constexpr unsigned int EDGE_LEFT   = 0x1; // s == 0
+constexpr unsigned int EDGE_RIGHT  = 0x2; // s == CHUNK_RES
+constexpr unsigned int EDGE_BOTTOM = 0x4; // t == 0
+constexpr unsigned int EDGE_TOP    = 0x8; // t == CHUNK_RES
+
 const std::array<FaceBasis, NUM_FACES> faceBases = { {
     // +X
     { Vector3f( 1.f, -1.f, -1.f), Vector3f(0.f, 2.f, 0.f), Vector3f(0.f, 0.f, 2.f) },
@@ -87,6 +97,26 @@ bufferOffset(std::size_t n)
     return reinterpret_cast<void*>(n);
 }
 
+// Pack a same-face quadtree cell into a 64-bit key for the leaf set. depth is at
+// most MAX_DEPTH (< 64) and i,j at most 2^depth, so the fields do not overlap.
+inline std::uint64_t
+packCell(int face, int depth, std::uint32_t i, std::uint32_t j)
+{
+    return (static_cast<std::uint64_t>(face)  << 60)
+         | (static_cast<std::uint64_t>(depth) << 54)
+         | (static_cast<std::uint64_t>(i)     << 27)
+         |  static_cast<std::uint64_t>(j);
+}
+
+inline void
+unpackCell(std::uint64_t p, int& face, int& depth, std::uint32_t& i, std::uint32_t& j)
+{
+    face  = static_cast<int>((p >> 60) & 0xfu);
+    depth = static_cast<int>((p >> 54) & 0x3fu);
+    i     = static_cast<std::uint32_t>((p >> 27) & 0x7ffffffu);
+    j     = static_cast<std::uint32_t>(p & 0x7ffffffu);
+}
+
 } // anonymous namespace
 
 
@@ -109,6 +139,100 @@ CubeSphereMesh::ensureBuffers()
         return;
 
     buffersInitialized = true;
+}
+
+
+// Build the 16 shared index buffers, one per edge-stitch mask. The grid topology
+// is identical for every chunk, so the indices depend only on the mask and can be
+// shared. For a "stitched" edge the odd-indexed boundary vertices are snapped to
+// their lower even neighbour; the triangles that then collapse to zero area are
+// dropped. This drops the high-resolution edge to match a coarser neighbour while
+// staying watertight (no T-junctions), and the snap-and-drop handles corners,
+// where two stitched edges meet, automatically.
+void
+CubeSphereMesh::ensureStitchTemplates()
+{
+    if (stitchTemplatesBuilt)
+        return;
+
+    constexpr int N = CHUNK_RES;
+    const auto stride = static_cast<unsigned int>(N + 1);
+    auto vid = [stride](int a, int b) {
+        return static_cast<unsigned int>(a * static_cast<int>(stride) + b);
+    };
+
+    std::vector<unsigned int> indices;
+    for (int mask = 0; mask < NUM_STITCH_TEMPLATES; ++mask)
+    {
+        auto snap = [mask](int a, int b) {
+            if (a == 0 && (mask & EDGE_LEFT)   != 0 && (b & 1) != 0) --b;
+            if (a == N && (mask & EDGE_RIGHT)  != 0 && (b & 1) != 0) --b;
+            if (b == 0 && (mask & EDGE_BOTTOM) != 0 && (a & 1) != 0) --a;
+            if (b == N && (mask & EDGE_TOP)    != 0 && (a & 1) != 0) --a;
+            return std::pair<int, int>(a, b);
+        };
+
+        indices.clear();
+        indices.reserve(static_cast<std::size_t>(N) * N * 6);
+        for (int ii = 0; ii < N; ++ii)
+        {
+            for (int jj = 0; jj < N; ++jj)
+            {
+                auto [a00, b00] = snap(ii,     jj);
+                auto [a10, b10] = snap(ii + 1, jj);
+                auto [a01, b01] = snap(ii,     jj + 1);
+                auto [a11, b11] = snap(ii + 1, jj + 1);
+                unsigned int v00 = vid(a00, b00);
+                unsigned int v10 = vid(a10, b10);
+                unsigned int v01 = vid(a01, b01);
+                unsigned int v11 = vid(a11, b11);
+                if (v00 != v10 && v10 != v11 && v00 != v11)
+                {
+                    indices.push_back(v00); indices.push_back(v10); indices.push_back(v11);
+                }
+                if (v00 != v11 && v11 != v01 && v00 != v01)
+                {
+                    indices.push_back(v00); indices.push_back(v11); indices.push_back(v01);
+                }
+            }
+        }
+
+        stitchCount[mask] = static_cast<GLsizei>(indices.size());
+        stitchIB[mask] = gl::Buffer(gl::Buffer::TargetHint::ElementArray,
+                                    celestia::util::array_view<void>(
+                                        indices.data(),
+                                        indices.size() * sizeof(unsigned int)),
+                                    gl::Buffer::BufferUsage::StaticDraw);
+
+#if CUBESPHERE_WIREFRAME
+        // Derive a wireframe template from the triangle template's edges so the
+        // wireframe reflects the actual stitched tessellation. Dedupe undirected
+        // edges so shared triangle edges are drawn once.
+        std::set<std::pair<unsigned int, unsigned int>> edges;
+        for (std::size_t t = 0; t + 2 < indices.size(); t += 3)
+        {
+            unsigned int a = indices[t], b = indices[t + 1], c = indices[t + 2];
+            edges.emplace(std::min(a, b), std::max(a, b));
+            edges.emplace(std::min(b, c), std::max(b, c));
+            edges.emplace(std::min(c, a), std::max(c, a));
+        }
+        std::vector<unsigned int> lineIndices;
+        lineIndices.reserve(edges.size() * 2);
+        for (const auto& e : edges)
+        {
+            lineIndices.push_back(e.first);
+            lineIndices.push_back(e.second);
+        }
+        stitchLineCount[mask] = static_cast<GLsizei>(lineIndices.size());
+        stitchLineIB[mask] = gl::Buffer(gl::Buffer::TargetHint::ElementArray,
+                                        celestia::util::array_view<void>(
+                                            lineIndices.data(),
+                                            lineIndices.size() * sizeof(unsigned int)),
+                                        gl::Buffer::BufferUsage::StaticDraw);
+#endif
+    }
+
+    stitchTemplatesBuilt = true;
 }
 
 
@@ -187,40 +311,6 @@ CubeSphereMesh::getOrCreateChunk(const ChunkKey& key, unsigned int attributes)
         }
     }
 
-    auto stride = static_cast<unsigned int>(CHUNK_RES + 1);
-    auto idx = [stride](int ii, int jj) {
-        return static_cast<unsigned int>(ii * stride + jj);
-    };
-
-    std::vector<unsigned int> indices;
-    indices.reserve(static_cast<std::size_t>(CHUNK_RES) * CHUNK_RES * 6);
-
-    for (int ii = 0; ii < CHUNK_RES; ++ii)
-    {
-        for (int jj = 0; jj < CHUNK_RES; ++jj)
-        {
-            unsigned int v00 = idx(ii, jj);
-            unsigned int v10 = idx(ii + 1, jj);
-            unsigned int v01 = idx(ii, jj + 1);
-            unsigned int v11 = idx(ii + 1, jj + 1);
-            indices.push_back(v00); indices.push_back(v10); indices.push_back(v11);
-            indices.push_back(v00); indices.push_back(v11); indices.push_back(v01);
-        }
-    }
-
-#if CUBESPHERE_WIREFRAME
-    std::vector<unsigned int> lineIndices;
-    for (int ii = 0; ii <= CHUNK_RES; ++ii)
-    {
-        for (int jj = 0; jj <= CHUNK_RES; ++jj)
-        {
-            unsigned int v = idx(ii, jj);
-            if (jj < CHUNK_RES) { lineIndices.push_back(v); lineIndices.push_back(idx(ii, jj + 1)); }
-            if (ii < CHUNK_RES) { lineIndices.push_back(v); lineIndices.push_back(idx(ii + 1, jj)); }
-        }
-    }
-#endif
-
     auto [pos, ok] = chunkCache.try_emplace(key);
     ChunkMesh& chunk = pos->second;
 
@@ -228,20 +318,6 @@ CubeSphereMesh::getOrCreateChunk(const ChunkKey& key, unsigned int attributes)
     chunk.vbuf.setData(celestia::util::array_view<void>(vertices.data(),
                                                         vertices.size() * sizeof(float)),
                        gl::Buffer::BufferUsage::StaticDraw);
-
-    chunk.ibuf.bind();
-    chunk.ibuf.setData(celestia::util::array_view<void>(indices.data(),
-                                                        indices.size() * sizeof(unsigned int)),
-                       gl::Buffer::BufferUsage::StaticDraw);
-    chunk.indexCount = static_cast<GLsizei>(indices.size());
-
-#if CUBESPHERE_WIREFRAME
-    chunk.lineBuffer.bind();
-    chunk.lineBuffer.setData(celestia::util::array_view<void>(lineIndices.data(),
-                                                              lineIndices.size() * sizeof(unsigned int)),
-                             gl::Buffer::BufferUsage::StaticDraw);
-    chunk.lineCount = static_cast<GLsizei>(lineIndices.size());
-#endif
 
     // Cull bounds: cone about the chunk centre direction plus a bounding sphere
     // over the four corners.
@@ -265,11 +341,12 @@ CubeSphereMesh::getOrCreateChunk(const ChunkKey& key, unsigned int attributes)
 }
 
 
-// Bind one chunk's buffers, point the vertex attributes at them (each chunk owns
-// its own VBO, so the pointers must be set per draw) and issue the draw. The
-// attribute arrays are enabled once by the caller.
+// Bind one chunk's vertex buffer, point the vertex attributes at it (each chunk
+// owns its own VBO, so the pointers must be set per draw) and draw it with the
+// shared stitch template selected by edgeMask. The attribute arrays are enabled
+// once by the caller.
 void
-CubeSphereMesh::drawChunk(ChunkMesh& chunk, unsigned int attributes)
+CubeSphereMesh::drawChunk(ChunkMesh& chunk, unsigned int attributes, unsigned int edgeMask)
 {
     chunk.vbuf.bind();
 
@@ -290,11 +367,11 @@ CubeSphereMesh::drawChunk(ChunkMesh& chunk, unsigned int attributes)
                               bufferOffset(texCoordOffset * sizeof(float)));
 
 #if CUBESPHERE_WIREFRAME
-    chunk.lineBuffer.bind();
-    glDrawElements(GL_LINES, chunk.lineCount, GL_UNSIGNED_INT, bufferOffset(0));
+    stitchLineIB[edgeMask].bind();
+    glDrawElements(GL_LINES, stitchLineCount[edgeMask], GL_UNSIGNED_INT, bufferOffset(0));
 #else
-    chunk.ibuf.bind();
-    glDrawElements(GL_TRIANGLES, chunk.indexCount, GL_UNSIGNED_INT, bufferOffset(0));
+    stitchIB[edgeMask].bind();
+    glDrawElements(GL_TRIANGLES, stitchCount[edgeMask], GL_UNSIGNED_INT, bufferOffset(0));
 #endif
 }
 
@@ -347,29 +424,135 @@ CubeSphereMesh::shouldSplit(int face, int depth, std::uint32_t i, std::uint32_t 
 }
 
 
-// Descend the quadtree for one face, refining by screen-space error. Cracks
-// appear where neighbouring leaves differ in depth (and across face seams); they
-// are removed by edge stitching in a later stage. Culling is also added later.
+// Pass 1: descend the quadtree by screen-space error, recording each leaf in the
+// draw list and the membership set. Frustum/horizon culling is added later.
 void
-CubeSphereMesh::renderNode(int face, int depth, std::uint32_t i, std::uint32_t j,
-                           unsigned int attributes,
-                           const celestia::math::Frustum& frustum,
-                           const Eigen::Vector3f& eyePos)
+CubeSphereMesh::collectLeaves(int face, int depth, std::uint32_t i, std::uint32_t j,
+                              const Eigen::Vector3f& eyePos)
 {
-    (void)frustum;
-
     if (shouldSplit(face, depth, i, j, eyePos))
     {
         for (std::uint32_t c = 0; c < 4; ++c)
-            renderNode(face, depth + 1, i * 2 + (c & 1u), j * 2 + ((c >> 1) & 1u),
-                       attributes, frustum, eyePos);
+            collectLeaves(face, depth + 1, i * 2 + (c & 1u), j * 2 + ((c >> 1) & 1u),
+                          eyePos);
         return;
     }
 
-    ChunkKey key{ face, depth, i, j, vertexSize };
-    ChunkMesh* chunk = getOrCreateChunk(key, attributes);
-    if (chunk != nullptr)
-        drawChunk(*chunk, attributes);
+    frameLeaves.push_back(ChunkKey{ face, depth, i, j, vertexSize });
+    frameLeafSet.insert(packCell(face, depth, i, j));
+}
+
+
+// Walk up the ancestors of a same-face cell until one is an active leaf; its
+// depth is the covering depth. Leaves partition the face, so at most one ancestor
+// matches. Returns -1 when the region is split finer than the queried cell.
+int
+CubeSphereMesh::coveringDepth(int face, int depth, std::uint32_t i, std::uint32_t j) const
+{
+    for (int dd = depth; dd >= 0; --dd)
+    {
+        auto shift = static_cast<std::uint32_t>(depth - dd);
+        if (frameLeafSet.count(packCell(face, dd, i >> shift, j >> shift)) != 0)
+            return dd;
+    }
+    return -1;
+}
+
+
+// 2:1-balance helper: does this leaf have a same-face neighbour split two or more
+// levels finer? Such a neighbour exposes a leaf at depth >= depth+2 along the
+// shared edge, which the one-level stitch templates cannot match. We detect it by
+// asking whether the neighbour's child cell adjacent to the edge (at depth+1) is
+// itself split (coveringDepth < 0). Coarser or one-level-finer neighbours never
+// trigger a split.
+bool
+CubeSphereMesh::needsBalanceSplit(int face, int depth,
+                                  std::uint32_t i, std::uint32_t j) const
+{
+    std::uint32_t cells = 1u << depth;
+    auto splitFiner = [&](std::uint32_t ci, std::uint32_t cj) {
+        return coveringDepth(face, depth + 1, ci, cj) < 0;
+    };
+
+    if (i > 0 &&
+        (splitFiner(2 * i - 1, 2 * j) || splitFiner(2 * i - 1, 2 * j + 1)))
+        return true;
+    if (i + 1 < cells &&
+        (splitFiner(2 * i + 2, 2 * j) || splitFiner(2 * i + 2, 2 * j + 1)))
+        return true;
+    if (j > 0 &&
+        (splitFiner(2 * i, 2 * j - 1) || splitFiner(2 * i + 1, 2 * j - 1)))
+        return true;
+    if (j + 1 < cells &&
+        (splitFiner(2 * i, 2 * j + 2) || splitFiner(2 * i + 1, 2 * j + 2)))
+        return true;
+    return false;
+}
+
+
+// Pass 1b: force-split leaves until no same-face neighbour differs by more than
+// one level (restricted quadtree / 2:1 balance). With this invariant the existing
+// one-level stitch templates make every in-face edge watertight. Iterates to a
+// fixpoint since each split can unbalance a coarser neighbour in turn. Rebuilds
+// the draw list from the balanced leaf set when done.
+void
+CubeSphereMesh::balanceLeaves()
+{
+    bool changed = true;
+    while (changed)
+    {
+        changed = false;
+        std::vector<std::uint64_t> current(frameLeafSet.begin(), frameLeafSet.end());
+        for (std::uint64_t cell : current)
+        {
+            int face, depth;
+            std::uint32_t i, j;
+            unpackCell(cell, face, depth, i, j);
+            if (depth >= MAX_DEPTH)
+                continue;
+            if (frameLeafSet.count(cell) == 0)
+                continue;
+            if (!needsBalanceSplit(face, depth, i, j))
+                continue;
+            frameLeafSet.erase(cell);
+            for (std::uint32_t c = 0; c < 4; ++c)
+                frameLeafSet.insert(packCell(face, depth + 1,
+                                             i * 2 + (c & 1u), j * 2 + ((c >> 1) & 1u)));
+            changed = true;
+        }
+    }
+
+    frameLeaves.clear();
+    frameLeaves.reserve(frameLeafSet.size());
+    for (std::uint64_t cell : frameLeafSet)
+    {
+        int face, depth;
+        std::uint32_t i, j;
+        unpackCell(cell, face, depth, i, j);
+        frameLeaves.push_back(ChunkKey{ face, depth, i, j, vertexSize });
+    }
+}
+
+
+// Pass 2 helper: set an edge's stitch bit when its same-face neighbour is covered
+// by a coarser leaf. Out-of-face edges are left unstitched here; cross-face
+// stitching is handled separately.
+unsigned int
+CubeSphereMesh::computeEdgeMask(int face, int depth,
+                               std::uint32_t i, std::uint32_t j) const
+{
+    unsigned int mask = 0;
+    std::uint32_t cells = 1u << depth;
+    auto coarser = [&](std::uint32_t ni, std::uint32_t nj) {
+        int cd = coveringDepth(face, depth, ni, nj);
+        return cd >= 0 && cd < depth;
+    };
+
+    if (i > 0             && coarser(i - 1, j)) mask |= EDGE_LEFT;
+    if (i + 1 < cells     && coarser(i + 1, j)) mask |= EDGE_RIGHT;
+    if (j > 0             && coarser(i, j - 1)) mask |= EDGE_BOTTOM;
+    if (j + 1 < cells     && coarser(i, j + 1)) mask |= EDGE_TOP;
+    return mask;
 }
 
 
@@ -400,6 +583,19 @@ CubeSphereMesh::render(unsigned int attributes,
     ensureBuffers();
     if (!buffersInitialized)
         return;
+    ensureStitchTemplates();
+
+    // Pass 1: build this frame's leaf set before drawing, so each leaf can see
+    // its neighbours' depths.
+    (void)frustum;
+    frameLeaves.clear();
+    frameLeafSet.clear();
+    for (int face = 0; face < NUM_FACES; ++face)
+        collectLeaves(face, 0, 0, 0, eyePos);
+
+    // Pass 1b: enforce 2:1 balance so neighbouring leaves differ by at most one
+    // level, which the one-level stitch templates can seal in-face.
+    balanceLeaves();
 
     for (int i = 0; i < nTexturesUsed; ++i)
     {
@@ -424,8 +620,14 @@ CubeSphereMesh::render(unsigned int attributes,
     for (int tc = 0; tc < nTexturesUsed; ++tc)
         glEnableVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex + tc);
 
-    for (int face = 0; face < NUM_FACES; ++face)
-        renderNode(face, 0, 0, 0, attributes, frustum, eyePos);
+    // Pass 2: draw each leaf with the stitch template chosen from its neighbours.
+    for (const ChunkKey& key : frameLeaves)
+    {
+        unsigned int mask = computeEdgeMask(key.face, key.depth, key.i, key.j);
+        ChunkMesh* chunk = getOrCreateChunk(key, attributes);
+        if (chunk != nullptr)
+            drawChunk(*chunk, attributes, mask);
+    }
 
     glDisableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
     if ((attributes & Normals) != 0)
