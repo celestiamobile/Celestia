@@ -106,24 +106,23 @@ private:
         }
     };
 
-    // A generated, GPU-resident chunk mesh plus its unit-sphere cull bounds:
-    // a cone (axis, cosHalfAngle) about the chunk centre for the horizon test
-    // and a bounding sphere (center, radius) for the frustum test. The triangle
-    // indices live in shared stitch templates (see stitchIB), not here, since
-    // every chunk has the same grid topology; only the vertices differ.
+    // A generated, GPU-resident chunk mesh. The triangle indices live in shared
+    // stitch templates (see stitchIB), not here, since every chunk has the same
+    // grid topology; only the vertices differ. lastUsed records the frame the
+    // chunk was last drawn so the cache can evict cold chunks.
     struct ChunkMesh
     {
         celestia::gl::Buffer vbuf{ celestia::gl::Buffer::TargetHint::Array };
-        Eigen::Vector3f axis{ Eigen::Vector3f::UnitZ() };
-        Eigen::Vector3f center{ Eigen::Vector3f::Zero() };
-        float cosHalfAngle{ 1.0f };
-        float radius{ 0.0f };
+        std::uint64_t lastUsed{ 0 };
     };
 
     void ensureBuffers();
     void ensureStitchTemplates();
     ChunkMesh* getOrCreateChunk(const ChunkKey& key, unsigned int attributes);
     void drawChunk(ChunkMesh& chunk, unsigned int attributes, unsigned int edgeMask);
+    // Drop chunks not drawn this frame once the cache exceeds its budget,
+    // evicting the least recently used first.
+    void evictColdChunks();
     bool shouldSplit(int face, int depth, std::uint32_t i, std::uint32_t j,
                      const Eigen::Vector3f& eyePos) const;
     // Pass 1: descend the quadtree by screen-space error, recording the active
@@ -163,6 +162,7 @@ private:
     std::array<GLsizei, NUM_STITCH_TEMPLATES> stitchLineCount{};
 #endif
     std::unordered_map<ChunkKey, ChunkMesh, ChunkKeyHash> chunkCache{};
+    std::uint64_t frameCounter{ 0 };
 
     // Active leaves for the current frame: a draw list and a packed-key set used
     // to look up neighbour depths when computing edge-stitch masks.

@@ -252,6 +252,71 @@ neighborOf(int face, unsigned int edge, int depth, std::uint32_t i, std::uint32_
     }
 }
 
+// Soft cap on cached chunk meshes. Cold chunks beyond this are evicted after each
+// frame so deep-zoom sessions do not grow GPU memory without bound.
+constexpr std::size_t MAX_CACHED_CHUNKS = 4096;
+
+// Unit-sphere cull bounds for a quadtree node: a bounding sphere (center, radius)
+// over the four corners and the bulged patch apex, used for both the frustum test
+// and the horizon test. Computed on demand from (face,depth,i,j) since culling
+// happens before the mesh is built.
+struct ChunkBounds
+{
+    Vector3f center;
+    float radius;
+};
+
+ChunkBounds
+chunkBounds(int face, int depth, std::uint32_t i, std::uint32_t j)
+{
+    const FaceBasis& f = faceBases[face];
+    float cells = static_cast<float>(1u << depth);
+    float s0 = static_cast<float>(i) / cells;
+    float s1 = static_cast<float>(i + 1) / cells;
+    float t0 = static_cast<float>(j) / cells;
+    float t1 = static_cast<float>(j + 1) / cells;
+
+    Vector3f corners[4] = {
+        spherePoint(f, s0, t0), spherePoint(f, s1, t0),
+        spherePoint(f, s1, t1), spherePoint(f, s0, t1),
+    };
+    // The patch bulges outward between its corners; include its apex so the
+    // bounding sphere covers the whole curved patch, not just the corners.
+    Vector3f apex = spherePoint(f, 0.5f * (s0 + s1), 0.5f * (t0 + t1));
+
+    ChunkBounds b;
+    b.center = (corners[0] + corners[1] + corners[2] + corners[3]) * 0.25f;
+
+    float radius2 = (b.center - apex).squaredNorm();
+    for (const Vector3f& c : corners)
+        radius2 = std::max(radius2, (b.center - c).squaredNorm());
+    b.radius = std::sqrt(radius2);
+    return b;
+}
+
+// Horizon (occlusion) cull: is the whole patch safely behind the planet's horizon
+// as seen from eyePos? On the unit sphere a surface point P is hidden when
+// P.dot(eyeDir) < 1/d (d = eye distance). The patch lies inside its bounding ball
+// (center, radius), whose maximum projection on eyeDir is center.dot(eyeDir) +
+// radius; if even that is below the horizon the whole patch is occluded.
+//
+// Using the bounding ball rather than a tight cone gives a margin that scales with
+// the patch size: the rendered limb is a coarse tessellation that sags inside the
+// true horizon, and the radius keeps any patch whose chord could poke through that
+// sagged silhouette, so no notch forms. Crucially the margin is bounded (radius<1),
+// so unlike a per-patch angular guard it still culls the back side at coarse LOD.
+bool
+chunkBelowHorizon(const ChunkBounds& b, const Vector3f& eyePos)
+{
+    float d = eyePos.norm();
+    if (d <= 1.0f)
+        return false;
+
+    Vector3f eyeDir = eyePos / d;
+    float maxDot = b.center.dot(eyeDir) + b.radius;
+    return maxDot < 1.0f / d;
+}
+
 } // anonymous namespace
 
 
@@ -454,24 +519,7 @@ CubeSphereMesh::getOrCreateChunk(const ChunkKey& key, unsigned int attributes)
                                                         vertices.size() * sizeof(float)),
                        gl::Buffer::BufferUsage::StaticDraw);
 
-    // Cull bounds: cone about the chunk centre direction plus a bounding sphere
-    // over the four corners.
-    Vector3f corners[4] = {
-        spherePoint(f, s0, t0), spherePoint(f, s1, t0),
-        spherePoint(f, s1, t1), spherePoint(f, s0, t1),
-    };
-    chunk.axis = spherePoint(f, 0.5f * (s0 + s1), 0.5f * (t0 + t1));
-    chunk.center = (corners[0] + corners[1] + corners[2] + corners[3]) * 0.25f;
-    float cosHalf = 1.0f;
-    float radius2 = 0.0f;
-    for (const Vector3f& c : corners)
-    {
-        cosHalf = std::min(cosHalf, chunk.axis.dot(c));
-        radius2 = std::max(radius2, (chunk.center - c).squaredNorm());
-    }
-    chunk.cosHalfAngle = cosHalf;
-    chunk.radius = std::sqrt(radius2);
-
+    chunk.lastUsed = frameCounter;
     return &chunk;
 }
 
@@ -560,7 +608,8 @@ CubeSphereMesh::shouldSplit(int face, int depth, std::uint32_t i, std::uint32_t 
 
 
 // Pass 1: descend the quadtree by screen-space error, recording each leaf in the
-// draw list and the membership set. Frustum/horizon culling is added later.
+// draw list and the membership set. Frustum/horizon culling happens at draw time,
+// not here, so the balance and stitch passes see the full leaf set.
 void
 CubeSphereMesh::collectLeaves(int face, int depth, std::uint32_t i, std::uint32_t j,
                               const Eigen::Vector3f& eyePos)
@@ -726,9 +775,10 @@ CubeSphereMesh::render(unsigned int attributes,
         return;
     ensureStitchTemplates();
 
+    ++frameCounter;
+
     // Pass 1: build this frame's leaf set before drawing, so each leaf can see
     // its neighbours' depths.
-    (void)frustum;
     frameLeaves.clear();
     frameLeafSet.clear();
     for (int face = 0; face < NUM_FACES; ++face)
@@ -761,9 +811,19 @@ CubeSphereMesh::render(unsigned int attributes,
     for (int tc = 0; tc < nTexturesUsed; ++tc)
         glEnableVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex + tc);
 
-    // Pass 2: draw each leaf with the stitch template chosen from its neighbours.
+    // Pass 2: cull leaves outside the frustum or behind the horizon, then draw
+    // each survivor with the stitch template chosen from its neighbours. Culling
+    // happens here (not during collection) so the balance and stitch passes still
+    // see the full leaf set and seal seams against off-screen neighbours.
     for (const ChunkKey& key : frameLeaves)
     {
+        ChunkBounds bounds = chunkBounds(key.face, key.depth, key.i, key.j);
+        if (frustum.testSphere(bounds.center, bounds.radius)
+                == celestia::math::FrustumAspect::Outside)
+            continue;
+        if (chunkBelowHorizon(bounds, eyePos))
+            continue;
+
         unsigned int mask = computeEdgeMask(key.face, key.depth, key.i, key.j);
         ChunkMesh* chunk = getOrCreateChunk(key, attributes);
         if (chunk != nullptr)
@@ -784,4 +844,29 @@ CubeSphereMesh::render(unsigned int attributes,
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    evictColdChunks();
+}
+
+
+// Keep the chunk cache bounded: once it exceeds MAX_CACHED_CHUNKS, drop the
+// chunks least recently drawn (smallest lastUsed) until back under budget.
+// Chunks drawn this frame share the current frameCounter and are evicted last.
+void
+CubeSphereMesh::evictColdChunks()
+{
+    if (chunkCache.size() <= MAX_CACHED_CHUNKS)
+        return;
+
+    std::vector<std::pair<std::uint64_t, ChunkKey>> byAge;
+    byAge.reserve(chunkCache.size());
+    for (const auto& entry : chunkCache)
+        byAge.emplace_back(entry.second.lastUsed, entry.first);
+
+    std::size_t excess = chunkCache.size() - MAX_CACHED_CHUNKS;
+    std::partial_sort(byAge.begin(), byAge.begin() + excess, byAge.end(),
+                      [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    for (std::size_t k = 0; k < excess; ++k)
+        chunkCache.erase(byAge[k].second);
 }
