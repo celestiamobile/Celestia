@@ -338,6 +338,9 @@ CubeSphereMesh::ensureBuffers()
     if (glGetError() != GL_NO_ERROR)
         return;
 
+    batchVBO = gl::Buffer(gl::Buffer::TargetHint::Array);
+    batchIBO = gl::Buffer(gl::Buffer::TargetHint::ElementArray);
+
     buffersInitialized = true;
 }
 
@@ -397,12 +400,7 @@ CubeSphereMesh::ensureStitchTemplates()
             }
         }
 
-        stitchCount[mask] = static_cast<GLsizei>(indices.size());
-        stitchIB[mask] = gl::Buffer(gl::Buffer::TargetHint::ElementArray,
-                                    celestia::util::array_view<void>(
-                                        indices.data(),
-                                        indices.size() * sizeof(unsigned int)),
-                                    gl::Buffer::BufferUsage::StaticDraw);
+        stitchTemplate[mask] = indices;
 
 #if CUBESPHERE_WIREFRAME
         // Derive a wireframe template from the triangle template's edges so the
@@ -423,12 +421,7 @@ CubeSphereMesh::ensureStitchTemplates()
             lineIndices.push_back(e.first);
             lineIndices.push_back(e.second);
         }
-        stitchLineCount[mask] = static_cast<GLsizei>(lineIndices.size());
-        stitchLineIB[mask] = gl::Buffer(gl::Buffer::TargetHint::ElementArray,
-                                        celestia::util::array_view<void>(
-                                            lineIndices.data(),
-                                            lineIndices.size() * sizeof(unsigned int)),
-                                        gl::Buffer::BufferUsage::StaticDraw);
+        stitchLineTemplate[mask] = std::move(lineIndices);
 #endif
     }
 
@@ -514,48 +507,30 @@ CubeSphereMesh::getOrCreateChunk(const ChunkKey& key, unsigned int attributes)
     auto [pos, ok] = chunkCache.try_emplace(key);
     ChunkMesh& chunk = pos->second;
 
-    chunk.vbuf.bind();
-    chunk.vbuf.setData(celestia::util::array_view<void>(vertices.data(),
-                                                        vertices.size() * sizeof(float)),
-                       gl::Buffer::BufferUsage::StaticDraw);
-
+    chunk.vertices = std::move(vertices);
     chunk.lastUsed = frameCounter;
     return &chunk;
 }
 
 
-// Bind one chunk's vertex buffer, point the vertex attributes at it (each chunk
-// owns its own VBO, so the pointers must be set per draw) and draw it with the
-// shared stitch template selected by edgeMask. The attribute arrays are enabled
-// once by the caller.
+// Append one chunk's vertices to the batch vertex buffer and its stitch template
+// (chosen by edgeMask, each index biased to the chunk's first vertex in the batch)
+// to the batch index buffer, so all visible chunks can be drawn at once.
 void
-CubeSphereMesh::drawChunk(ChunkMesh& chunk, unsigned int attributes, unsigned int edgeMask)
+CubeSphereMesh::appendChunk(const ChunkMesh& chunk, unsigned int edgeMask)
 {
-    chunk.vbuf.bind();
-
-    const auto stride = static_cast<GLsizei>(vertexSize * sizeof(float));
-    const int texCoordOffset = ((attributes & Tangents) != 0) ? 6 : 3;
-
-    glVertexAttribPointer(CelestiaGLProgram::VertexCoordAttributeIndex,
-                          3, GL_FLOAT, GL_FALSE, stride, bufferOffset(0));
-    if ((attributes & Normals) != 0)
-        glVertexAttribPointer(CelestiaGLProgram::NormalAttributeIndex,
-                              3, GL_FLOAT, GL_FALSE, stride, bufferOffset(0));
-    if ((attributes & Tangents) != 0)
-        glVertexAttribPointer(CelestiaGLProgram::TangentAttributeIndex,
-                              3, GL_FLOAT, GL_FALSE, stride, bufferOffset(3 * sizeof(float)));
-    for (int tc = 0; tc < nTexturesUsed; ++tc)
-        glVertexAttribPointer(CelestiaGLProgram::TextureCoord0AttributeIndex + tc,
-                              2, GL_FLOAT, GL_FALSE, stride,
-                              bufferOffset(texCoordOffset * sizeof(float)));
+    auto baseVertex = static_cast<unsigned int>(batchVertices.size()
+                                                / static_cast<std::size_t>(vertexSize));
+    batchVertices.insert(batchVertices.end(), chunk.vertices.begin(), chunk.vertices.end());
 
 #if CUBESPHERE_WIREFRAME
-    stitchLineIB[edgeMask].bind();
-    glDrawElements(GL_LINES, stitchLineCount[edgeMask], GL_UNSIGNED_INT, bufferOffset(0));
+    const std::vector<unsigned int>& tmpl = stitchLineTemplate[edgeMask];
 #else
-    stitchIB[edgeMask].bind();
-    glDrawElements(GL_TRIANGLES, stitchCount[edgeMask], GL_UNSIGNED_INT, bufferOffset(0));
+    const std::vector<unsigned int>& tmpl = stitchTemplate[edgeMask];
 #endif
+    batchIndices.reserve(batchIndices.size() + tmpl.size());
+    for (unsigned int idx : tmpl)
+        batchIndices.push_back(idx + baseVertex);
 }
 
 
@@ -803,18 +778,13 @@ CubeSphereMesh::render(unsigned int attributes,
 
     glBindVertexArray(vao);
 
-    glEnableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
-    if ((attributes & Normals) != 0)
-        glEnableVertexAttribArray(CelestiaGLProgram::NormalAttributeIndex);
-    if ((attributes & Tangents) != 0)
-        glEnableVertexAttribArray(CelestiaGLProgram::TangentAttributeIndex);
-    for (int tc = 0; tc < nTexturesUsed; ++tc)
-        glEnableVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex + tc);
-
-    // Pass 2: cull leaves outside the frustum or behind the horizon, then draw
-    // each survivor with the stitch template chosen from its neighbours. Culling
-    // happens here (not during collection) so the balance and stitch passes still
-    // see the full leaf set and seal seams against off-screen neighbours.
+    // Pass 2: cull leaves outside the frustum or behind the horizon, then batch
+    // each survivor into the shared vertex/index buffers with the stitch template
+    // chosen from its neighbours. Culling happens here (not during collection) so
+    // the balance and stitch passes still see the full leaf set and seal seams
+    // against off-screen neighbours. The whole cube-sphere is then drawn at once.
+    batchVertices.clear();
+    batchIndices.clear();
     for (const ChunkKey& key : frameLeaves)
     {
         ChunkBounds bounds = chunkBounds(key.face, key.depth, key.i, key.j);
@@ -827,16 +797,66 @@ CubeSphereMesh::render(unsigned int attributes,
         unsigned int mask = computeEdgeMask(key.face, key.depth, key.i, key.j);
         ChunkMesh* chunk = getOrCreateChunk(key, attributes);
         if (chunk != nullptr)
-            drawChunk(*chunk, attributes, mask);
+        {
+            chunk->lastUsed = frameCounter;
+            appendChunk(*chunk, mask);
+        }
     }
 
-    glDisableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
-    if ((attributes & Normals) != 0)
-        glDisableVertexAttribArray(CelestiaGLProgram::NormalAttributeIndex);
-    if ((attributes & Tangents) != 0)
-        glDisableVertexAttribArray(CelestiaGLProgram::TangentAttributeIndex);
-    for (int tc = 0; tc < nTexturesUsed; ++tc)
-        glDisableVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex + tc);
+    if (!batchIndices.empty())
+    {
+        batchVBO.setData(celestia::util::array_view<void>(
+                             batchVertices.data(),
+                             batchVertices.size() * sizeof(float)),
+                         gl::Buffer::BufferUsage::StreamDraw);
+
+        const auto stride = static_cast<GLsizei>(vertexSize * sizeof(float));
+        const int texCoordOffset = ((attributes & Tangents) != 0) ? 6 : 3;
+
+        glEnableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
+        glVertexAttribPointer(CelestiaGLProgram::VertexCoordAttributeIndex,
+                              3, GL_FLOAT, GL_FALSE, stride, bufferOffset(0));
+        if ((attributes & Normals) != 0)
+        {
+            glEnableVertexAttribArray(CelestiaGLProgram::NormalAttributeIndex);
+            glVertexAttribPointer(CelestiaGLProgram::NormalAttributeIndex,
+                                  3, GL_FLOAT, GL_FALSE, stride, bufferOffset(0));
+        }
+        if ((attributes & Tangents) != 0)
+        {
+            glEnableVertexAttribArray(CelestiaGLProgram::TangentAttributeIndex);
+            glVertexAttribPointer(CelestiaGLProgram::TangentAttributeIndex,
+                                  3, GL_FLOAT, GL_FALSE, stride, bufferOffset(3 * sizeof(float)));
+        }
+        for (int tc = 0; tc < nTexturesUsed; ++tc)
+        {
+            glEnableVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex + tc);
+            glVertexAttribPointer(CelestiaGLProgram::TextureCoord0AttributeIndex + tc,
+                                  2, GL_FLOAT, GL_FALSE, stride,
+                                  bufferOffset(texCoordOffset * sizeof(float)));
+        }
+
+        batchIBO.setData(celestia::util::array_view<void>(
+                             batchIndices.data(),
+                             batchIndices.size() * sizeof(unsigned int)),
+                         gl::Buffer::BufferUsage::StreamDraw);
+
+#if CUBESPHERE_WIREFRAME
+        glDrawElements(GL_LINES, static_cast<GLsizei>(batchIndices.size()),
+                       GL_UNSIGNED_INT, bufferOffset(0));
+#else
+        glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(batchIndices.size()),
+                       GL_UNSIGNED_INT, bufferOffset(0));
+#endif
+
+        glDisableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
+        if ((attributes & Normals) != 0)
+            glDisableVertexAttribArray(CelestiaGLProgram::NormalAttributeIndex);
+        if ((attributes & Tangents) != 0)
+            glDisableVertexAttribArray(CelestiaGLProgram::TangentAttributeIndex);
+        for (int tc = 0; tc < nTexturesUsed; ++tc)
+            glDisableVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex + tc);
+    }
 
     for (int i = 0; i < nTexturesUsed; ++i)
         tex[i]->endUsage();

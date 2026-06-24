@@ -106,20 +106,26 @@ private:
         }
     };
 
-    // A generated, GPU-resident chunk mesh. The triangle indices live in shared
-    // stitch templates (see stitchIB), not here, since every chunk has the same
-    // grid topology; only the vertices differ. lastUsed records the frame the
-    // chunk was last drawn so the cache can evict cold chunks.
+    // A generated chunk mesh, held CPU-side. The triangle indices live in shared
+    // stitch templates (see stitchTemplate), not here, since every chunk has the
+    // same grid topology; only the vertices differ. The vertices are kept on the
+    // CPU (not in a per-chunk VBO) so every visible chunk can be concatenated into
+    // one batch buffer and the whole cube-sphere drawn in a single draw call.
+    // lastUsed records the frame the chunk was last drawn so the cache can evict
+    // cold chunks.
     struct ChunkMesh
     {
-        celestia::gl::Buffer vbuf{ celestia::gl::Buffer::TargetHint::Array };
+        std::vector<float> vertices;
         std::uint64_t lastUsed{ 0 };
     };
 
     void ensureBuffers();
     void ensureStitchTemplates();
     ChunkMesh* getOrCreateChunk(const ChunkKey& key, unsigned int attributes);
-    void drawChunk(ChunkMesh& chunk, unsigned int attributes, unsigned int edgeMask);
+    // Append one chunk's vertices to the batch vertex buffer and its stitch
+    // template (selected by edgeMask, with each index offset to the chunk's base
+    // vertex) to the batch index buffer.
+    void appendChunk(const ChunkMesh& chunk, unsigned int edgeMask);
     // Drop chunks not drawn this frame once the cache exceeds its budget,
     // evicting the least recently used first.
     void evictColdChunks();
@@ -143,9 +149,10 @@ private:
     unsigned int computeEdgeMask(int face, int depth,
                                  std::uint32_t i, std::uint32_t j) const;
 
-    // One pre-built index buffer per 4-bit edge mask: bit set means that edge is
+    // One pre-built index template per 4-bit edge mask: bit set means that edge is
     // stitched down to a coarser (one level lower) neighbour by dropping its odd
-    // boundary vertices. Shared by all chunks of any planet.
+    // boundary vertices. Shared by all chunks of any planet; held CPU-side because
+    // the per-frame batch index buffer is assembled from them.
     static constexpr int NUM_STITCH_TEMPLATES = 16;
 
     int vertexSize{ 0 };
@@ -155,12 +162,20 @@ private:
     bool buffersInitialized{ false };
     bool stitchTemplatesBuilt{ false };
     GLuint vao{ 0 };
-    std::array<celestia::gl::Buffer, NUM_STITCH_TEMPLATES> stitchIB{};
-    std::array<GLsizei, NUM_STITCH_TEMPLATES> stitchCount{};
+    std::array<std::vector<unsigned int>, NUM_STITCH_TEMPLATES> stitchTemplate{};
 #if CUBESPHERE_WIREFRAME
-    std::array<celestia::gl::Buffer, NUM_STITCH_TEMPLATES> stitchLineIB{};
-    std::array<GLsizei, NUM_STITCH_TEMPLATES> stitchLineCount{};
+    std::array<std::vector<unsigned int>, NUM_STITCH_TEMPLATES> stitchLineTemplate{};
 #endif
+
+    // Single batched draw: every visible chunk's vertices are concatenated into
+    // batchVBO and its stitch indices (offset to its base vertex) into batchIBO,
+    // then the whole cube-sphere is drawn with one glDrawElements. The CPU staging
+    // vectors are kept as members so their capacity is reused across frames.
+    celestia::gl::Buffer batchVBO{};
+    celestia::gl::Buffer batchIBO{};
+    std::vector<float> batchVertices{};
+    std::vector<unsigned int> batchIndices{};
+
     std::unordered_map<ChunkKey, ChunkMesh, ChunkKeyHash> chunkCache{};
     std::uint64_t frameCounter{ 0 };
 
