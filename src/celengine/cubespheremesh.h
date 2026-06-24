@@ -64,7 +64,9 @@ public:
     // (per-axis normalized so an ellipsoid maps to the unit sphere) for culling
     // and LOD; pixWidth is the planet's apparent disc size in pixels; pixelSize
     // is the projected world size per pixel at unit distance (≈ radians/pixel),
-    // which drives the screen-space-error refinement.
+    // which drives the screen-space-error refinement. enableHorizonCull discards
+    // patches behind the horizon; disable it for shells drawn inside-out (e.g. the
+    // atmosphere), whose visible side is the far hemisphere a horizon test removes.
     void render(unsigned int attributes,
                 const celestia::math::Frustum& frustum,
                 const Eigen::Vector3f& eyePos,
@@ -72,7 +74,8 @@ public:
                 float pixelSize,
                 Texture** tex,
                 int nTextures,
-                CelestiaGLProgram* program);
+                CelestiaGLProgram* program,
+                bool enableHorizonCull = true);
 
 private:
     // Identifies a quadtree node: at the given depth a face is split into

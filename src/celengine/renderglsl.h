@@ -72,7 +72,8 @@ void renderClouds_GLSL(const RenderInfo& ri,
                        const celestia::math::Frustum& frustum,
                        const Matrices &m,
                        Renderer* renderer,
-                       LODSphereMesh* lodSphere);
+                       LODSphereMesh* lodSphere,
+                       CubeSphereMesh* cubeSphere);
 
 void renderGeometry_GLSL_Unlit(RenderGeometry* geometry,
                                const RenderInfo& ri,

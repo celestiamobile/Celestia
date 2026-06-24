@@ -1888,7 +1888,7 @@ static void renderSphereUnlit(const RenderInfo& ri,
                               const math::Frustum& frustum,
                               const Matrices &m,
                               Renderer *r,
-                              LODSphereMesh *lodSphere)
+                              CubeSphereMesh *cubeSphere)
 {
     boost::container::static_vector<Texture*, LODSphereMesh::MAX_SPHERE_MESH_TEXTURES> textures;
 
@@ -1928,13 +1928,16 @@ static void renderSphereUnlit(const RenderInfo& ri,
     if (ri.isStar)
         prog->eyePosition = ri.eyePos_obj;
 
+    unsigned int attributes = LODSphereMesh::Normals;
+
     Renderer::PipelineState ps;
     ps.depthMask = true;
     ps.depthTest = true;
     r->setPipelineState(ps);
 
-    lodSphere->render(frustum, ri.pixWidth,
-                      textures.data(), static_cast<int>(textures.size()), prog);
+    cubeSphere->render(attributes,
+                       frustum, ri.eyePos_obj, ri.pixWidth, ri.pixelSize,
+                       textures.data(), static_cast<int>(textures.size()), prog);
 }
 
 
@@ -1942,9 +1945,10 @@ static void renderCloudsUnlit(const RenderInfo& ri,
                               const math::Frustum& frustum,
                               Texture *cloudTex,
                               float cloudTexOffset,
+                              float cloudScale,
                               const Matrices &m,
                               Renderer *r,
-                              LODSphereMesh *lodSphere)
+                              CubeSphereMesh *cubeSphere)
 {
     ShaderProperties shadprop;
     shadprop.texUsage = TexUsage::DiffuseTexture | TexUsage::TextureCoordTransform;
@@ -1964,7 +1968,11 @@ static void renderCloudsUnlit(const RenderInfo& ri,
     ps.depthTest = true;
     r->setPipelineState(ps);
 
-    lodSphere->render(frustum, ri.pixWidth, &cloudTex, 1, prog);
+    math::Frustum shellFrustum = frustum;
+    shellFrustum.transform(math::scale(1.0f / cloudScale));
+    cubeSphere->render(LODSphereMesh::Normals,
+                       shellFrustum, ri.eyePos_obj / cloudScale, ri.pixWidth, ri.pixelSize,
+                       &cloudTex, 1, prog);
 }
 
 void
@@ -2507,7 +2515,7 @@ void Renderer::renderObject(const Vector3f& pos,
         else
         {
             ri.isStar = obj.isStar;
-            renderSphereUnlit(ri, viewFrustum, planetMVP, this, m_lodSphere.get());
+            renderSphereUnlit(ri, viewFrustum, planetMVP, this, m_cubeSphere.get());
         }
     }
     else if (geometry != nullptr)
@@ -2638,11 +2646,12 @@ void Renderer::renderObject(const Vector3f& pos,
                                   viewFrustum,
                                   mvp,
                                   this,
-                                  m_lodSphere.get());
+                                  m_lodSphere.get(),
+                                  m_cubeSphere.get());
             }
             else
             {
-                renderCloudsUnlit(ri,viewFrustum, cloudTex, cloudTexOffset, mvp, this, m_lodSphere.get());
+                renderCloudsUnlit(ri, viewFrustum, cloudTex, cloudTexOffset, cloudScale, mvp, this, m_cubeSphere.get());
             }
 
             glDisable(GL_POLYGON_OFFSET_FILL);

@@ -729,7 +729,8 @@ CubeSphereMesh::render(unsigned int attributes,
                        float pixelSize,
                        Texture** tex,
                        int nTextures,
-                       CelestiaGLProgram* program)
+                       CelestiaGLProgram* program,
+                       bool enableHorizonCull)
 {
     (void)pixWidth;
 
@@ -791,7 +792,7 @@ CubeSphereMesh::render(unsigned int attributes,
         if (frustum.testSphere(bounds.center, bounds.radius)
                 == celestia::math::FrustumAspect::Outside)
             continue;
-        if (chunkBelowHorizon(bounds, eyePos))
+        if (enableHorizonCull && chunkBelowHorizon(bounds, eyePos))
             continue;
 
         unsigned int mask = computeEdgeMask(key.face, key.depth, key.i, key.j);

@@ -19,10 +19,12 @@
 #include <celengine/glsupport.h>
 #include <celengine/lightenv.h>
 #include <celengine/lodspheremesh.h>
+#include <celengine/cubespheremesh.h>
 #include <celengine/render.h>
 #include <celengine/renderinfo.h>
 #include <celengine/shadermanager.h>
 #include <celmath/mathlib.h>
+#include <celmath/frustum.h>
 #include <celmath/vecgl.h>
 #include <celutil/indexlist.h>
 
@@ -390,10 +392,20 @@ AtmosphereRenderer::render(
     ps.depthTest = true;
     m_renderer.setPipelineState(ps);
 
-    m_renderer.m_lodSphere->render(LODSphereMesh::Normals,
-                                   frustum,
-                                   ri.pixWidth,
-                                   nullptr);
+    // The atmosphere shell mesh is the unit sphere scaled up by atmScale in the
+    // modelview, so both the eye and the frustum must be mapped into the shell's
+    // own unit-sphere space (divide by atmScale) for culling and LOD.
+    math::Frustum shellFrustum = frustum;
+    shellFrustum.transform(math::scale(1.0f / atmScale));
+    m_renderer.m_cubeSphere->render(LODSphereMesh::Normals,
+                                    shellFrustum,
+                                    ls.eyePos_obj / atmScale,
+                                    ri.pixWidth,
+                                    ri.pixelSize,
+                                    nullptr,
+                                    0,
+                                    prog,
+                                    /* enableHorizonCull */ false);
 
     glFrontFace(GL_CCW);
 }

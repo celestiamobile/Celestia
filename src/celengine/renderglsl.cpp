@@ -20,8 +20,10 @@
 #include <boost/container/static_vector.hpp>
 
 #include <celcompat/numbers.h>
+#include <celmath/frustum.h>
 #include <celmath/geomutil.h>
 #include <celmath/mathlib.h>
+#include <celmath/vecgl.h>
 #include <celmodel/material.h>
 #include <celrender/gl/buffer.h>
 #include <celrender/gl/vertexobject.h>
@@ -543,7 +545,8 @@ void renderClouds_GLSL(const RenderInfo& ri,
                        const math::Frustum& frustum,
                        const Matrices &m,
                        Renderer* renderer,
-                       LODSphereMesh* lodSphere)
+                       LODSphereMesh* lodSphere,
+                       CubeSphereMesh* cubeSphere)
 {
     float radius = semiAxes.maxCoeff();
 
@@ -634,9 +637,16 @@ void renderClouds_GLSL(const RenderInfo& ri,
 
     auto endTextures = std::remove(textures.begin(), textures.end(), nullptr);
     textures.erase(endTextures, textures.end());
-    lodSphere->render(attributes,
-                      frustum, ri.pixWidth,
-                      textures.data(), static_cast<int>(textures.size()), prog);
+
+    // The cloud shell mesh is the unit sphere scaled up by cloudScale in the
+    // modelview, so both the eye and the frustum must be mapped into the shell's
+    // own unit-sphere space (divide by cloudScale) for culling and LOD.
+    float cloudScale = (atmosphere != nullptr) ? 1.0f + atmosphere->cloudHeight / radius : 1.0f;
+    math::Frustum shellFrustum = frustum;
+    shellFrustum.transform(math::scale(1.0f / cloudScale));
+    cubeSphere->render(attributes,
+                       shellFrustum, ri.eyePos_obj / cloudScale, ri.pixWidth, ri.pixelSize,
+                       textures.data(), static_cast<int>(textures.size()), prog);
 
     prog->textureOffset = 0.0f;
 }
