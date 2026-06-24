@@ -1888,12 +1888,18 @@ static void renderSphereUnlit(const RenderInfo& ri,
                               const math::Frustum& frustum,
                               const Matrices &m,
                               Renderer *r,
-                              CubeSphereMesh *cubeSphere)
+                              LODSphereMesh *lodSphere,
+                              CubeSphereMesh *cubeSphere,
+                              bool useCubeSphere)
 {
     boost::container::static_vector<Texture*, LODSphereMesh::MAX_SPHERE_MESH_TEXTURES> textures;
 
     ShaderProperties shadprop;
+    // The cube-sphere needs per-fragment equirectangular coordinates to avoid
+    // seam/pole smearing of its baked vertex UVs; the LODSphere uses its own.
     shadprop.texUsage = TexUsage::TextureCoordTransform;
+    if (useCubeSphere)
+        shadprop.texUsage |= TexUsage::SphericalTextureCoord;
 
     // Set up the textures used by this object
     if (ri.baseTex != nullptr)
@@ -1935,9 +1941,17 @@ static void renderSphereUnlit(const RenderInfo& ri,
     ps.depthTest = true;
     r->setPipelineState(ps);
 
-    cubeSphere->render(attributes,
-                       frustum, ri.eyePos_obj, ri.pixWidth, ri.pixelSize,
-                       textures.data(), static_cast<int>(textures.size()), prog);
+    if (useCubeSphere)
+    {
+        cubeSphere->render(attributes,
+                           frustum, ri.eyePos_obj, ri.pixWidth, ri.pixelSize,
+                           textures.data(), static_cast<int>(textures.size()), prog);
+    }
+    else
+    {
+        lodSphere->render(frustum, ri.pixWidth,
+                          textures.data(), static_cast<int>(textures.size()), prog);
+    }
 }
 
 
@@ -1948,10 +1962,14 @@ static void renderCloudsUnlit(const RenderInfo& ri,
                               float cloudScale,
                               const Matrices &m,
                               Renderer *r,
-                              CubeSphereMesh *cubeSphere)
+                              LODSphereMesh *lodSphere,
+                              CubeSphereMesh *cubeSphere,
+                              bool useCubeSphere)
 {
     ShaderProperties shadprop;
     shadprop.texUsage = TexUsage::DiffuseTexture | TexUsage::TextureCoordTransform;
+    if (useCubeSphere)
+        shadprop.texUsage |= TexUsage::SphericalTextureCoord;
     shadprop.lightModel = LightingModel::UnlitModel;
 
     // Get a shader for the current rendering configuration
@@ -1968,11 +1986,18 @@ static void renderCloudsUnlit(const RenderInfo& ri,
     ps.depthTest = true;
     r->setPipelineState(ps);
 
-    math::Frustum shellFrustum = frustum;
-    shellFrustum.transform(math::scale(1.0f / cloudScale));
-    cubeSphere->render(LODSphereMesh::Normals,
-                       shellFrustum, ri.eyePos_obj / cloudScale, ri.pixWidth, ri.pixelSize,
-                       &cloudTex, 1, prog);
+    if (useCubeSphere)
+    {
+        math::Frustum shellFrustum = frustum;
+        shellFrustum.transform(math::scale(1.0f / cloudScale));
+        cubeSphere->render(LODSphereMesh::Normals,
+                           shellFrustum, ri.eyePos_obj / cloudScale, ri.pixWidth, ri.pixelSize,
+                           &cloudTex, 1, prog);
+    }
+    else
+    {
+        lodSphere->render(frustum, ri.pixWidth, &cloudTex, 1, prog);
+    }
 }
 
 void
@@ -2496,6 +2521,20 @@ void Renderer::renderObject(const Vector3f& pos,
             cloudTexOffset = (float) (-math::pfmod(now * atmosphere->cloudSpeed * 0.5 * celestia::numbers::inv_pi, 1.0));
     }
 
+    // Choose the sphere renderer for every layer of this body. The cube-sphere
+    // binds each texture with a single getTile(0,0,0), so it cannot render a
+    // tiled equirectangular virtual texture; if any texture used by the surface
+    // or clouds reports that mapping, fall back to LODSphereMesh for all layers
+    // (mixing meshes between surface and clouds also makes the cloud shell pierce
+    // the surface).
+    auto requiresLODSphere = [](const Texture* t) {
+        return t != nullptr && t->getMeshMapping() == Texture::MeshMapping::Equirectangular;
+    };
+    bool useCubeSphere = !requiresLODSphere(ri.baseTex) && !requiresLODSphere(ri.bumpTex)
+                      && !requiresLODSphere(ri.nightTex) && !requiresLODSphere(ri.overlayTex)
+                      && !requiresLODSphere(ri.glossTex) && !requiresLODSphere(cloudTex)
+                      && !requiresLODSphere(cloudNormalMap);
+
     if (obj.geometry == engine::GeometryHandle::Invalid)
     {
         // A null model indicates that this body is a sphere
@@ -2510,12 +2549,13 @@ void Renderer::renderObject(const Vector3f& pos,
                                  planetMVP,
                                  this,
                                  m_lodSphere.get(),
-                                 m_cubeSphere.get());
+                                 m_cubeSphere.get(),
+                                 useCubeSphere);
         }
         else
         {
             ri.isStar = obj.isStar;
-            renderSphereUnlit(ri, viewFrustum, planetMVP, this, m_cubeSphere.get());
+            renderSphereUnlit(ri, viewFrustum, planetMVP, this, m_lodSphere.get(), m_cubeSphere.get(), useCubeSphere);
         }
     }
     else if (geometry != nullptr)
@@ -2590,7 +2630,8 @@ void Renderer::renderObject(const Vector3f& pos,
                     obj.orientation,
                     radius * atmScale,
                     viewFrustum,
-                    planetMVP);
+                    planetMVP,
+                    useCubeSphere);
             }
             else
             {
@@ -2647,11 +2688,12 @@ void Renderer::renderObject(const Vector3f& pos,
                                   mvp,
                                   this,
                                   m_lodSphere.get(),
-                                  m_cubeSphere.get());
+                                  m_cubeSphere.get(),
+                                  useCubeSphere);
             }
             else
             {
-                renderCloudsUnlit(ri, viewFrustum, cloudTex, cloudTexOffset, cloudScale, mvp, this, m_cubeSphere.get());
+                renderCloudsUnlit(ri, viewFrustum, cloudTex, cloudTexOffset, cloudScale, mvp, this, m_lodSphere.get(), m_cubeSphere.get(), useCubeSphere);
             }
 
             glDisable(GL_POLYGON_OFFSET_FILL);

@@ -346,7 +346,8 @@ AtmosphereRenderer::render(
     const Eigen::Quaternionf &/*planetOrientation*/,
     float                     radius,
     const math::Frustum      &frustum,
-    const Matrices           &m)
+    const Matrices           &m,
+    bool                      useCubeSphere)
 {
     // Currently, we just skip rendering an atmosphere when there are no
     // light sources, even though the atmosphere would still the light
@@ -395,17 +396,27 @@ AtmosphereRenderer::render(
     // The atmosphere shell mesh is the unit sphere scaled up by atmScale in the
     // modelview, so both the eye and the frustum must be mapped into the shell's
     // own unit-sphere space (divide by atmScale) for culling and LOD.
-    math::Frustum shellFrustum = frustum;
-    shellFrustum.transform(math::scale(1.0f / atmScale));
-    m_renderer.m_cubeSphere->render(LODSphereMesh::Normals,
-                                    shellFrustum,
-                                    ls.eyePos_obj / atmScale,
-                                    ri.pixWidth,
-                                    ri.pixelSize,
-                                    nullptr,
-                                    0,
-                                    prog,
-                                    /* enableHorizonCull */ false);
+    if (useCubeSphere)
+    {
+        math::Frustum shellFrustum = frustum;
+        shellFrustum.transform(math::scale(1.0f / atmScale));
+        m_renderer.m_cubeSphere->render(LODSphereMesh::Normals,
+                                        shellFrustum,
+                                        ls.eyePos_obj / atmScale,
+                                        ri.pixWidth,
+                                        ri.pixelSize,
+                                        nullptr,
+                                        0,
+                                        prog,
+                                        /* enableHorizonCull */ false);
+    }
+    else
+    {
+        m_renderer.m_lodSphere->render(LODSphereMesh::Normals,
+                                       frustum,
+                                       ri.pixWidth,
+                                       nullptr);
+    }
 
     glFrontFace(GL_CCW);
 }

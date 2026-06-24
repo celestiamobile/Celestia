@@ -46,6 +46,7 @@ public:
     int getVTileCount(int lod) const override;
     void beginUsage() override;
     void endUsage() override;
+    MeshMapping getMeshMapping() const override { return MeshMapping::Equirectangular; }
 
     // ResourceCacheBase — render thread only.
     std::size_t drainReady(std::size_t byteBudget) override;

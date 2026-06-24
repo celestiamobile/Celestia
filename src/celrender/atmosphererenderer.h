@@ -63,7 +63,8 @@ public:
         const Eigen::Quaternionf &planetOrientation,
         float                     radius,
         const math::Frustum      &frustum,
-        const Matrices           &m);
+        const Matrices           &m,
+        bool                      useCubeSphere);
 
     void initGL();
 

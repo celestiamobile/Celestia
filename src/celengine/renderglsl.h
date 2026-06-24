@@ -46,7 +46,8 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
                           const Matrices &m,
                           Renderer* renderer,
                           LODSphereMesh* lodSphere,
-                          CubeSphereMesh* cubeSphere);
+                          CubeSphereMesh* cubeSphere,
+                          bool useCubeSphere);
 
 void renderGeometry_GLSL(RenderGeometry* geometry,
                          const RenderInfo& ri,
@@ -73,7 +74,8 @@ void renderClouds_GLSL(const RenderInfo& ri,
                        const Matrices &m,
                        Renderer* renderer,
                        LODSphereMesh* lodSphere,
-                       CubeSphereMesh* cubeSphere);
+                       CubeSphereMesh* cubeSphere,
+                       bool useCubeSphere);
 
 void renderGeometry_GLSL_Unlit(RenderGeometry* geometry,
                                const RenderInfo& ri,

@@ -60,6 +60,20 @@ public:
     virtual void beginUsage() {};
     virtual void endUsage() {};
 
+    // Classifies how a texture maps onto a sphere, which determines whether the
+    // cube-sphere renderer can use it. The cube-sphere fetches a single
+    // getTile(0,0,0), so it cannot bind a tiled equirectangular virtual texture;
+    // callers fall back to LODSphereMesh when any texture reports Equirectangular.
+    // A future cube-map virtual texture class will add a value here that remains
+    // cube-sphere compatible.
+    enum class MeshMapping
+    {
+        Standard,        // ordinary image — compatible with any mesh
+        Equirectangular, // tiled equirectangular virtual texture — LODSphere only
+    };
+
+    virtual MeshMapping getMeshMapping() const { return MeshMapping::Standard; }
+
     virtual void setBorderColor(Color);
 
     int getWidth() const;

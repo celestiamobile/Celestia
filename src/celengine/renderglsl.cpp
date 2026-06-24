@@ -141,14 +141,21 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
                           const Matrices &m,
                           Renderer* renderer,
                           LODSphereMesh* lodSphere,
-                          CubeSphereMesh* cubeSphere)
+                          CubeSphereMesh* cubeSphere,
+                          bool useCubeSphere)
 {
     float radius = semiAxes.maxCoeff();
 
     boost::container::static_vector<Texture*, LODSphereMesh::MAX_SPHERE_MESH_TEXTURES> textures;
 
     ShaderProperties shadprop;
-    shadprop.texUsage = TexUsage::TextureCoordTransform | TexUsage::SphericalTextureCoord;
+    // Only the cube-sphere needs the shader to regenerate equirectangular
+    // coordinates per fragment from the surface normal: its baked vertex UVs
+    // smear at the longitude seam and poles. The LODSphere's lon/lat-aligned
+    // mesh has clean UVs and uses them directly.
+    shadprop.texUsage = TexUsage::TextureCoordTransform;
+    if (useCubeSphere)
+        shadprop.texUsage |= TexUsage::SphericalTextureCoord;
     shadprop.nLights = std::min(ls.nLights, MaxShaderLights);
 
     // Set up the textures used by this object
@@ -360,9 +367,18 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
 
     auto endTextures = std::remove(textures.begin(), textures.end(), nullptr);
     textures.erase(endTextures, textures.end());
-    cubeSphere->render(attributes,
-                       frustum, ri.eyePos_obj, ri.pixWidth, ri.pixelSize,
-                       textures.data(), static_cast<int>(textures.size()), prog);
+    if (useCubeSphere)
+    {
+        cubeSphere->render(attributes,
+                           frustum, ri.eyePos_obj, ri.pixWidth, ri.pixelSize,
+                           textures.data(), static_cast<int>(textures.size()), prog);
+    }
+    else
+    {
+        lodSphere->render(attributes,
+                          frustum, ri.pixWidth,
+                          textures.data(), static_cast<int>(textures.size()), prog);
+    }
 }
 
 
@@ -546,14 +562,19 @@ void renderClouds_GLSL(const RenderInfo& ri,
                        const Matrices &m,
                        Renderer* renderer,
                        LODSphereMesh* lodSphere,
-                       CubeSphereMesh* cubeSphere)
+                       CubeSphereMesh* cubeSphere,
+                       bool useCubeSphere)
 {
     float radius = semiAxes.maxCoeff();
 
     boost::container::static_vector<Texture*, LODSphereMesh::MAX_SPHERE_MESH_TEXTURES> textures;
 
     ShaderProperties shadprop;
+    // Clouds are equirectangular too, so the cube-sphere regenerates their
+    // coordinates per fragment to avoid the same seam/pole smearing.
     shadprop.texUsage = TexUsage::TextureCoordTransform;
+    if (useCubeSphere)
+        shadprop.texUsage |= TexUsage::SphericalTextureCoord;
     shadprop.nLights = ls.nLights;
 
     // Set up the textures used by this object
@@ -642,11 +663,20 @@ void renderClouds_GLSL(const RenderInfo& ri,
     // modelview, so both the eye and the frustum must be mapped into the shell's
     // own unit-sphere space (divide by cloudScale) for culling and LOD.
     float cloudScale = (atmosphere != nullptr) ? 1.0f + atmosphere->cloudHeight / radius : 1.0f;
-    math::Frustum shellFrustum = frustum;
-    shellFrustum.transform(math::scale(1.0f / cloudScale));
-    cubeSphere->render(attributes,
-                       shellFrustum, ri.eyePos_obj / cloudScale, ri.pixWidth, ri.pixelSize,
-                       textures.data(), static_cast<int>(textures.size()), prog);
+    if (useCubeSphere)
+    {
+        math::Frustum shellFrustum = frustum;
+        shellFrustum.transform(math::scale(1.0f / cloudScale));
+        cubeSphere->render(attributes,
+                           shellFrustum, ri.eyePos_obj / cloudScale, ri.pixWidth, ri.pixelSize,
+                           textures.data(), static_cast<int>(textures.size()), prog);
+    }
+    else
+    {
+        lodSphere->render(attributes,
+                          frustum, ri.pixWidth,
+                          textures.data(), static_cast<int>(textures.size()), prog);
+    }
 
     prog->textureOffset = 0.0f;
 }
