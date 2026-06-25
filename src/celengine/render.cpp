@@ -1931,7 +1931,7 @@ static void renderSphereUnlit(const RenderInfo& ri,
     ps.depthTest = true;
     r->setPipelineState(ps);
 
-    lodSphere->render(frustum, ri.pixWidth,
+    lodSphere->render(LODSphereMesh::Normals, frustum, ri.eyePos_obj, ri.pixelSize,
                       textures.data(), static_cast<int>(textures.size()), prog);
 }
 
@@ -1940,6 +1940,7 @@ static void renderCloudsUnlit(const RenderInfo& ri,
                               const math::Frustum& frustum,
                               Texture *cloudTex,
                               float cloudTexOffset,
+                              float cloudScale,
                               const Matrices &m,
                               Renderer *r,
                               LODSphereMesh *lodSphere)
@@ -1962,7 +1963,8 @@ static void renderCloudsUnlit(const RenderInfo& ri,
     ps.depthTest = true;
     r->setPipelineState(ps);
 
-    lodSphere->render(frustum, ri.pixWidth, &cloudTex, 1, prog);
+    lodSphere->render(LODSphereMesh::Normals, frustum, ri.eyePos_obj, ri.pixelSize,
+                      &cloudTex, 1, prog, true, cloudScale);
 }
 
 void
@@ -2404,6 +2406,7 @@ void Renderer::renderObject(const Vector3f& pos,
     ri.orientation = getCameraOrientationf() * obj.orientation.conjugate();
 
     ri.pixWidth = discSizeInPixels;
+    ri.pixelSize = pixelSize;
 
     // Set up the colors
     if (ri.baseTex == nullptr ||
@@ -2638,7 +2641,7 @@ void Renderer::renderObject(const Vector3f& pos,
             }
             else
             {
-                renderCloudsUnlit(ri,viewFrustum, cloudTex, cloudTexOffset, mvp, this, m_lodSphere.get());
+                renderCloudsUnlit(ri,viewFrustum, cloudTex, cloudTexOffset, cloudScale, mvp, this, m_lodSphere.get());
             }
 
             glDisable(GL_POLYGON_OFFSET_FILL);
