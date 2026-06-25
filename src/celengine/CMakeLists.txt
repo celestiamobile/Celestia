@@ -60,6 +60,8 @@ set(CELENGINE_SOURCES
   lodspheremesh.h
   cubespheremesh.cpp
   cubespheremesh.h
+  cubemapvirtualtex.cpp
+  cubemapvirtualtex.h
   marker.cpp
   marker.h
   meshmanager.cpp

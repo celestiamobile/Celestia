@@ -1898,8 +1898,6 @@ static void renderSphereUnlit(const RenderInfo& ri,
     // The cube-sphere needs per-fragment equirectangular coordinates to avoid
     // seam/pole smearing of its baked vertex UVs; the LODSphere uses its own.
     shadprop.texUsage = TexUsage::TextureCoordTransform;
-    if (useCubeSphere)
-        shadprop.texUsage |= TexUsage::SphericalTextureCoord;
 
     // Set up the textures used by this object
     if (ri.baseTex != nullptr)
@@ -1917,6 +1915,15 @@ static void renderSphereUnlit(const RenderInfo& ri,
         shadprop.texUsage |= TexUsage::OverlayTexture;
         textures.push_back(ri.overlayTex);
     }
+
+    // A cube-map virtual texture bakes its own per-chunk local UVs, so don't
+    // also regenerate spherical coordinates for it (see renderEllipsoid_GLSL).
+    bool anyCubeMap = std::any_of(textures.cbegin(), textures.cend(),
+                                  [](const Texture* t) {
+        return t != nullptr && t->getMeshMapping() == Texture::MeshMapping::CubeMap;
+    });
+    if (useCubeSphere && !anyCubeMap)
+        shadprop.texUsage |= TexUsage::SphericalTextureCoord;
 
     if (ri.isStar)
         shadprop.lightModel = LightingModel::StarModel;
@@ -1968,8 +1975,12 @@ static void renderCloudsUnlit(const RenderInfo& ri,
 {
     ShaderProperties shadprop;
     shadprop.texUsage = TexUsage::DiffuseTexture | TexUsage::TextureCoordTransform;
-    if (useCubeSphere)
+    if (useCubeSphere
+        && (cloudTex == nullptr
+            || cloudTex->getMeshMapping() != Texture::MeshMapping::CubeMap))
+    {
         shadprop.texUsage |= TexUsage::SphericalTextureCoord;
+    }
     shadprop.lightModel = LightingModel::UnlitModel;
 
     // Get a shader for the current rendering configuration

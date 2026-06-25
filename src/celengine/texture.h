@@ -64,15 +64,22 @@ public:
     // cube-sphere renderer can use it. The cube-sphere fetches a single
     // getTile(0,0,0), so it cannot bind a tiled equirectangular virtual texture;
     // callers fall back to LODSphereMesh when any texture reports Equirectangular.
-    // A future cube-map virtual texture class will add a value here that remains
-    // cube-sphere compatible.
+    // CubeMap virtual textures, in contrast, have a tile pyramid that matches the
+    // cube-sphere quadtree and are fetched per-chunk via getCubeTile().
     enum class MeshMapping
     {
         Standard,        // ordinary image — compatible with any mesh
         Equirectangular, // tiled equirectangular virtual texture — LODSphere only
+        CubeMap,         // tiled cube-map virtual texture — cube-sphere only
     };
 
     virtual MeshMapping getMeshMapping() const { return MeshMapping::Standard; }
+
+    // For cube-map virtual textures: fetch the resident tile (with coarser-
+    // ancestor fallback) covering cube face `face` at quadtree node (level, i, j),
+    // where the face is split into (1<<level) cells per edge. Returns an invalid
+    // tile (texID 0) for any texture that is not a cube-map virtual texture.
+    virtual TextureTile getCubeTile(int face, int level, int i, int j);
 
     virtual void setBorderColor(Color);
 

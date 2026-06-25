@@ -111,24 +111,59 @@ private:
 
     // A generated chunk mesh, held CPU-side. The triangle indices live in shared
     // stitch templates (see stitchTemplate), not here, since every chunk has the
-    // same grid topology; only the vertices differ. The vertices are kept on the
-    // CPU (not in a per-chunk VBO) so every visible chunk can be concatenated into
-    // one batch buffer and the whole cube-sphere drawn in a single draw call.
-    // lastUsed records the frame the chunk was last drawn so the cache can evict
-    // cold chunks.
+    // same grid topology; only the vertices differ. Each source vertex stores
+    // position [+ tangent], then (when textured) the chunk-local face UV and the
+    // equirectangular UV; the per-texture atlas UV written to the batch buffer is
+    // derived from one of those at append time. The vertices are kept on the CPU
+    // (not in a per-chunk VBO) so visible chunks can be concatenated into one
+    // batch buffer. lastUsed records the frame the chunk was last drawn so the
+    // cache can evict cold chunks.
     struct ChunkMesh
     {
         std::vector<float> vertices;
         std::uint64_t lastUsed{ 0 };
     };
 
+    // The resident tile a texture resolves to for one chunk: a GL texture plus
+    // the sub-rectangle (base/delta) covering the chunk, and which source UV set
+    // (chunk-local for cube-map textures, equirectangular otherwise) to transform.
+    struct TexTile
+    {
+        unsigned int texID{ 0 };
+        float baseU{ 0.0f };
+        float baseV{ 0.0f };
+        float deltaU{ 1.0f };
+        float deltaV{ 1.0f };
+        bool cubeMap{ false };
+    };
+
+    // A visible leaf plus its per-texture tile bindings, gathered in pass 2 then
+    // sorted by texID so chunks sharing the same bindings draw in one call.
+    struct DrawLeaf
+    {
+        ChunkKey key;
+        unsigned int mask;
+        std::array<TexTile, MAX_TEXTURES> tiles;
+    };
+
+    // A maximal run of sorted leaves sharing the same per-texture texIDs: one
+    // bind + one glDrawElements over [first, first+count) of the batch indices.
+    struct DrawGroup
+    {
+        std::size_t first;
+        std::size_t count;
+        std::array<unsigned int, MAX_TEXTURES> texID;
+    };
+
     void ensureBuffers();
     void ensureStitchTemplates();
     ChunkMesh* getOrCreateChunk(const ChunkKey& key, unsigned int attributes);
-    // Append one chunk's vertices to the batch vertex buffer and its stitch
-    // template (selected by edgeMask, with each index offset to the chunk's base
-    // vertex) to the batch index buffer.
-    void appendChunk(const ChunkMesh& chunk, unsigned int edgeMask);
+    // Append one chunk's vertices to the batch vertex buffer (baking each
+    // texture's atlas UV from the chunk's source UV and the tile's base/delta)
+    // and its stitch template (selected by edgeMask, each index offset to the
+    // chunk's base vertex) to the batch index buffer.
+    void appendChunk(const ChunkMesh& chunk, unsigned int edgeMask,
+                     const std::array<TexTile, MAX_TEXTURES>& tiles, int nTiles);
     // Drop chunks not drawn this frame once the cache exceeds its budget,
     // evicting the least recently used first.
     void evictColdChunks();
@@ -158,7 +193,12 @@ private:
     // the per-frame batch index buffer is assembled from them.
     static constexpr int NUM_STITCH_TEMPLATES = 16;
 
-    int vertexSize{ 0 };
+    // Per-vertex float counts. prefixFloats = position (3) + optional tangent (3).
+    // srcVertexSize (cache layout) adds chunk-local + equirectangular UV (4) when
+    // textured; batchVertexSize (GPU layout) adds one atlas UV (2) per texture.
+    int prefixFloats{ 3 };
+    int srcVertexSize{ 0 };
+    int batchVertexSize{ 0 };
     int nTexturesUsed{ 0 };
     float lodPixelSize{ 1.0f };
 
@@ -186,4 +226,9 @@ private:
     // to look up neighbour depths when computing edge-stitch masks.
     std::vector<ChunkKey> frameLeaves{};
     std::unordered_set<std::uint64_t> frameLeafSet{};
+
+    // Pass-2 scratch (members so capacity is reused): visible leaves with their
+    // per-texture tile bindings, and the coalesced draw groups built from them.
+    std::vector<DrawLeaf> frameDraws{};
+    std::vector<DrawGroup> frameGroups{};
 };

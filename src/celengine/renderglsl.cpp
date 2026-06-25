@@ -127,6 +127,22 @@ void renderGeometryShadow_GLSL(RenderGeometry* geometry,
     shadowFbo->unbind(oldFboId);
 }
 
+// A cube-map virtual texture supplies its own per-chunk local UVs (baked into
+// the cube-sphere vertices); per-fragment spherical texcoord generation would
+// override them. So SphericalTextureCoord must be off whenever any active
+// texture is a cube-map, even though the body still renders on the cube-sphere.
+template<typename Range>
+bool
+anyCubeMapTexture(const Range& textures)
+{
+    for (const Texture* tex : textures)
+    {
+        if (tex != nullptr && tex->getMeshMapping() == Texture::MeshMapping::CubeMap)
+            return true;
+    }
+    return false;
+}
+
 } // end unnamed namespace
 
 // Render a planet sphere with GLSL shaders
@@ -154,8 +170,6 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
     // smear at the longitude seam and poles. The LODSphere's lon/lat-aligned
     // mesh has clean UVs and uses them directly.
     shadprop.texUsage = TexUsage::TextureCoordTransform;
-    if (useCubeSphere)
-        shadprop.texUsage |= TexUsage::SphericalTextureCoord;
     shadprop.nLights = std::min(ls.nLights, MaxShaderLights);
 
     // Set up the textures used by this object
@@ -202,6 +216,12 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
         shadprop.texUsage |= TexUsage::OverlayTexture;
         textures.push_back(ri.overlayTex);
     }
+
+    // The cube-sphere has no clean baked equirectangular UVs, so for ordinary
+    // textures it regenerates them per fragment from the surface normal. Skip
+    // this when a cube-map virtual texture is used: it bakes its own local UVs.
+    if (useCubeSphere && !anyCubeMapTexture(textures))
+        shadprop.texUsage |= TexUsage::SphericalTextureCoord;
 
     if (atmosphere != nullptr)
     {
@@ -573,8 +593,6 @@ void renderClouds_GLSL(const RenderInfo& ri,
     // Clouds are equirectangular too, so the cube-sphere regenerates their
     // coordinates per fragment to avoid the same seam/pole smearing.
     shadprop.texUsage = TexUsage::TextureCoordTransform;
-    if (useCubeSphere)
-        shadprop.texUsage |= TexUsage::SphericalTextureCoord;
     shadprop.nLights = ls.nLights;
 
     // Set up the textures used by this object
@@ -591,6 +609,11 @@ void renderClouds_GLSL(const RenderInfo& ri,
         if (cloudNormalMap->getFormatOptions() & Texture::DXT5NormalMap)
             shadprop.texUsage |= TexUsage::CompressedNormalTexture;
     }
+
+    // Skip per-fragment spherical texcoords when a cube-map virtual texture
+    // bakes its own local UVs (see renderEllipsoid_GLSL).
+    if (useCubeSphere && !anyCubeMapTexture(textures))
+        shadprop.texUsage |= TexUsage::SphericalTextureCoord;
 
     if (atmosphere != nullptr && util::is_set(renderFlags, RenderFlags::ShowAtmospheres))
     {

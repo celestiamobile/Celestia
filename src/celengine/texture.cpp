@@ -22,6 +22,7 @@
 #include "framebuffer.h"
 #include "texture.h"
 #include "virtualtex.h"
+#include "cubemapvirtualtex.h"
 
 
 using namespace celestia;
@@ -648,6 +649,13 @@ Texture::setBorderColor(Color)
     // no-op
 }
 
+TextureTile
+Texture::getCubeTile(int, int, int, int)
+{
+    // Only cube-map virtual textures override this.
+    return TextureTile(0);
+}
+
 int
 Texture::getWidth() const
 {
@@ -1013,8 +1021,14 @@ LoadTextureFromFile(const std::filesystem::path& filename,
     // Check for a Celestia texture--these need to be handled specially.
     ContentType contentType = DetermineFileType(filename);
 
+    // A Celestia .ctx file is either an equirectangular or a cube-map virtual
+    // texture; the cube-map loader returns null for a non-cube-map file.
     if (contentType == ContentType::CelestiaTexture)
+    {
+        if (auto cubeTex = LoadCubeMapVirtualTexture(filename, colorspace))
+            return cubeTex;
         return LoadVirtualTexture(filename, colorspace);
+    }
 
     // All other texture types are handled by first loading an image, then
     // creating a texture from that image.

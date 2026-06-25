@@ -493,6 +493,14 @@ CubeSphereMesh::getOrCreateChunk(const ChunkKey& key, unsigned int attributes)
 
             if (wantTex)
             {
+                // Chunk-local face UV in [0,1], used to sample a cube-map tile
+                // that covers exactly this chunk.
+                float localU = static_cast<float>(ii) / CHUNK_RES;
+                float localV = static_cast<float>(jj) / CHUNK_RES;
+                vertices.push_back(localU);
+                vertices.push_back(localV);
+
+                // Equirectangular UV, used for ordinary whole-globe textures.
                 float lon = std::atan2(p.z(), p.x());
                 while (lon - centerLon > celestia::numbers::pi) lon -= twoPi;
                 while (centerLon - lon > celestia::numbers::pi) lon += twoPi;
@@ -515,13 +523,44 @@ CubeSphereMesh::getOrCreateChunk(const ChunkKey& key, unsigned int attributes)
 
 // Append one chunk's vertices to the batch vertex buffer and its stitch template
 // (chosen by edgeMask, each index biased to the chunk's first vertex in the batch)
-// to the batch index buffer, so all visible chunks can be drawn at once.
+// to the batch index buffer. Each source vertex contributes position [+ tangent],
+// then one atlas UV per texture, baked from the chunk's source UV (chunk-local for
+// cube-map textures, equirectangular otherwise) and the tile's base/delta so the
+// shader's texcoord transform stays identity and chunks sharing a texID can batch.
 void
-CubeSphereMesh::appendChunk(const ChunkMesh& chunk, unsigned int edgeMask)
+CubeSphereMesh::appendChunk(const ChunkMesh& chunk, unsigned int edgeMask,
+                            const std::array<TexTile, MAX_TEXTURES>& tiles, int nTiles)
 {
     auto baseVertex = static_cast<unsigned int>(batchVertices.size()
-                                                / static_cast<std::size_t>(vertexSize));
-    batchVertices.insert(batchVertices.end(), chunk.vertices.begin(), chunk.vertices.end());
+                                                / static_cast<std::size_t>(batchVertexSize));
+
+    const std::size_t nVerts = chunk.vertices.size()
+                               / static_cast<std::size_t>(srcVertexSize);
+    const bool srcHasUV = srcVertexSize > prefixFloats;
+    const int localOff = prefixFloats;     // chunk-local UV in the source vertex
+    const int equirectOff = prefixFloats + 2;
+
+    for (std::size_t v = 0; v < nVerts; ++v)
+    {
+        const float* src = chunk.vertices.data() + v * static_cast<std::size_t>(srcVertexSize);
+
+        for (int k = 0; k < prefixFloats; ++k)
+            batchVertices.push_back(src[k]);
+
+        for (int t = 0; t < nTiles; ++t)
+        {
+            float su = 0.0f;
+            float sv = 0.0f;
+            if (srcHasUV)
+            {
+                int off = tiles[t].cubeMap ? localOff : equirectOff;
+                su = src[off];
+                sv = src[off + 1];
+            }
+            batchVertices.push_back(tiles[t].baseU + su * tiles[t].deltaU);
+            batchVertices.push_back(tiles[t].baseV + sv * tiles[t].deltaV);
+        }
+    }
 
 #if CUBESPHERE_WIREFRAME
     const std::vector<unsigned int>& tmpl = stitchLineTemplate[edgeMask];
@@ -597,7 +636,7 @@ CubeSphereMesh::collectLeaves(int face, int depth, std::uint32_t i, std::uint32_
         return;
     }
 
-    frameLeaves.push_back(ChunkKey{ face, depth, i, j, vertexSize });
+    frameLeaves.push_back(ChunkKey{ face, depth, i, j, srcVertexSize });
     frameLeafSet.insert(packCell(face, depth, i, j));
 }
 
@@ -697,7 +736,7 @@ CubeSphereMesh::balanceLeaves()
         int face, depth;
         std::uint32_t i, j;
         unpackCell(cell, face, depth, i, j);
-        frameLeaves.push_back(ChunkKey{ face, depth, i, j, vertexSize });
+        frameLeaves.push_back(ChunkKey{ face, depth, i, j, srcVertexSize });
     }
 }
 
@@ -740,11 +779,13 @@ CubeSphereMesh::render(unsigned int attributes,
         nTextures = 0;
     nTexturesUsed = std::min(nTextures, static_cast<int>(MAX_TEXTURES));
 
-    vertexSize = 3;
+    prefixFloats = 3;
     if ((attributes & Tangents) != 0)
-        vertexSize += 3;
-    if (nTexturesUsed > 0)
-        vertexSize += 2;
+        prefixFloats += 3;
+    // Source vertices store chunk-local + equirectangular UV (4 floats) when
+    // textured; the batch stores one baked atlas UV (2 floats) per texture.
+    srcVertexSize = prefixFloats + (nTexturesUsed > 0 ? 4 : 0);
+    batchVertexSize = prefixFloats + 2 * nTexturesUsed;
 
     ensureBuffers();
     if (!buffersInitialized)
@@ -764,28 +805,22 @@ CubeSphereMesh::render(unsigned int attributes,
     // level, which the one-level stitch templates can seal in-face.
     balanceLeaves();
 
+    // Each texture is sampled either per-chunk (cube-map virtual texture, via
+    // getCubeTile) or from a single whole-globe tile (everything else).
+    std::array<bool, MAX_TEXTURES> cubeMap{};
     for (int i = 0; i < nTexturesUsed; ++i)
     {
         tex[i]->beginUsage();
-        if (nTexturesUsed > 1)
-            glActiveTexture(GL_TEXTURE0 + i);
-        TextureTile tile = tex[i]->getTile(0, 0, 0);
-        glBindTexture(GL_TEXTURE_2D, tile.texID);
-        program->texCoordTransforms[i].base = Vector2f(tile.u, tile.v);
-        program->texCoordTransforms[i].delta = Vector2f(tile.du, tile.dv);
+        cubeMap[i] = tex[i]->getMeshMapping() == Texture::MeshMapping::CubeMap;
     }
-    if (nTexturesUsed > 1)
-        glActiveTexture(GL_TEXTURE0);
 
     glBindVertexArray(vao);
 
-    // Pass 2: cull leaves outside the frustum or behind the horizon, then batch
-    // each survivor into the shared vertex/index buffers with the stitch template
-    // chosen from its neighbours. Culling happens here (not during collection) so
-    // the balance and stitch passes still see the full leaf set and seal seams
-    // against off-screen neighbours. The whole cube-sphere is then drawn at once.
-    batchVertices.clear();
-    batchIndices.clear();
+    // Pass 2: cull leaves outside the frustum or behind the horizon, then gather
+    // each survivor with its per-texture tile bindings. Culling happens here (not
+    // during collection) so the balance and stitch passes still see the full leaf
+    // set and seal seams against off-screen neighbours.
+    frameDraws.clear();
     for (const ChunkKey& key : frameLeaves)
     {
         ChunkBounds bounds = chunkBounds(key.face, key.depth, key.i, key.j);
@@ -795,13 +830,71 @@ CubeSphereMesh::render(unsigned int attributes,
         if (enableHorizonCull && chunkBelowHorizon(bounds, eyePos))
             continue;
 
-        unsigned int mask = computeEdgeMask(key.face, key.depth, key.i, key.j);
-        ChunkMesh* chunk = getOrCreateChunk(key, attributes);
-        if (chunk != nullptr)
+        DrawLeaf leaf;
+        leaf.key = key;
+        leaf.mask = computeEdgeMask(key.face, key.depth, key.i, key.j);
+        for (int i = 0; i < nTexturesUsed; ++i)
         {
-            chunk->lastUsed = frameCounter;
-            appendChunk(*chunk, mask);
+            TextureTile tile = cubeMap[i]
+                ? tex[i]->getCubeTile(key.face, key.depth,
+                                      static_cast<int>(key.i), static_cast<int>(key.j))
+                : tex[i]->getTile(0, 0, 0);
+            leaf.tiles[i] = TexTile{ tile.texID, tile.u, tile.v, tile.du, tile.dv, cubeMap[i] };
         }
+        frameDraws.push_back(leaf);
+    }
+
+    // Sort by the per-texture texID tuple so leaves that resolve to the same
+    // bindings (common, thanks to coarser-ancestor fallback) draw in one call.
+    std::sort(frameDraws.begin(), frameDraws.end(),
+              [n = nTexturesUsed](const DrawLeaf& a, const DrawLeaf& b)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            if (a.tiles[i].texID != b.tiles[i].texID)
+                return a.tiles[i].texID < b.tiles[i].texID;
+        }
+        return false;
+    });
+
+    // Build the batch in sorted order, recording one DrawGroup per maximal run of
+    // identical bindings. Atlas UVs are baked into the vertices, so the index
+    // range alone (plus the group's texIDs) describes each draw.
+    batchVertices.clear();
+    batchIndices.clear();
+    frameGroups.clear();
+    for (const DrawLeaf& leaf : frameDraws)
+    {
+        ChunkMesh* chunk = getOrCreateChunk(leaf.key, attributes);
+        if (chunk == nullptr)
+            continue;
+        chunk->lastUsed = frameCounter;
+
+        bool newGroup = frameGroups.empty();
+        if (!newGroup)
+        {
+            for (int i = 0; i < nTexturesUsed; ++i)
+            {
+                if (frameGroups.back().texID[i] != leaf.tiles[i].texID)
+                {
+                    newGroup = true;
+                    break;
+                }
+            }
+        }
+        if (newGroup)
+        {
+            DrawGroup g;
+            g.first = batchIndices.size();
+            g.count = 0;
+            for (int i = 0; i < nTexturesUsed; ++i)
+                g.texID[i] = leaf.tiles[i].texID;
+            frameGroups.push_back(g);
+        }
+
+        std::size_t before = batchIndices.size();
+        appendChunk(*chunk, leaf.mask, leaf.tiles, nTexturesUsed);
+        frameGroups.back().count += batchIndices.size() - before;
     }
 
     if (!batchIndices.empty())
@@ -811,8 +904,7 @@ CubeSphereMesh::render(unsigned int attributes,
                              batchVertices.size() * sizeof(float)),
                          gl::Buffer::BufferUsage::StreamDraw);
 
-        const auto stride = static_cast<GLsizei>(vertexSize * sizeof(float));
-        const int texCoordOffset = ((attributes & Tangents) != 0) ? 6 : 3;
+        const auto stride = static_cast<GLsizei>(batchVertexSize * sizeof(float));
 
         glEnableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
         glVertexAttribPointer(CelestiaGLProgram::VertexCoordAttributeIndex,
@@ -831,10 +923,13 @@ CubeSphereMesh::render(unsigned int attributes,
         }
         for (int tc = 0; tc < nTexturesUsed; ++tc)
         {
+            // Atlas UVs are baked, so the shader's texcoord transform is identity.
+            program->texCoordTransforms[tc].base = Vector2f(0.0f, 0.0f);
+            program->texCoordTransforms[tc].delta = Vector2f(1.0f, 1.0f);
             glEnableVertexAttribArray(CelestiaGLProgram::TextureCoord0AttributeIndex + tc);
             glVertexAttribPointer(CelestiaGLProgram::TextureCoord0AttributeIndex + tc,
                                   2, GL_FLOAT, GL_FALSE, stride,
-                                  bufferOffset(texCoordOffset * sizeof(float)));
+                                  bufferOffset((prefixFloats + 2 * tc) * sizeof(float)));
         }
 
         batchIBO.setData(celestia::util::array_view<void>(
@@ -843,12 +938,25 @@ CubeSphereMesh::render(unsigned int attributes,
                          gl::Buffer::BufferUsage::StreamDraw);
 
 #if CUBESPHERE_WIREFRAME
-        glDrawElements(GL_LINES, static_cast<GLsizei>(batchIndices.size()),
-                       GL_UNSIGNED_INT, bufferOffset(0));
+        const GLenum primitive = GL_LINES;
 #else
-        glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(batchIndices.size()),
-                       GL_UNSIGNED_INT, bufferOffset(0));
+        const GLenum primitive = GL_TRIANGLES;
 #endif
+        for (const DrawGroup& g : frameGroups)
+        {
+            for (int tc = 0; tc < nTexturesUsed; ++tc)
+            {
+                if (nTexturesUsed > 1)
+                    glActiveTexture(GL_TEXTURE0 + tc);
+                glBindTexture(GL_TEXTURE_2D, g.texID[tc]);
+            }
+            if (nTexturesUsed > 1)
+                glActiveTexture(GL_TEXTURE0);
+
+            glDrawElements(primitive, static_cast<GLsizei>(g.count),
+                           GL_UNSIGNED_INT,
+                           bufferOffset(g.first * sizeof(unsigned int)));
+        }
 
         glDisableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
         if ((attributes & Normals) != 0)

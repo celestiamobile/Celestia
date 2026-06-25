@@ -14,6 +14,8 @@
 #include <celutil/filetype.h>
 #include <celutil/flag.h>
 
+#include "cubemapvirtualtex.h"
+
 namespace celestia::engine
 {
 
@@ -55,10 +57,14 @@ TextureTraits::decode(const Info& info) const
     translateFlags(info.flags, addressMode, mipMode, colorspace);
 
     // Virtual textures are detected by extension; their loader is file
-    // parsing only (no GL), so run it here on the worker.
+    // parsing only (no GL), so run it here on the worker. A .ctx file is either
+    // an equirectangular or a cube-map virtual texture; the cube-map loader
+    // returns null for a non-cube-map file, so try it first then fall back.
     if (DetermineFileType(info.path) == ContentType::CelestiaTexture)
     {
-        auto vtex = LoadVirtualTexture(info.path, colorspace);
+        std::unique_ptr<Texture> vtex = LoadCubeMapVirtualTexture(info.path, colorspace);
+        if (vtex == nullptr)
+            vtex = LoadVirtualTexture(info.path, colorspace);
         if (vtex == nullptr)
             return std::nullopt;
 
@@ -118,6 +124,8 @@ TextureTraits::upload(CpuData&& cpu) const
         {
             if (auto* vt = dynamic_cast<VirtualTexture*>(cpu.virtualTexture.get()))
                 vt->attachToResourceSystem(*m_system);
+            else if (auto* cvt = dynamic_cast<CubeMapVirtualTexture*>(cpu.virtualTexture.get()))
+                cvt->attachToResourceSystem(*m_system);
         }
         return std::move(cpu.virtualTexture);
     }
