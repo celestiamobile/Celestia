@@ -358,7 +358,8 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
     textures.erase(endTextures, textures.end());
     lodSphere->render(attributes,
                       frustum, ri.eyePos_obj, ri.pixelSize,
-                      textures.data(), static_cast<int>(textures.size()), prog);
+                      textures.data(), static_cast<int>(textures.size()), prog,
+                      true, 1.0f, ri.heightField, ri.heightDispScale, ri.heightDispOffset);
 }
 
 

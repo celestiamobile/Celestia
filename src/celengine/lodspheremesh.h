@@ -33,6 +33,11 @@ namespace celestia::math
 class Frustum;
 }
 
+namespace celestia::engine
+{
+class HeightField;
+}
+
 class LODSphereMesh
 {
 public:
@@ -57,6 +62,8 @@ public:
     // refinement. Disable enableHorizonCull for inside-out shells (e.g. atmosphere).
     // geometryScale is the modelview scale of the geometry (cloud/atmosphere
     // shells), used to lift cull bounds and the LOD metric into world space.
+    // When heightField is non-null, chunk vertices are displaced along their normal
+    // by (heightOffset + texel * heightScale) in unit-sphere units (terrain).
     void render(unsigned int attributes,
                 const celestia::math::Frustum& frustum,
                 const Eigen::Vector3f& eyePos,
@@ -65,7 +72,10 @@ public:
                 int nTextures,
                 CelestiaGLProgram* program,
                 bool enableHorizonCull = true,
-                float geometryScale = 1.0f);
+                float geometryScale = 1.0f,
+                const celestia::engine::HeightField* heightField = nullptr,
+                float heightScale = 0.0f,
+                float heightOffset = 0.0f);
 
 private:
     // A quadtree node: at depth d the map has 2^(d+1) longitude cells by 2^d
@@ -99,9 +109,10 @@ private:
 
     // A CPU-side chunk mesh. Triangle indices live in shared stitch templates (all
     // chunks share grid topology); only vertices differ. Each vertex is position
-    // [+ tangent], then (when textured) the (sf, tf) map fraction in [0,1] from
-    // which the batch atlas UV is baked. Kept on the CPU so visible chunks can be
-    // concatenated into one batch buffer; lastUsed drives cache eviction.
+    // [+ explicit normal, terrain only] [+ tangent], then (when textured) the
+    // (sf, tf) map fraction in [0,1] from which the batch atlas UV is baked. Kept on
+    // the CPU so visible chunks can be concatenated into one batch buffer; lastUsed
+    // drives cache eviction.
     struct ChunkMesh
     {
         std::vector<float> vertices;
@@ -164,9 +175,10 @@ private:
 
     static constexpr int NUM_STITCH_TEMPLATES = 16;
 
-    // Per-vertex float counts. prefixFloats = position (3) + optional tangent (3).
-    // srcVertexSize (cache layout) adds the map fraction (2) when textured;
-    // batchVertexSize (GPU layout) adds one atlas UV (2) per texture.
+    // Per-vertex float counts. prefixFloats = position (3) + explicit normal (3,
+    // terrain only) + optional tangent (3). srcVertexSize (cache layout) adds the
+    // map fraction (2) when textured; batchVertexSize (GPU layout) adds one atlas
+    // UV (2) per texture.
     int prefixFloats{ 3 };
     int srcVertexSize{ 0 };
     int batchVertexSize{ 0 };
@@ -175,6 +187,18 @@ private:
     float lodGeometryScale{ 1.0f };
     // Minimum depth so no leaf straddles several texture tiles.
     int minTileDepth{ 0 };
+
+    // Terrain displacement for the current render: vertices are pushed along their
+    // normal by (lodHeightOffset + texel * lodHeightScale) unit-sphere units. The
+    // signature drives chunk-cache invalidation; lodHeightDmax is the largest
+    // absolute displacement, used to inflate cull bounds conservatively.
+    const celestia::engine::HeightField* lodHeightField{ nullptr };
+    float lodHeightScale{ 0.0f };
+    float lodHeightOffset{ 0.0f };
+    float lodHeightDmax{ 0.0f };
+    const celestia::engine::HeightField* cacheHeightField{ nullptr };
+    float cacheHeightScale{ 0.0f };
+    float cacheHeightOffset{ 0.0f };
 
     std::array<Texture*, MAX_SPHERE_MESH_TEXTURES> textures{};
 

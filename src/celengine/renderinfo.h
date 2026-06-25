@@ -16,6 +16,8 @@
 
 class Texture;
 
+namespace celestia::engine { class HeightField; }
+
 struct RenderInfo
 {
     Eigen::Quaternionf orientation{ Eigen::Quaternionf::Identity() };
@@ -25,6 +27,11 @@ struct RenderInfo
     Texture* nightTex{ nullptr };
     Texture* glossTex{ nullptr };
     Texture* overlayTex{ nullptr };
+    // CPU elevation map for LODSphereMesh terrain, with the texel->displacement map
+    // (unit-sphere units): displacement = heightDispOffset + texel * heightDispScale.
+    const celestia::engine::HeightField* heightField{ nullptr };
+    float heightDispScale{ 0.0f };
+    float heightDispOffset{ 0.0f };
     Color color{ 1.0f, 1.0f, 1.0f };
     Color specularColor{ 0.0f, 0.0f, 0.0f };
     float specularPower{ 0.0f };

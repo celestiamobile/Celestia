@@ -22,6 +22,7 @@
 #endif
 
 #include <celcompat/numbers.h>
+#include <celengine/heightfield.h>
 #include <celengine/shadermanager.h>
 #include <celengine/texture.h>
 #include <celmath/frustum.h>
@@ -318,9 +319,49 @@ LODSphereMesh::getOrCreateChunk(const ChunkKey& key, unsigned int attributes)
 
     const bool wantTangents = (attributes & Tangents) != 0;
     const bool wantTex = nTexturesUsed > 0;
+    const bool terrain = lodHeightField != nullptr;
 
     double cols = static_cast<double>(1u << (key.depth + 1));
     double rows = static_cast<double>(1u << key.depth);
+
+    // Terrain displacement as a function of map fraction (sf, tf), matching the
+    // colour texture's (u, v) = (1 - sf, 1 - tf) convention so relief aligns with
+    // the texture. At the poles (tf 0/1) the elevation is the row mean so every
+    // pole vertex shares one displacement and the fan stays watertight.
+    auto sampleHeight = [this](double sf, double tf) -> float
+    {
+        if (tf <= 0.0)
+            return lodHeightField->poleValue(false);
+        if (tf >= 1.0)
+            return lodHeightField->poleValue(true);
+        return lodHeightField->sampleUV(1.0f - static_cast<float>(sf),
+                                        1.0f - static_cast<float>(tf));
+    };
+    auto dispPoint = [&](double sf, double tf) -> Vector3f
+    {
+        float disp = lodHeightOffset + sampleHeight(sf, tf) * lodHeightScale;
+        return spherePoint(sf, tf) * (1.0f + disp);
+    };
+    // Normal from central differences with texel-sized steps, so it depends only on
+    // (sf, tf) and the height field (not the chunk depth) and stays continuous
+    // across chunk and stitch boundaries.
+    const double dSf = terrain ? 1.0 / lodHeightField->width() : 0.0;
+    const double dTf = terrain ? 1.0 / lodHeightField->height() : 0.0;
+    auto dispNormal = [&](double sf, double tf) -> Vector3f
+    {
+        if (tf <= 0.0)
+            return Vector3f(0.0f, -1.0f, 0.0f);
+        if (tf >= 1.0)
+            return Vector3f(0.0f, 1.0f, 0.0f);
+        Vector3f dpsf = dispPoint(sf + dSf, tf) - dispPoint(sf - dSf, tf);
+        Vector3f dptf = dispPoint(sf, std::min(1.0, tf + dTf))
+                        - dispPoint(sf, std::max(0.0, tf - dTf));
+        Vector3f n = dpsf.cross(dptf);
+        if (n.dot(spherePoint(sf, tf)) < 0.0f)
+            n = -n;
+        float len = n.norm();
+        return len > 0.0f ? (n / len) : spherePoint(sf, tf);
+    };
 
     std::vector<float> vertices;
     vertices.reserve(static_cast<std::size_t>(CHUNK_RES + 1) * (CHUNK_RES + 1)
@@ -334,11 +375,19 @@ LODSphereMesh::getOrCreateChunk(const ChunkKey& key, unsigned int attributes)
         {
             double tf = (static_cast<double>(key.j)
                          + static_cast<double>(jj) / CHUNK_RES) / rows;
-            Vector3f p = spherePoint(sf, tf);
+            Vector3f p = terrain ? dispPoint(sf, tf) : spherePoint(sf, tf);
 
             vertices.push_back(p.x());
             vertices.push_back(p.y());
             vertices.push_back(p.z());
+
+            if (terrain)
+            {
+                Vector3f n = dispNormal(sf, tf);
+                vertices.push_back(n.x());
+                vertices.push_back(n.y());
+                vertices.push_back(n.z());
+            }
 
             if (wantTangents)
             {
@@ -638,16 +687,39 @@ LODSphereMesh::render(unsigned int attributes,
                       int nTextures,
                       CelestiaGLProgram* program,
                       bool enableHorizonCull,
-                      float geometryScale)
+                      float geometryScale,
+                      const celestia::engine::HeightField* heightField,
+                      float heightScale,
+                      float heightOffset)
 {
     lodPixelSize = pixelSize;
     lodGeometryScale = geometryScale;
+
+    lodHeightField = heightField;
+    lodHeightScale = heightField != nullptr ? heightScale : 0.0f;
+    lodHeightOffset = heightField != nullptr ? heightOffset : 0.0f;
+    lodHeightDmax = std::max(std::abs(lodHeightOffset),
+                             std::abs(lodHeightOffset + lodHeightScale));
+
+    // Cached chunk geometry depends on the active height field; this LODSphereMesh
+    // is shared across all bodies, so drop the cache whenever the terrain changes.
+    if (lodHeightField != cacheHeightField
+        || lodHeightScale != cacheHeightScale
+        || lodHeightOffset != cacheHeightOffset)
+    {
+        chunkCache.clear();
+        cacheHeightField = lodHeightField;
+        cacheHeightScale = lodHeightScale;
+        cacheHeightOffset = lodHeightOffset;
+    }
 
     if (tex == nullptr)
         nTextures = 0;
     nTexturesUsed = std::min(nTextures, static_cast<int>(MAX_SPHERE_MESH_TEXTURES));
 
     prefixFloats = 3;
+    if (lodHeightField != nullptr)
+        prefixFloats += 3; // explicit per-vertex normal for displaced terrain
     if ((attributes & Tangents) != 0)
         prefixFloats += 3;
     // Source vertices store the map fraction (2 floats) when textured; the batch
@@ -696,6 +768,9 @@ LODSphereMesh::render(unsigned int attributes,
         // space of the frustum and eyePos.
         bounds.center *= lodGeometryScale;
         bounds.radius *= lodGeometryScale;
+        // Terrain displaces each vertex by at most lodHeightDmax along its normal;
+        // inflate the bound so displaced peaks/valleys are never wrongly culled.
+        bounds.radius += lodHeightDmax * lodGeometryScale;
         if (frustum.testSphere(bounds.center, bounds.radius) == math::FrustumAspect::Outside)
             continue;
         if (enableHorizonCull && chunkBelowHorizon(bounds, eyePos))
@@ -773,17 +848,23 @@ LODSphereMesh::render(unsigned int attributes,
         glEnableVertexAttribArray(CelestiaGLProgram::VertexCoordAttributeIndex);
         glVertexAttribPointer(CelestiaGLProgram::VertexCoordAttributeIndex,
                               3, GL_FLOAT, GL_FALSE, stride, bufferOffset(0));
+        // Terrain stores an explicit normal after the position; a smooth sphere
+        // has normal == position, so the attribute aliases the position offset.
+        const int normalOffset = lodHeightField != nullptr ? 3 : 0;
+        const int tangentOffset = 3 + (lodHeightField != nullptr ? 3 : 0);
         if ((attributes & Normals) != 0)
         {
             glEnableVertexAttribArray(CelestiaGLProgram::NormalAttributeIndex);
             glVertexAttribPointer(CelestiaGLProgram::NormalAttributeIndex,
-                                  3, GL_FLOAT, GL_FALSE, stride, bufferOffset(0));
+                                  3, GL_FLOAT, GL_FALSE, stride,
+                                  bufferOffset(normalOffset * sizeof(float)));
         }
         if ((attributes & Tangents) != 0)
         {
             glEnableVertexAttribArray(CelestiaGLProgram::TangentAttributeIndex);
             glVertexAttribPointer(CelestiaGLProgram::TangentAttributeIndex,
-                                  3, GL_FLOAT, GL_FALSE, stride, bufferOffset(3 * sizeof(float)));
+                                  3, GL_FLOAT, GL_FALSE, stride,
+                                  bufferOffset(tangentOffset * sizeof(float)));
         }
         for (int tc = 0; tc < nTexturesUsed; ++tc)
         {

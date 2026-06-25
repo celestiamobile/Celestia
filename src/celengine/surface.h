@@ -34,6 +34,7 @@ struct Surface
         Emissive             = 0x80,
         SeparateSpecularMap  = 0x100,
         ApplyOverlay         = 0x200,
+        ApplyHeightMap       = 0x400,
     };
 
     Flags appearanceFlags{ Flags::None };
@@ -45,6 +46,9 @@ struct Surface
     celestia::util::TextureHandle nightTexture{ celestia::util::TextureHandle::Invalid };   // artificial lights to show on night side
     celestia::util::TextureHandle specularTexture{ celestia::util::TextureHandle::Invalid };// specular mask
     celestia::util::TextureHandle overlayTexture{ celestia::util::TextureHandle::Invalid }; // overlay texture, applied last
+    celestia::util::TextureHandle heightTexture{ celestia::util::TextureHandle::Invalid };  // grayscale elevation map for geometric terrain
+    float heightMinElevation{ 0.0f };   // km, elevation at texel value 0 (may be negative, below the datum radius)
+    float heightMaxElevation{ 0.0f };   // km, elevation at texel value 1
     float lunarLambert{ 0.0f };     // mix between Lambertian and Lommel-Seeliger (lunar-like) photometric functions
 };
 

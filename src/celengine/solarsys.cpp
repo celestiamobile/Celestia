@@ -645,6 +645,7 @@ FillinSurface(const AssociativeArray& surfaceData,
     auto specularTexture = GetFilename(surfaceData, "SpecularTexture"sv, "Invalid filename in SpecularTexture\n");
     auto normalTexture = GetFilename(surfaceData, "NormalMap"sv, "Invalid filename in NormalMap\n");
     auto overlayTexture = GetFilename(surfaceData, "OverlayTexture"sv, "Invalid filename in OverlayTexture\n");
+    auto heightTexture = GetFilename(surfaceData, "HeightMap"sv, "Invalid filename in HeightMap\n");
 
     constexpr auto baseFlags = engine::TextureFlags::WrapTexture;
     constexpr auto bumpFlags = engine::TextureFlags::WrapTexture | engine::TextureFlags::LinearColorspace;
@@ -663,6 +664,7 @@ FillinSurface(const AssociativeArray& surfaceData,
     util::set_or_unset(surface.appearanceFlags, Surface::Flags::ApplyNightMap, nightTexture.has_value());
     util::set_or_unset(surface.appearanceFlags, Surface::Flags::SeparateSpecularMap, specularTexture.has_value());
     util::set_or_unset(surface.appearanceFlags, Surface::Flags::ApplyOverlay, overlayTexture.has_value());
+    util::set_or_unset(surface.appearanceFlags, Surface::Flags::ApplyHeightMap, heightTexture.has_value());
     util::set_or_unset(surface.appearanceFlags, Surface::Flags::SpecularReflection, surface.specularColor != Color(0.0f, 0.0f, 0.0f));
 
     if (baseTexture.has_value())
@@ -680,6 +682,18 @@ FillinSurface(const AssociativeArray& surfaceData,
 
     if (overlayTexture.has_value())
         surface.overlayTexture = texturePaths.getHandle(*overlayTexture, path, baseFlags);
+
+    if (heightTexture.has_value())
+    {
+        // CPU-sampled grayscale elevation; loaded linear (no sRGB) and clamped at
+        // the poles/seam so terrain stays watertight.
+        constexpr auto heightFlags = engine::TextureFlags::BorderClamp
+                                     | engine::TextureFlags::LinearColorspace
+                                     | engine::TextureFlags::NoMipMaps;
+        surface.heightTexture = texturePaths.getHandle(*heightTexture, path, heightFlags);
+        surface.heightMinElevation = surfaceData.getLength<float>("HeightMapMinElevation").value_or(0.0f);
+        surface.heightMaxElevation = surfaceData.getLength<float>("HeightMapMaxElevation").value_or(0.0f);
+    }
 }
 
 

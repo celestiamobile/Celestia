@@ -12,6 +12,7 @@
 
 #include <array>
 #include <list>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -44,7 +45,7 @@ class CurvePlot;
 class CurvePlotVertexBuffer;
 class PointStarVertexBuffer;
 namespace celestia::render { class PsfStarVertexBuffer; class StarPipelineOwner; }
-namespace celestia::engine { class ResourceSystem; }
+namespace celestia::engine { class ResourceSystem; class HeightField; }
 class Observer;
 struct Surface;
 class Texture;
@@ -494,6 +495,10 @@ class Renderer
                       const LightingState&,
                       const Matrices&);
 
+    // Resolve (and cache) the CPU-side elevation map for a surface height texture,
+    // used to displace LODSphereMesh terrain. Returns nullptr when none/unloadable.
+    const celestia::engine::HeightField* getHeightField(celestia::util::TextureHandle);
+
     void renderPlanet(Body& body,
                       const Eigen::Vector3f& pos,
                       float distance,
@@ -797,8 +802,13 @@ class Renderer
     std::unique_ptr<celestia::render::SkyGridRenderer> m_skyGridRenderer;
 
     std::shared_ptr<celestia::engine::ResourceSystem> m_resourceSystem;
+    std::shared_ptr<const celestia::engine::TexturePaths> m_texturePaths;
     std::unique_ptr<celestia::engine::RenderGeometryManager> m_geometryManager;
     std::unique_ptr<celestia::engine::TextureManager> m_textureManager;
+    // CPU elevation maps for terrain, keyed by surface height-texture handle.
+    // A present-but-null entry records a failed load so it is not retried.
+    std::map<celestia::util::TextureHandle,
+             std::unique_ptr<celestia::engine::HeightField>> m_heightFields;
 
     // Location markers
  public:

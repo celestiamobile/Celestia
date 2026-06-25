@@ -53,6 +53,8 @@ set(CELENGINE_SOURCES
   glshader.h
   glsupport.cpp
   glsupport.h
+  heightfield.cpp
+  heightfield.h
   lightenv.h
   location.cpp
   location.h

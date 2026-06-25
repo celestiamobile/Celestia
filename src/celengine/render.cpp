@@ -26,6 +26,7 @@
 #include "glshader.h"
 #include "spheremesh.h"
 #include "lodspheremesh.h"
+#include "heightfield.h"
 #include "geometry.h"
 #include "resourcesystem.h"
 #include "texmanager.h"
@@ -410,6 +411,7 @@ bool Renderer::init(int winWidth, int winHeight,
                     std::shared_ptr<engine::ResourceSystem> resourceSystem)
 {
     m_resourceSystem = std::move(resourceSystem);
+    m_texturePaths = texturePaths;
     m_geometryManager = std::make_unique<RenderGeometryManager>(geometryManager, *m_resourceSystem);
     m_textureManager = std::make_unique<TextureManager>(texturePaths, resolution, *m_resourceSystem);
     detailOptions = _detailOptions;
@@ -517,6 +519,24 @@ TextureResolution Renderer::getResolution() const
     if (!m_textureManager)
         return TextureResolution::medres;
     return m_textureManager->resolution();
+}
+
+const engine::HeightField*
+Renderer::getHeightField(util::TextureHandle handle)
+{
+    if (handle == util::TextureHandle::Invalid || !m_texturePaths)
+        return nullptr;
+
+    if (auto it = m_heightFields.find(handle); it != m_heightFields.end())
+        return it->second.get();
+
+    std::unique_ptr<engine::HeightField> field;
+    if (engine::TextureInfo info; m_texturePaths->getInfo(handle, getResolution(), info))
+        field = engine::HeightField::load(info.path);
+
+    const engine::HeightField* result = field.get();
+    m_heightFields.emplace(handle, std::move(field));
+    return result;
 }
 
 void Renderer::enableSelectionPointer()
@@ -1932,7 +1952,8 @@ static void renderSphereUnlit(const RenderInfo& ri,
     r->setPipelineState(ps);
 
     lodSphere->render(LODSphereMesh::Normals, frustum, ri.eyePos_obj, ri.pixelSize,
-                      textures.data(), static_cast<int>(textures.size()), prog);
+                      textures.data(), static_cast<int>(textures.size()), prog,
+                      true, 1.0f, ri.heightField, ri.heightDispScale, ri.heightDispOffset);
 }
 
 
@@ -2347,6 +2368,19 @@ void Renderer::renderObject(const Vector3f& pos,
         ri.glossTex = m_textureManager->find(obj.surface->specularTexture);
     if (util::is_set(obj.surface->appearanceFlags, Surface::Flags::ApplyOverlay))
         ri.overlayTex = m_textureManager->find(obj.surface->overlayTexture);
+    if (util::is_set(obj.surface->appearanceFlags, Surface::Flags::ApplyHeightMap)
+        && obj.radius > 0.0f)
+    {
+        if (const engine::HeightField* hf = getHeightField(obj.surface->heightTexture); hf != nullptr)
+        {
+            // Convert the km elevation range to unit-sphere displacement (Radius is
+            // the datum); texel 0 -> minElevation, texel 1 -> maxElevation.
+            ri.heightField = hf;
+            ri.heightDispOffset = obj.surface->heightMinElevation / obj.radius;
+            ri.heightDispScale = (obj.surface->heightMaxElevation
+                                  - obj.surface->heightMinElevation) / obj.radius;
+        }
+    }
 
     // Scaling will be nonuniform for nonspherical planets. As long as the
     // deviation from spherical isn't too large, the nonuniform scale factor
