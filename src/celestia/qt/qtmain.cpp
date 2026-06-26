@@ -37,6 +37,7 @@
 #include "qtappwin.h"
 #include "qtcommandline.h"
 #include "qtgettext.h"
+#include "sentryintegration.h"
 #include "steamintegration.h"
 
 #ifdef ENABLE_NLS
@@ -60,6 +61,9 @@ bindTextDomainUTF8(const char* domainName, const QString& directory)
 int main(int argc, char *argv[])
 {
     using namespace celestia::qt;
+
+    initializeSentry();
+    struct SentryGuard { ~SentryGuard() { shutdownSentry(); } } sentryGuard;
 
     initializeSteam();
 

@@ -48,6 +48,8 @@ function(GetQtSources _var_name)
     qttourguide.h
     steamintegration.cpp
     steamintegration.h
+    sentryintegration.cpp
+    sentryintegration.h
     xbel.cpp
     xbel.h
   )
