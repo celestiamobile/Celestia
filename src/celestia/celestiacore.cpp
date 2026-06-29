@@ -1525,7 +1525,13 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         break;
 
     case '[':
-        if (!util::is_set(renderer->getRenderFlags(), RenderFlags::ShowAutoMag))
+        if (renderer->getStarStyle() == StarStyle::PointSpreadFunction)
+        {
+            renderer->setStarExposure(renderer->getStarExposure() / 1.1f);
+            auto buf = fmt::format(loc, fmt::runtime(_("Star exposure: {:.3f}")), renderer->getStarExposure());
+            flash(buf);
+        }
+        else if (!util::is_set(renderer->getRenderFlags(), RenderFlags::ShowAutoMag))
         {
             if (sim->getFaintestVisible() > 1.0f)
             {
@@ -1549,7 +1555,13 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         break;
 
     case ']':
-        if (!util::is_set(renderer->getRenderFlags(), RenderFlags::ShowAutoMag))
+        if (renderer->getStarStyle() == StarStyle::PointSpreadFunction)
+        {
+            renderer->setStarExposure(renderer->getStarExposure() * 1.1f);
+            auto buf = fmt::format(loc, fmt::runtime(_("Star exposure: {:.3f}")), renderer->getStarExposure());
+            flash(buf);
+        }
+        else if (!util::is_set(renderer->getRenderFlags(), RenderFlags::ShowAutoMag))
         {
             if (sim->getFaintestVisible() < 15.0f)
             {
