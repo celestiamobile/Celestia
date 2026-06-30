@@ -18,6 +18,7 @@
 #include <celestia/configfile.h>
 #include <celestia/progressnotifier.h>
 #include <celutil/gettext.h>
+#include <celutil/fsutils.h>
 #include <celutil/logger.h>
 
 namespace celestia
@@ -77,15 +78,16 @@ std::unique_ptr<StarDatabase>
 loadStars(const CelestiaConfig &config,
           ProgressNotifier *progressNotifier,
           engine::GeometryPaths& geometryPaths,
-          engine::TexturePaths& texturePaths)
+          engine::TexturePaths& texturePaths,
+          engine::UrlManager& urlManager)
 {
     // First load the binary star database file. The majority of stars
     // will be defined here.
-    StarDatabaseBuilder starDBBuilder{ geometryPaths, texturePaths };
+    StarDatabaseBuilder starDBBuilder{ geometryPaths, texturePaths, urlManager };
     if (auto &path = config.paths.starDatabaseFile; !path.empty())
     {
         if (progressNotifier)
-            progressNotifier->update(path.string());
+            progressNotifier->update(util::PathToString(path));
 
         if (std::ifstream starFile(path, std::ios::binary); starFile.good())
         {

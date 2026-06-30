@@ -8,6 +8,9 @@ on:
     branches: [ master ]
     paths: [ po/**, .github/workflows/translations.yml ]
 
+permissions:
+  contents: read
+
 jobs:
   gettext:
     strategy:
@@ -15,6 +18,7 @@ jobs:
       matrix:
         platform: [ ubuntu-latest ]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
     - name: 'Install dependencies'
       run: |
@@ -22,7 +26,7 @@ jobs:
         sudo apt-get install -y gettext
 
     - name: 'Checkout source code'
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: 'Validate translations'
       working-directory: ${{github.workspace}}/po

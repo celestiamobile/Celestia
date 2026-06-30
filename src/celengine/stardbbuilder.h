@@ -36,6 +36,7 @@ namespace engine
 {
 class GeometryPaths;
 class TexturePaths;
+class UrlManager;
 }
 namespace ephem
 {
@@ -52,7 +53,8 @@ class StarDatabaseBuilder
 {
 public:
     StarDatabaseBuilder(celestia::engine::GeometryPaths&,
-                        celestia::engine::TexturePaths&);
+                        celestia::engine::TexturePaths&,
+                        celestia::engine::UrlManager&);
     ~StarDatabaseBuilder();
 
     bool load(std::istream&,
@@ -67,22 +69,21 @@ public:
 
 private:
     bool createOrUpdateStar(const StcHeader&,
-                            const celestia::util::AssociativeArray*,
-                            Star*,
-                            const std::filesystem::path&);
+                            const celestia::util::AssociativeArray&,
+                            Star*);
     bool checkStcPosition(const StcHeader&,
-                          const celestia::util::AssociativeArray*,
+                          const celestia::util::AssociativeArray&,
                           const Star*,
                           std::optional<Eigen::Vector3f>&,
                           std::optional<AstroCatalog::IndexNumber>&,
                           std::shared_ptr<const celestia::ephem::Orbit>&) const;
     bool checkBarycenter(const StarDatabaseBuilder::StcHeader&,
-                         const celestia::util::AssociativeArray*,
+                         const celestia::util::AssociativeArray&,
                          std::optional<Eigen::Vector3f>&,
                          std::optional<AstroCatalog::IndexNumber>&) const;
 
     void loadCategories(const StarDatabaseBuilder::StcHeader&,
-                        const celestia::util::AssociativeArray* starData,
+                        const celestia::util::AssociativeArray& starData,
                         const std::string&);
     void addCategory(AstroCatalog::IndexNumber catalogNumber,
                      const std::string& name,
@@ -103,6 +104,8 @@ private:
     std::map<AstroCatalog::IndexNumber, Star*> stcFileCatalogNumberIndex;
     std::map<AstroCatalog::IndexNumber, AstroCatalog::IndexNumber> barycenters;
     std::multimap<AstroCatalog::IndexNumber, UserCategoryId> categories;
+    std::map<AstroCatalog::IndexNumber, std::string> infoUrls;
     celestia::engine::GeometryPaths* geometryPaths;
     celestia::engine::TexturePaths* texturePaths;
+    celestia::engine::UrlManager* urlManager;
 };

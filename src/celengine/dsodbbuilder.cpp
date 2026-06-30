@@ -22,6 +22,7 @@
 #include <celastro/astro.h>
 #include <celcompat/numbers.h>
 #include <celutil/associativearray.h>
+#include <celutil/fsutils.h>
 #include <celutil/logger.h>
 #include <celutil/gettext.h>
 #include <celutil/parser.h>
@@ -198,8 +199,9 @@ buildCatalogNumberIndex(const engine::DSOOctree& DSOs)
 
 } // end unnamed namespace
 
-DSODatabaseBuilder::DSODatabaseBuilder(engine::GeometryPaths& _geometryPaths) :
-    geometryPaths(&_geometryPaths)
+DSODatabaseBuilder::DSODatabaseBuilder(engine::GeometryPaths& _geometryPaths,
+                                       engine::UrlManager& _urlManager) :
+    geometryPaths(&_geometryPaths), urlManager(&_urlManager)
 {
 }
 
@@ -213,7 +215,7 @@ DSODatabaseBuilder::load(std::istream& in,
     util::Parser    parser(&tokenizer);
 
 #ifdef ENABLE_NLS
-    std::string s = resourcePath.string();
+    std::string s = util::PathToString(resourcePath);
     const char *d = s.c_str();
     bindtextdomain(d, d); // domain name is the same as resource path
 #endif
@@ -253,13 +255,13 @@ DSODatabaseBuilder::load(std::istream& in,
 
         std::unique_ptr<DeepSkyObject> obj = createDSO(objType);
 
-        if (obj == nullptr || !obj->load(objParams, resourcePath, *geometryPaths, objName))
+        if (obj == nullptr || !obj->load(objParams, resourcePath, *geometryPaths, objName, *urlManager))
         {
             GetLogger()->warn("Bad Deep Sky Object definition--will continue parsing file.\n");
             continue;
         }
 
-        UserCategory::loadCategories(obj.get(), *objParams, DataDisposition::Add, resourcePath.string());
+        UserCategory::loadCategories(obj.get(), *objParams, DataDisposition::Add, util::PathToString(resourcePath));
 
         if (nextAutoCatalogNumber == AstroCatalog::InvalidIndex)
         {
