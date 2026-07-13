@@ -2817,6 +2817,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
 
     renderer->colors = renderer->colors.linearize(gl::sRGBRendering);
     m_scriptMaps.initColorMaps(renderer->colors);
+    renderer->setToneMapping(config->renderDetails.toneMapping);
 
     if (util::is_set(renderer->getRenderFlags(), RenderFlags::ShowAutoMag))
     {

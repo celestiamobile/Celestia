@@ -537,4 +537,11 @@ StarTextures
 #------------------------------------------------------------------------
 # Exposure 1.0
 
+#------------------------------------------------------------------------
+# ToneMapping toggles the exponential tone-map in the sRGB post-process.
+# When false, HDR highlights hard-clip to white instead of rolling off.
+# Only takes effect when SRGBRendering is enabled. The default is false.
+#------------------------------------------------------------------------
+# ToneMapping true
+
 }

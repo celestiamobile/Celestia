@@ -23,6 +23,7 @@ in float v_alpha;
 in float v_peakRadiance;
 in float v_psfRadius;
 in float v_p04;
+in float v_limbRadius;   // resolved-body limb radius in unscaled px, 0 if none
 
 void main(void)
 {
@@ -46,11 +47,28 @@ void main(void)
     float val = pow(base * psfB, 2.5);
     val = min(val, v_peakRadiance);
 
-    // Clamp each channel of v_color * val to 1 BEFORE applying the
-    // fade alpha so the bleached-white centre of a colored (e.g.
-    // blue) star stays white through the fade, instead of reverting
-    // to its underlying tint once v_alpha drops the per-channel value
-    // back below saturation.
-    vec3 clampedColor = min(vec3(1.0), v_color * val);
-    fragColor = vec4(clampedColor * v_alpha, 1.0);
+    // Fade the glow toward the resolving disc.  Outside the geometric limb the
+    // halo fades linearly with v_alpha.  Inside the limb: first reshape the
+    // interior into a plateau (climb rapidly from the limb value to the peak
+    // just inside the limb, via kPsfCoreSharpness, so the disc reads as a
+    // flat-topped face rather than a centre peak); then crush that plateau
+    // steeply (v_alpha^10) so it collapses as the disc resolves, floored at the
+    // limb brightness (valLimb * v_alpha) so the interior is never dimmer than
+    // the (linearly-faded) limb ring.  Point sources (v_limbRadius == 0) keep
+    // the plain linear fade.
+    const float kPsfCoreSharpness = 8.0;
+    const float kPsfInteriorFadeExponent = 10.0;
+    float brightness = val * v_alpha;
+    if (v_limbRadius > 0.0 && px < v_limbRadius && v_peakRadiance > 1.0)
+    {
+        float baseL   = v_p04 / v_limbRadius - psfA;
+        float valLimb = min(pow(max(baseL, 0.0) * psfB, 2.5), v_peakRadiance);
+        float t = 1.0 - px / v_limbRadius;
+        t = pow(t, 1.0 / kPsfCoreSharpness);
+        float valPlateau = mix(valLimb, v_peakRadiance, t);
+        brightness = max(valPlateau * pow(v_alpha, kPsfInteriorFadeExponent),
+                         valLimb * v_alpha);
+    }
+
+    fragColor = vec4(v_color * brightness, 1.0);
 }

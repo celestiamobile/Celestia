@@ -95,6 +95,7 @@ struct CelestiaConfig
         std::vector<std::string> ignoreGLExtensions{ };
         bool sRGBRendering{ false };
         float exposure{ 1.0f };
+        bool toneMapping{ false };
         struct StarRendering
         {
             float pointRadius{ 1.5f };

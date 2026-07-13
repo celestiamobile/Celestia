@@ -19,6 +19,7 @@ layout(location = 2) in vec2  in_TexCoord0;   // quad UV in [0, 1]
 layout(location = 8) in vec3  in_Color;       // linear RGB
 layout(location = 9) in float in_Intensity;   // peak radiance
 layout(location = 13) in float in_Alpha;       // glow fade
+layout(location = 14) in float in_LimbRadius;  // resolved-body limb radius (px)
 
 uniform float psfA;             // optimization / pointRadius
 uniform float psfB;             // 1 / (pi/pointRadius - a)
@@ -33,6 +34,7 @@ out float v_alpha;
 out float v_peakRadiance;
 out float v_psfRadius;
 out float v_p04;
+out float v_limbRadius;   // resolved-body limb radius in unscaled px, 0 if none
 
 void main(void)
 {
@@ -40,6 +42,7 @@ void main(void)
     v_color        = in_Color;
     v_alpha        = in_Alpha;
     v_peakRadiance = in_Intensity;
+    v_limbRadius   = in_LimbRadius;
 
     float p04   = pow(in_Intensity, 0.4);
     float rFull = p04 / psfA;

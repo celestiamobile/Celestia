@@ -1771,9 +1771,6 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
     ps.depthTest = true;
     setPipelineState(ps);
 
-    const Vector3f &spritePos = position;
-    Vector3f frontPos = calculateQuadCenter(getCameraOrientationf(), spritePos, radius);
-
     float exposureFactor = std::max(starExposure, 1.0e-6f);
     float r              = std::max(starPointRadius, 1.0e-3f);
     float peakRadScale   = exposureFactor * 3.0f
@@ -1797,6 +1794,8 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
     Color linearStarColor = psfGreenNormalization(color, 0.1f, greenScale);
     float peakRadCol = peakRad * greenScale;
 
+    Eigen::Vector3f frontPos = calculateQuadCenter(getCameraOrientationf(), position, radius);
+
     // Suppress the cone-cap sprite once the body is resolved as a
     // mesh; the linked glow below handles the bloom around the disc.
     if (discSizeInPixels <= 1.0f)
@@ -1806,7 +1805,18 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
     // equals the body's angular disc.
     float a    = starOptimization / r;
     float invB = celestia::numbers::pi_v<float> / r - a;
-    float angR = discSizeInPixels / pointScale;
+
+    // Size the glow's flat core to the exact projected mesh limb radius
+    // radius / sqrt(distance^2 - radius^2) / pixelSize; discSizeInPixels is
+    // the small-angle approximation that undershoots the limb up close.
+    float limbDiscPixels = discSizeInPixels;
+    if (distance > radius)
+    {
+        double d2 = static_cast<double>(distance) * distance;
+        double r2 = static_cast<double>(radius) * radius;
+        limbDiscPixels = static_cast<float>(radius / (std::sqrt(d2 - r2) * pixelSize));
+    }
+    float angR = limbDiscPixels / pointScale;
     float linkedGlowPeak = std::pow(angR * (a + invB), 2.5f);
 
     // Gate on the irradiance-based peak so the linked term only
@@ -1851,11 +1861,11 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
         {
             // Oversize glow (typical for Sol at ~1 AU): hand it to the
             // batched billboard renderer.
-            m_psfGlowLargeRenderer->addStar(glowPos, linearStarColor, glowPeakToUse, alpha);
+            m_psfGlowLargeRenderer->addStar(glowPos, linearStarColor, glowPeakToUse, angR, alpha);
         }
         else
         {
-            psfGlowBuffer->addStar(glowPos, linearStarColor, glowPeakToUse, alpha);
+            psfGlowBuffer->addStar(glowPos, linearStarColor, glowPeakToUse, angR, alpha);
         }
     }
 }
@@ -4652,6 +4662,19 @@ void Renderer::setExposure(float e)
 float Renderer::getExposure() const
 {
     return exposure;
+}
+
+
+void Renderer::setToneMapping(bool enabled)
+{
+    toneMapping = enabled;
+    markSettingsChanged();
+}
+
+
+bool Renderer::getToneMapping() const
+{
+    return toneMapping;
 }
 
 

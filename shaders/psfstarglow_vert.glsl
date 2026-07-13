@@ -15,6 +15,7 @@ layout(location = 0) in vec4 in_Position;
 layout(location = 8) in vec3 in_Color;
 layout(location = 9) in float in_Intensity;
 layout(location = 13) in float in_Alpha;      // glow fade
+layout(location = 14) in float in_LimbRadius; // resolved-body limb radius (px)
 
 uniform float pointRadius;
 uniform float psfA;        // = optimization / pointRadius
@@ -30,6 +31,7 @@ out float v_peakRadiance;
 out float v_psfRadius;  // PSF cutoff radius in px (>0)
 out float v_p04;        // pow(peakRadiance, 0.4); needed because v_psfRadius
                         // is now the shrunken visibility radius, not p04/a.
+out float v_limbRadius; // resolved-body limb radius in unscaled px, 0 if none
 
 void main(void)
 {
@@ -57,6 +59,7 @@ void main(void)
 
     v_psfRadius = rEff;
     v_p04       = p04;
+    v_limbRadius = in_LimbRadius;
 
     gl_PointSize = 2.0 * rEff * pointScale;
     set_vp(in_Position);

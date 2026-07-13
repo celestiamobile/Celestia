@@ -301,6 +301,8 @@ class Renderer
     float getStarExposure() const;
     void  setExposure(float e);
     float getExposure() const;
+    void  setToneMapping(bool enabled);
+    bool  getToneMapping() const;
     void setResolution(celestia::engine::TextureResolution resolution);
     celestia::engine::TextureResolution getResolution() const;
     void enableSelectionPointer();
@@ -690,6 +692,7 @@ class Renderer
     float starDimClipFactor{ 10.0f };
     float starExposure{ 10.0f };
     float exposure{ 1.0f };
+    bool  toneMapping{ false };
 
     Color ambientColor;
     std::string displayedSurface;
