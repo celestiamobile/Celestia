@@ -702,11 +702,8 @@ ScatteringPhaseFunctions(const ShaderProperties& /*unused*/)
 
     // Evaluate the Mie and Rayleigh phase functions; both are functions of the cosine
     // of the angle between the view vector and light vector
-    source += "    float phMie = (1.0 - mieK * mieK) / ((1.0 - mieK * cosTheta) * (1.0 - mieK * cosTheta));\n";
-
-    // Ignore Rayleigh phase function and treat Rayleigh scattering as isotropic
-    // source += "    float phRayleigh = (1.0 + cosTheta * cosTheta);\n";
-    source += "    float phRayleigh = 1.0;\n";
+    source += "    float phMie = (1.0 - mieK * mieK) / ((1.0 + mieK * cosTheta) * (1.0 + mieK * cosTheta));\n";
+    source += "    float phRayleigh = 0.75 * (1.0 + cosTheta * cosTheta);\n";
 
     return source;
 }
@@ -1045,8 +1042,10 @@ float calculateShadow()
     source += fmt::format("    for (float y = {:f}; y <= {:f}; y += 1.0)\n", firstSample, lastSample);
     source += fmt::format("        for (float x = {:f}; x <= {:f}; x += 1.0)\n", firstSample, lastSample);
     // Modern GLSL hardware compare: returns single float (PCF result when
-    // GL_LINEAR filter + GL_COMPARE_REF_TO_TEXTURE).
-    source += "            s += texture(shadowMapTex0, shadowTexCoord0.xyz + vec3(x * texelSize, y * texelSize, bias));\n";
+    // GL_LINEAR filter + GL_COMPARE_REF_TO_TEXTURE). The bias is subtracted
+    // from the reference depth so a fragment stays lit when it is within
+    // bias of the stored depth, matching the acne-avoidance direction.
+    source += "            s += texture(shadowMapTex0, shadowTexCoord0.xyz + vec3(x * texelSize, y * texelSize, -bias));\n";
     source += fmt::format("    return s * {:f};\n", sampleWeight);
     source += "}\n";
     return source;
@@ -2218,7 +2217,7 @@ buildParticleVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
     {
         source += "    {\n";
         fmt::format_to(std::back_inserter(source), "         float cosTheta = dot({}, eyeDir);\n", LightProperty(i, "direction"));
-        source += "         float phMie = (1.0 - mieK * mieK) / ((1.0 - mieK * cosTheta) * (1.0 - mieK * cosTheta));\n";
+        source += "         float phMie = (1.0 - mieK * mieK) / ((1.0 + mieK * cosTheta) * (1.0 + mieK * cosTheta));\n";
         source += "         brightness += phMie;\n";
         source += "    }\n";
     }
