@@ -226,7 +226,10 @@ public:
                                     const Eigen::Quaternionf& orientation);
     void setAtmosphereParameters(const Atmosphere& atmosphere,
                                  float atmPlanetRadius,
-                                 float objRadius);
+                                 float objRadius,
+                                 float skySphereRadius,
+                                 unsigned int segmentCount,
+                                 float extinctionThreshold);
     void setMVPMatrices(const Eigen::Matrix4f& p, const Eigen::Matrix4f& m = Eigen::Matrix4f::Identity());
 
     enum
@@ -299,6 +302,8 @@ public:
     //    y = radius^2
     //    z = 1/radius
     Vec3ShaderParameter atmosphereRadius;
+    IntegerShaderParameter atmosphereSegmentCount;
+    FloatShaderParameter atmosphereExtinctionThreshold;
 
     // Scale factor for point sprites
     FloatShaderParameter pointScale;

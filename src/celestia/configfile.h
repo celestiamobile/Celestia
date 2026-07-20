@@ -94,6 +94,12 @@ struct CelestiaConfig
         unsigned int ShadowMapSize{ 0 };
         std::vector<std::string> ignoreGLExtensions{ };
         bool sRGBRendering{ false };
+        struct AtmosphereRendering
+        {
+            unsigned int segmentCount{ 3 };
+            float extinctionThreshold{ 0.05f };
+        };
+        AtmosphereRendering atmosphere{ };
         struct StarRendering
         {
             float pointRadius{ 1.5f };
