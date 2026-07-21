@@ -179,6 +179,12 @@ CelestiaGlWidget::initializeGL()
     appRenderer->setStarExposure(
         (float) settings.value("StarExposure",
                                appCore->getConfig()->renderDetails.stars.exposure).toDouble());
+    appRenderer->setExposure(
+        static_cast<float>(settings.value("Exposure",
+                                          appCore->getConfig()->renderDetails.output.exposure).toDouble()));
+    appRenderer->setToneMapping(
+        settings.value("ToneMapping",
+                       appCore->getConfig()->renderDetails.output.toneMapping).toBool());
 }
 
 void

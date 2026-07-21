@@ -2773,7 +2773,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
                                 std::optional<bool> sRGBRendering,
                                 [[maybe_unused]] bool useMesaPackInvert)
 {
-    gl::sRGBRendering = sRGBRendering.value_or(config->renderDetails.sRGBRendering);
+    gl::sRGBRendering = sRGBRendering.value_or(config->renderDetails.output.sRGB);
 
     if (gl::sRGBRendering)
     {
@@ -2819,6 +2819,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
 
     renderer->colors = renderer->colors.linearize(gl::sRGBRendering);
     m_scriptMaps.initColorMaps(renderer->colors);
+    renderer->setToneMapping(config->renderDetails.output.toneMapping);
 
     if (util::is_set(renderer->getRenderFlags(), RenderFlags::ShowAutoMag))
     {

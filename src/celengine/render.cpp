@@ -1797,9 +1797,6 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
     ps.depthTest = true;
     setPipelineState(ps);
 
-    const Vector3f &spritePos = position;
-    Vector3f frontPos = calculateQuadCenter(getCameraOrientationf(), spritePos, radius);
-
     float exposureFactor = std::max(starExposure, 1.0e-6f);
     float r              = std::max(starPointRadius, 1.0e-3f);
     float peakRadScale   = exposureFactor * 3.0f
@@ -1823,27 +1820,40 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
     Color linearStarColor = psfGreenNormalization(color, 0.1f, greenScale);
     float peakRadCol = peakRad * greenScale;
 
+    Eigen::Vector3f frontPos = calculateQuadCenter(getCameraOrientationf(), position, radius);
+
     // Suppress the cone-cap sprite once the body is resolved as a
     // mesh; the linked glow below handles the bloom around the disc.
     if (discSizeInPixels <= 1.0f)
         psfPointBuffer->addStar(frontPos, linearStarColor, peakRadCol);
-
-    // Peak radiance whose bloom radius (per the shader's PSF formula)
-    // equals the body's angular disc.
-    float a    = starOptimization / r;
-    float invB = celestia::numbers::pi_v<float> / r - a;
-    // Exact projected limb radius; discSizeInPixels undershoots up close.
-    float limbDiscPixels = discSizeInPixels;
-    if (distance > radius)
-        limbDiscPixels = radius / (std::sqrt(distance * distance - radius * radius) * pixelSize);
-    float angR = limbDiscPixels / pointScale;
-    float linkedGlowPeak = std::pow(angR * (a + invB), 2.5f);
 
     // Gate on the irradiance-based peak so the linked term only
     // enhances an already-firing glow, never starts one (keeps
     // reflective bodies with large angular radius from blooming).
     if (peakRadCol > 1.0f && starOptimization > 0.0f)
     {
+        // Peak radiance whose bloom radius (per the shader's PSF formula)
+        // equals the body's angular disc.
+        float a    = starOptimization / r;
+        float invB = celestia::numbers::pi_v<float> / r - a;
+        // Exact projected limb radius; discSizeInPixels undershoots up close.
+        float limbDiscPixels = discSizeInPixels;
+        float fadeLimbDiscPixels = limbDiscPixels;
+        if (distance > radius)
+        {
+            float limbAngularRadius = radius / std::sqrt(distance * distance - radius * radius);
+            limbDiscPixels = limbAngularRadius / pixelSize;
+
+            // The distance-fade derivation assumes that a growing projected limb
+            // means the observer moved closer. Camera zoom also grows the limb, so
+            // evaluate the fade at the projection's unit zoom instead.
+            fadeLimbDiscPixels = limbAngularRadius / projectionMode->getPixelSize(1.0f);
+        }
+        float angR = limbDiscPixels / pointScale;
+        float linkedGlowPeak = std::pow(angR * (a + invB), 2.5f);
+        float fadeAngR = fadeLimbDiscPixels / pointScale;
+        float fadeLinkedGlowPeak = std::pow(fadeAngR * (a + invB), 2.5f);
+
         float glowPeak = peakRadCol;
         if (starMaxIrradiance > 0.0f)
         {
@@ -1866,7 +1876,7 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
         // sprite vanishes smoothly as the disc takes over.  This is a
         // continuous distance-derived value, so pass it as a float to keep
         // the transition smooth.
-        float alpha = computePsfGlowAlpha(distance, radius, linkedGlowPeak, glowPeak);
+        float alpha = computePsfGlowAlpha(distance, radius, fadeLinkedGlowPeak, glowPeak);
         if (alpha <= 0.0f)
             return;
 
@@ -1881,11 +1891,11 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
         {
             // Oversize glow (typical for Sol at ~1 AU): hand it to the
             // batched billboard renderer.
-            m_psfGlowLargeRenderer->addStar(glowPos, linearStarColor, glowPeakToUse, alpha);
+            m_psfGlowLargeRenderer->addStar(glowPos, linearStarColor, glowPeakToUse, angR, alpha);
         }
         else
         {
-            psfGlowBuffer->addStar(glowPos, linearStarColor, glowPeakToUse, alpha);
+            psfGlowBuffer->addStar(glowPos, linearStarColor, glowPeakToUse, angR, alpha);
         }
     }
 }
@@ -4675,6 +4685,32 @@ void Renderer::setStarExposure(float e)
 float Renderer::getStarExposure() const
 {
     return starExposure;
+}
+
+
+void Renderer::setExposure(float e)
+{
+    exposure = std::clamp(e, 1.0e-3f, 1.0e6f);
+    markSettingsChanged();
+}
+
+
+float Renderer::getExposure() const
+{
+    return exposure;
+}
+
+
+void Renderer::setToneMapping(bool enabled)
+{
+    toneMapping = enabled;
+    markSettingsChanged();
+}
+
+
+bool Renderer::getToneMapping() const
+{
+    return toneMapping;
 }
 
 
