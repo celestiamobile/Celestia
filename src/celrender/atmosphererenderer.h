@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include <Eigen/Core>
@@ -34,6 +35,8 @@ class Frustum;
 
 namespace celestia::render
 {
+
+class MultipleScatteringLut;
 
 class AtmosphereRenderer
 {
@@ -67,6 +70,12 @@ public:
 
     void initGL();
 
+    bool bindMultipleScatteringLut(
+        const Atmosphere &atmosphere,
+        float             planetRadius,
+        float             atmosphereHeight,
+        unsigned int      textureUnit);
+
 private:
     void computeLegacy(
         const Atmosphere         &atmosphere,
@@ -99,6 +108,7 @@ private:
     std::vector<SkyContourPoint>  m_skyContour;
     gl::Buffer                    m_bo;
     gl::VertexObject              m_vo;
+    std::unique_ptr<MultipleScatteringLut> m_multipleScatteringLut;
     bool                          m_initialized{ false };
 };
 

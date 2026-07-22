@@ -9,6 +9,7 @@
 // of the License, or (at your option) any later version.
 
 #include "atmosphererenderer.h"
+#include "multiplescatteringlut.h"
 
 #include <algorithm>
 #include <cmath>
@@ -45,11 +46,23 @@ constexpr int MaxIndices = IndexListCapacity(MaxSkySlices,  MaxSkyRings + 1);
 } // end unnamed namespace
 
 AtmosphereRenderer::AtmosphereRenderer(Renderer &renderer) :
-    m_renderer(renderer)
+    m_renderer(renderer),
+    m_multipleScatteringLut(std::make_unique<MultipleScatteringLut>())
 {
 }
 
 AtmosphereRenderer::~AtmosphereRenderer() = default;
+
+bool
+AtmosphereRenderer::bindMultipleScatteringLut(
+    const Atmosphere &atmosphere,
+    float             planetRadius,
+    float             atmosphereHeight,
+    unsigned int      textureUnit)
+{
+    return m_multipleScatteringLut->bind(atmosphere, planetRadius,
+                                         atmosphereHeight, textureUnit);
+}
 
 void AtmosphereRenderer::initGL()
 {
@@ -351,6 +364,8 @@ AtmosphereRenderer::render(
     shadprop.nLights = static_cast<ushort>(ls.nLights);
 
     shadprop.texUsage |= TexUsage::Scattering;
+    if (atmosphere.normalizedPhaseFunctions)
+        shadprop.texUsage |= TexUsage::NormalizedPhase;
     shadprop.lightModel = LightingModel::AtmosphereModel;
 
     bool useDualSource = false;
@@ -367,6 +382,16 @@ AtmosphereRenderer::render(
     transmissionProps.nLights = 0;
     transmissionProps.effects = LightingEffects::AtmosphereTransmission;
 
+    float extinctionThreshold = m_renderer.getAtmosphereExtinctionThreshold();
+    float atmosphereHeight =
+        m_renderer.getAtmosphereShellHeight(atmosphere.mieScaleHeight);
+    float atmosphereRadius = radius + atmosphereHeight;
+    if (ls.nLights > 0 &&
+        bindMultipleScatteringLut(atmosphere, radius, atmosphereHeight, 0))
+    {
+        shadprop.texUsage |= TexUsage::MultipleScattering;
+    }
+
     if (useDualSource)
         shadprop.effects = LightingEffects::AtmosphereDualSource;
 
@@ -380,9 +405,6 @@ AtmosphereRenderer::render(
         (ls.nLights > 0 && scatteringProg == nullptr))
         return;
 
-    float extinctionThreshold = m_renderer.getAtmosphereExtinctionThreshold();
-    float atmosphereRadius = radius +
-                             m_renderer.getAtmosphereShellHeight(atmosphere.mieScaleHeight);
     float atmScale = atmosphereRadius / radius;
 
     auto setupAtmosphereProgram = [&](CelestiaGLProgram* prog)
@@ -390,7 +412,7 @@ AtmosphereRenderer::render(
         prog->use();
         prog->eyePosition = ls.eyePos_obj / atmScale;
         prog->setAtmosphereParameters(atmosphere, radius, atmosphereRadius, atmosphereRadius,
-                                      m_renderer.getAtmosphereSegmentCount(),
+                                      m_renderer.getAtmosphereSegmentCount(atmosphere),
                                       extinctionThreshold);
         prog->setMVPMatrices(*m.projection, (*m.modelview) * math::scale(atmScale));
     };

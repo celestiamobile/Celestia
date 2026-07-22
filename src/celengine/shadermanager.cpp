@@ -528,13 +528,10 @@ AddDirectionalLightContrib(unsigned int i, const ShaderProperties& props)
     }
     else if (props.effects == LightingEffects::CloudLighting)
     {
-        // GPU Gems, Chapter 16.2, "Simple Scattering Approximations":
-        // https://developer.nvidia.com/gpugems/gpugems/part-iii-materials/chapter-16-real-time-approximations-subsurface-scattering
         std::string sunCos = IndexedParameter("cloudSunCos", i);
         std::string twilight = IndexedParameter("cloudTwilight", i);
         source += "float " + sunCos + " = dot(N, " + LightProperty(i, "direction") + ");\n";
-        source += "float " + twilight + " = max(0.0, (" + sunCos
-                  + " + cloudHorizon) / (1.0 + cloudHorizon));\n";
+        source += "float " + twilight + " = max(0.0, " + sunCos + ");\n";
         source += "NL = " + twilight + ";\n";
     }
     else
@@ -710,14 +707,22 @@ ShadowsForLightSource(const ShaderProperties& props, unsigned int light)
 
 
 std::string
-ScatteringPhaseFunctions(const ShaderProperties& /*unused*/)
+ScatteringPhaseFunctions(const ShaderProperties& props)
 {
     std::string source;
 
     // Evaluate the Mie and Rayleigh phase functions; both are functions of the cosine
     // of the angle between the view vector and light vector
-    source += "    float phMie = (1.0 - mieK * mieK) / ((1.0 + mieK * cosTheta) * (1.0 + mieK * cosTheta));\n";
-    source += "    float phRayleigh = 0.75 * (1.0 + cosTheta * cosTheta);\n";
+    if (util::is_set(props.texUsage, TexUsage::NormalizedPhase))
+    {
+        source += "    float phMie = 0.07957747 * (1.0 - mieK * mieK) / ((1.0 + mieK * cosTheta) * (1.0 + mieK * cosTheta));\n";
+        source += "    float phRayleigh = 0.05968310 * (1.0 + cosTheta * cosTheta);\n";
+    }
+    else
+    {
+        source += "    float phMie = (1.0 - mieK * mieK) / ((1.0 + mieK * cosTheta) * (1.0 + mieK * cosTheta));\n";
+        source += "    float phRayleigh = 0.75 * (1.0 + cosTheta * cosTheta);\n";
+    }
 
     return source;
 }
@@ -770,6 +775,8 @@ AtmosphericEffects(const ShaderProperties& props)
     source += "    vec3 segmentStart = atmEnter;\n";
     source += "    float odAtm = 0.0;\n";
     source += "    vec3 scatteredLight = vec3(0.0);\n";
+    if (util::is_set(props.texUsage, TexUsage::MultipleScattering))
+        source += "    vec3 multipleScatteredLight = vec3(0.0);\n";
     source += "    float planetRadiusSq = atmosphereRadius.z * atmosphereRadius.z;\n";
     source += "    float shadowAngularWidth = min(0.2, sqrt(2.0 / (atmosphereRadius.z * mieH)));\n";
     source += "    float shadowWidth = (atmosphereRadius.x + atmosphereRadius.z) * 0.5 * shadowAngularWidth;\n";
@@ -801,6 +808,11 @@ AtmosphericEffects(const ShaderProperties& props)
     source += "        vec3 atmSamplePointSun = segmentStart + atmStep * 0.5;\n";
     source += "        rq = dot(atmSamplePointSun, " + LightProperty(0, "direction") + ");\n";
     source += "        float sampleRadiusSq = dot(atmSamplePointSun, atmSamplePointSun);\n";
+    source += "        vec3 segmentTau = extinctionCoeff * segmentDepth;\n";
+    source += "        vec3 segmentIntegral = (vec3(1.0) - exp(-segmentTau)) / max(extinctionCoeff, vec3(1.0e-18));\n";
+    source += "        vec3 thinIntegral = segmentDepth * (vec3(1.0) - segmentTau * 0.5 + segmentTau * segmentTau * (1.0 / 6.0));\n";
+    source += "        vec3 thinMask = vec3(1.0) - step(vec3(1.0e-3), segmentTau);\n";
+    source += "        segmentIntegral = mix(segmentIntegral, thinIntegral, thinMask);\n";
     source += "        float horizonDistance = sqrt(max(0.0, sampleRadiusSq - planetRadiusSq));\n";
     source += "        float sunVisibility = smoothstep(-shadowWidth, shadowWidth, rq + horizonDistance);\n";
     source += "        if (sunVisibility > 0.0)\n";
@@ -811,14 +823,19 @@ AtmosphericEffects(const ShaderProperties& props)
     source += "            float sampleMu = rq / sampleRadius;\n";
     source += "            float boundaryMu = d / atmosphereRadius.x;\n";
     source += "            float odSun = max(0.0, chapmanToSpace(sampleRadius, sampleMu) - chapmanFromAtmosphereBoundary(boundaryMu, atmosphereBoundaryGrazing));\n";
-    source += "            vec3 segmentTau = extinctionCoeff * segmentDepth;\n";
-    source += "            vec3 segmentIntegral = (vec3(1.0) - exp(-segmentTau)) / max(extinctionCoeff, vec3(1.0e-18));\n";
-    source += "            vec3 thinIntegral = segmentDepth * (vec3(1.0) - segmentTau * 0.5 + segmentTau * segmentTau * (1.0 / 6.0));\n";
-    source += "            vec3 thinMask = vec3(1.0) - step(vec3(1.0e-3), segmentTau);\n";
-    source += "            segmentIntegral = mix(segmentIntegral, thinIntegral, thinMask);\n";
     source += "            vec3 sampleTransmittance = exp(-extinctionCoeff * (odAtm + odSun));\n";
     source += "            scatteredLight += sampleTransmittance * (segmentIntegral * sunVisibility);\n";
     source += "        }\n";
+    if (util::is_set(props.texUsage, TexUsage::MultipleScattering))
+    {
+        source += "        float sampleRadius = sqrt(sampleRadiusSq);\n";
+        source += "        float sunMu = rq / sampleRadius;\n";
+        source += "        vec2 multipleScatteringUv = vec2(sunMu * 0.5 + 0.5, (sampleRadius - atmosphereRadius.z) / (atmosphereRadius.x - atmosphereRadius.z));\n";
+        source += "        multipleScatteringUv = (clamp(multipleScatteringUv, vec2(0.0), vec2(1.0)) * 31.0 + 0.5) / 32.0;\n";
+        source += "        vec3 multipleScattering = texture(multipleScatteringTex, multipleScatteringUv).rgb;\n";
+        source += "        vec3 viewTransmittance = exp(-extinctionCoeff * odAtm);\n";
+        source += "        multipleScatteredLight += viewTransmittance * segmentIntegral * multipleScattering;\n";
+    }
     source += "        odAtm += segmentDepth;\n";
     source += "        segmentStart += atmStep;\n";
     source += "        viewStartRadiusSq = viewEndRadiusSq;\n";
@@ -826,6 +843,11 @@ AtmosphericEffects(const ShaderProperties& props)
     source += "    }\n";
     source += "    vec3 ex = exp(-extinctionCoeff * odAtm);\n";
     source += "    vec3 integratedLight = " + LightProperty(0, "color") + " * scatteredLight;\n";
+    if (util::is_set(props.texUsage, TexUsage::MultipleScattering))
+    {
+        source += "    vec3 multipleIntegratedLight = " + LightProperty(0, "color") +
+                  " * (rayleighCoeff + vec3(mieCoeff)) * multipleScatteredLight;\n";
+    }
 
     // If we're rendering the sky dome, compute the phase functions in the fragment shader
     // rather than the vertex shader in order to avoid artifacts from coarse tessellation.
@@ -833,6 +855,8 @@ AtmosphericEffects(const ShaderProperties& props)
     {
         source += "    scatterEx = ex;\n";
         source += "    " + ScatteredColor(0) + " = integratedLight;\n";
+        if (util::is_set(props.texUsage, TexUsage::MultipleScattering))
+            source += "    multipleScatteredColor = multipleIntegratedLight;\n";
     }
     else
     {
@@ -840,6 +864,8 @@ AtmosphericEffects(const ShaderProperties& props)
         source += ScatteringPhaseFunctions(props);
         source += "    scatterEx = ex;\n";
         source += "    scatterColor = (phRayleigh * rayleighCoeff + phMie * mieCoeff) * integratedLight;\n";
+        if (util::is_set(props.texUsage, TexUsage::MultipleScattering))
+            source += "    scatterColor += multipleIntegratedLight;\n";
     }
 
     // Optional exposure control
@@ -932,6 +958,11 @@ TextureSamplerDeclarations(const ShaderProperties& props)
     if (util::is_set(props.texUsage, TexUsage::ShadowMapTexture))
     {
         source += DeclareUniform("shadowMapTex0", Shader_Sampler2DShadow);
+    }
+
+    if (util::is_set(props.texUsage, TexUsage::MultipleScattering))
+    {
+        source += DeclareUniform("multipleScatteringTex", Shader_Sampler2D);
     }
 
     return source;
@@ -1761,6 +1792,17 @@ buildFragmentShader(const ShaderProperties& props)
         source += "fragColor = color * diff;\n";
     }
 
+    if (props.effects == LightingEffects::CloudLighting &&
+        util::is_set(props.texUsage, TexUsage::MultipleScattering))
+    {
+        source += "float cloudSunMu = dot(nposition, " + LightProperty(0, "direction") + ");\n";
+        source += "vec2 cloudMultipleScatteringUv = vec2(cloudSunMu * 0.5 + 0.5, (1.0 - atmosphereRadius.z) / (atmosphereRadius.x - atmosphereRadius.z));\n";
+        source += "cloudMultipleScatteringUv = (clamp(cloudMultipleScatteringUv, vec2(0.0), vec2(1.0)) * 31.0 + 0.5) / 32.0;\n";
+        source += "vec3 cloudMultipleScattering = texture(multipleScatteringTex, cloudMultipleScatteringUv).rgb;\n";
+        source += "fragColor.rgb += color.rgb * " + LightProperty(0, "color") +
+                  " * cloudMultipleScattering;\n";
+    }
+
     if (util::is_set(props.texUsage, TexUsage::NightTexture))
     {
         if (useSeparateDiffuse)
@@ -2033,6 +2075,7 @@ buildAtmosphereFragmentShader(const ShaderProperties& props)
     source += DeclareLights(props);
     source += DeclareUniform("eyePosition", Shader_Vector3);
     source += ScatteringConstantDeclarations(props);
+    source += TextureSamplerDeclarations(props);
 
     source += DeclareInput("position", Shader_Vector3);
     source += DeclareInput("normal", Shader_Vector3);
@@ -2059,6 +2102,8 @@ buildAtmosphereFragmentShader(const ShaderProperties& props)
     else
     {
         source += DeclareLocal("NL", Shader_Float);
+        if (util::is_set(props.texUsage, TexUsage::MultipleScattering))
+            source += DeclareLocal("multipleScatteredColor", Shader_Vector3);
         source += AtmosphericEffects(props);
 
         // Sum the contributions from each light source, currently only the primary one.
@@ -2069,6 +2114,8 @@ buildAtmosphereFragmentShader(const ShaderProperties& props)
             source += ScatteringPhaseFunctions(props);
             source += "    color += (phRayleigh * rayleighCoeff + phMie * mieCoeff) * " + ScatteredColor(i) + ";\n";
         }
+        if (util::is_set(props.texUsage, TexUsage::MultipleScattering))
+            source += "    color += multipleScatteredColor;\n";
         source += "    fragColor = vec4(color, 0.0);\n";
         if (dualSource)
             source += "    atmosphereTransmission = vec4(scatterEx, 1.0);\n";
@@ -3013,6 +3060,13 @@ CelestiaGLProgram::initSamplers()
     if (util::is_set(props.texUsage, TexUsage::ShadowMapTexture))
     {
         if (GLint slot = glGetUniformLocation(program.getID(), "shadowMapTex0"); slot != -1)
+            glUniform1i(slot, nSamplers);
+        nSamplers++;
+    }
+
+    if (util::is_set(props.texUsage, TexUsage::MultipleScattering))
+    {
+        if (GLint slot = glGetUniformLocation(program.getID(), "multipleScatteringTex"); slot != -1)
             glUniform1i(slot, nSamplers);
     }
 }

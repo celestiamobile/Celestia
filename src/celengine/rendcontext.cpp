@@ -383,12 +383,24 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
     {
         // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
         if (atmosphere->mieScaleHeight > 0.0f)
+        {
             shaderProps.texUsage |= TexUsage::Scattering;
+            if (atmosphere->normalizedPhaseFunctions)
+                shaderProps.texUsage |= TexUsage::NormalizedPhase;
+        }
     }
 
     bool hasShadowMap = shadowMap != 0 && shadowMapWidth != 0 && lightMatrix != nullptr;
     if (hasShadowMap)
         shaderProps.texUsage |= TexUsage::ShadowMapTexture;
+
+    if (atmosphere != nullptr && shaderProps.hasScattering() &&
+        renderer->bindAtmosphereMultipleScatteringLut(
+            *atmosphere, objRadius,
+            nTextures + (hasShadowMap ? 1u : 0u)))
+    {
+        shaderProps.texUsage |= TexUsage::MultipleScattering;
+    }
 
     // Get a shader for the current rendering configuration
     assert(renderer != nullptr);
@@ -448,7 +460,7 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
         float atmosphereRadius = objRadius +
                                  renderer->getAtmosphereShellHeight(atmosphere->mieScaleHeight);
         prog->setAtmosphereParameters(*atmosphere, objRadius, objRadius, atmosphereRadius,
-                                      renderer->getAtmosphereSegmentCount(),
+                                      renderer->getAtmosphereSegmentCount(*atmosphere),
                                       extinctionThreshold);
         disableDepthWriteOnBlend = false;
     }

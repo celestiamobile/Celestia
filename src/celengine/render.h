@@ -219,8 +219,12 @@ class Renderer
     void setSolarSystemMaxDistance(float);
     void setShadowMapSize(unsigned);
     unsigned int getAtmosphereSegmentCount() const noexcept;
+    unsigned int getAtmosphereSegmentCount(const Atmosphere& atmosphere) const noexcept;
     float getAtmosphereExtinctionThreshold() const noexcept;
     float getAtmosphereShellHeight(float scaleHeight) const noexcept;
+    bool bindAtmosphereMultipleScatteringLut(const Atmosphere& atmosphere,
+                                             float planetRadius,
+                                             unsigned int textureUnit);
 
     bool captureFrame(int, int, int, int, celestia::engine::PixelFormat format, unsigned char*) const;
 

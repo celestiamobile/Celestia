@@ -224,7 +224,11 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
             // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
             // ... but don't show atmospheres when there are no light sources.
             if (atmosphere->mieScaleHeight > 0.0f && shadprop.nLights > 0)
+            {
                 shadprop.texUsage |= TexUsage::Scattering;
+                if (atmosphere->normalizedPhaseFunctions)
+                    shadprop.texUsage |= TexUsage::NormalizedPhase;
+            }
         }
 
         if (util::is_set(renderFlags, RenderFlags::ShowCloudMaps) &&
@@ -322,6 +326,15 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
     }
 
 
+    if (atmosphere != nullptr && shadprop.hasScattering() &&
+        renderer->bindAtmosphereMultipleScatteringLut(
+            *atmosphere, radius,
+            static_cast<unsigned int>(textures.size()) +
+                (util::is_set(shadprop.texUsage, TexUsage::RingShadowTexture) ? 1u : 0u)))
+    {
+        shadprop.texUsage |= TexUsage::MultipleScattering;
+    }
+
     // Get a shader for the current rendering configuration
     CelestiaGLProgram* prog = renderer->getShaderManager().getShader(shadprop);
     if (prog == nullptr)
@@ -367,7 +380,7 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
             float atmosphereRadius = radius +
                                      renderer->getAtmosphereShellHeight(atmosphere->mieScaleHeight);
             prog->setAtmosphereParameters(*atmosphere, radius, radius, atmosphereRadius,
-                                          renderer->getAtmosphereSegmentCount(),
+                                          renderer->getAtmosphereSegmentCount(*atmosphere),
                                           extinctionThreshold);
         }
     }
@@ -602,7 +615,11 @@ void renderClouds_GLSL(const RenderInfo& ri,
         // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
         // ... but don't show atmospheres when there are no light sources.
         if (atmosphere->mieScaleHeight > 0.0f && shadprop.nLights > 0)
+        {
             shadprop.texUsage |= TexUsage::Scattering;
+            if (atmosphere->normalizedPhaseFunctions)
+                shadprop.texUsage |= TexUsage::NormalizedPhase;
+        }
     }
 
     // Set the shadow information.
@@ -614,6 +631,15 @@ void renderClouds_GLSL(const RenderInfo& ri,
                                              static_cast<unsigned int>(ls.shadows[li]->size()));
             shadprop.setEclipseShadowCountForLight(li, nShadows);
         }
+    }
+
+    if (atmosphere != nullptr && shadprop.hasScattering() &&
+        renderer->bindAtmosphereMultipleScatteringLut(
+            *atmosphere, radius,
+            static_cast<unsigned int>(textures.size()) +
+                (util::is_set(shadprop.texUsage, TexUsage::RingShadowTexture) ? 1u : 0u)))
+    {
+        shadprop.texUsage |= TexUsage::MultipleScattering;
     }
 
     // Get a shader for the current rendering configuration
@@ -643,7 +669,7 @@ void renderClouds_GLSL(const RenderInfo& ri,
             float atmosphereRadius = radius +
                                      renderer->getAtmosphereShellHeight(atmosphere->mieScaleHeight);
             prog->setAtmosphereParameters(*atmosphere, radius, cloudRadius, atmosphereRadius,
-                                          renderer->getAtmosphereSegmentCount(),
+                                          renderer->getAtmosphereSegmentCount(*atmosphere),
                                           extinctionThreshold);
         }
     }

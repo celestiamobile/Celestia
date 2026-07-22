@@ -4806,6 +4806,14 @@ Renderer::getAtmosphereSegmentCount() const noexcept
     return atmosphereSegmentCount;
 }
 
+unsigned int
+Renderer::getAtmosphereSegmentCount(const Atmosphere& atmosphere) const noexcept
+{
+    return atmosphere.normalizedPhaseFunctions
+        ? std::max(atmosphereSegmentCount, 32u)
+        : atmosphereSegmentCount;
+}
+
 float
 Renderer::getAtmosphereExtinctionThreshold() const noexcept
 {
@@ -4816,6 +4824,16 @@ float
 Renderer::getAtmosphereShellHeight(float scaleHeight) const noexcept
 {
     return scaleHeight * atmosphereExtinctionFactor;
+}
+
+bool
+Renderer::bindAtmosphereMultipleScatteringLut(const Atmosphere& atmosphere,
+                                              float planetRadius,
+                                              unsigned int textureUnit)
+{
+    return m_atmosphereRenderer->bindMultipleScatteringLut(
+        atmosphere, planetRadius,
+        getAtmosphereShellHeight(atmosphere.mieScaleHeight), textureUnit);
 }
 
 void Renderer::getViewport(int* x, int* y, int* w, int* h) const

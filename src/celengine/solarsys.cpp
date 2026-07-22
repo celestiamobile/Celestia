@@ -738,6 +738,11 @@ void ReadAtmosphere(Body* body,
         GetLogger()->warn("Deprecated parameter MieAsymmetry used in {} definition.\nUse MieHGAnisotropy instead.\n", body->getName());
         atmosphere->miePhaseAsymmetry = -*miePhaseAsymmetry; // invert sign to address established usage
     }
+    if (auto normalizedPhaseFunctions = atmosData.getBoolean("NormalizedPhaseFunctions");
+        normalizedPhaseFunctions.has_value())
+    {
+        atmosphere->normalizedPhaseFunctions = *normalizedPhaseFunctions;
+    }
     if (auto rayleighCoeff = atmosData.getVector3<float>("Rayleigh"); rayleighCoeff.has_value())
         atmosphere->rayleighCoeff = *rayleighCoeff;
     //atmosData->getNumber("RayleighScaleHeight", atmosphere->rayleighScaleHeight);

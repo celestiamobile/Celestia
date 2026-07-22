@@ -31,6 +31,7 @@ struct Atmosphere
     float mieCoeff{ 0.0f };
     float mieScaleHeight{ 0.0f };
     float miePhaseAsymmetry{ 0.0f };
+    bool normalizedPhaseFunctions{ false };
     Eigen::Vector3f rayleighCoeff{ Eigen::Vector3f::Zero() };
     float rayleighScaleHeight{ 0.0f };
     Eigen::Vector3f absorptionCoeff{ Eigen::Vector3f::Zero() };
