@@ -526,6 +526,17 @@ AddDirectionalLightContrib(unsigned int i, const ShaderProperties& props)
         // unaffected by light direction except when considering shadows.
         source += "NL = 1.0;\n";
     }
+    else if (props.effects == LightingEffects::CloudLighting)
+    {
+        // GPU Gems, Chapter 16.2, "Simple Scattering Approximations":
+        // https://developer.nvidia.com/gpugems/gpugems/part-iii-materials/chapter-16-real-time-approximations-subsurface-scattering
+        std::string sunCos = IndexedParameter("cloudSunCos", i);
+        std::string twilight = IndexedParameter("cloudTwilight", i);
+        source += "float " + sunCos + " = dot(N, " + LightProperty(i, "direction") + ");\n";
+        source += "float " + twilight + " = max(0.0, (" + sunCos
+                  + " + cloudHorizon) / (1.0 + cloudHorizon));\n";
+        source += "NL = " + twilight + ";\n";
+    }
     else
     {
         source += "NL = max(0.0, dot(N, " + LightProperty(i, "direction") + "));\n";
@@ -837,6 +848,28 @@ AtmosphericEffects(const ShaderProperties& props)
     source += "}\n";
 
     return source;
+}
+
+
+std::string
+AtmosphericTransmission()
+{
+    return R"glsl({
+    float rq = dot(eyePosition, eyeDir);
+    float qq = dot(eyePosition, eyePosition) - atmosphereRadius.y;
+    float d = sqrt(max(rq * rq - qq, 0.0));
+    vec3 atmEnter = eyePosition + min(0.0, -rq + d) * eyeDir;
+    vec3 viewDirection = -eyeDir;
+    float enterRadius = max(length(atmEnter), 1.0e-6);
+    float leaveRadius = max(length(nposition), 1.0e-6);
+    float enterColumn = chapmanToSpace(enterRadius,
+                                       dot(atmEnter, viewDirection) / enterRadius);
+    float leaveColumn = chapmanToSpace(leaveRadius,
+                                       dot(nposition, viewDirection) / leaveRadius);
+    float opticalDepth = max(0.0, enterColumn - leaveColumn);
+    scatterEx = exp(-extinctionCoeff * opticalDepth);
+}
+)glsl";
 }
 
 
@@ -1424,6 +1457,9 @@ buildFragmentShader(const ShaderProperties& props)
     if (util::is_set(props.lightModel, LightingModel::LunarLambertModel))
         source += DeclareUniform("lunarLambert", Shader_Float);
 
+    if (props.effects == LightingEffects::CloudLighting)
+        source += DeclareUniform("cloudHorizon", Shader_Float);
+
     if (props.lightModel != LightingModel::ParticleDiffuseModel)
         source += DeclareInput("normal", Shader_Vector3);
 
@@ -1630,6 +1666,8 @@ buildFragmentShader(const ShaderProperties& props)
             {
                 source += "l = max(0.0, dot(" + LightDir_tan(i) + ", n)) * clamp(" + LightDir_tan(i) + ".z * 8.0, 0.0, 1.0);\n";
             }
+            if (props.effects == LightingEffects::CloudLighting)
+                source += "l = max(l, " + IndexedParameter("cloudTwilight", i) + ");\n";
 
             if (util::is_set(props.texUsage, TexUsage::NightTexture))
                 source += "totalLight += l * " + LightProperty(i, "brightness") + ";\n";
@@ -1977,9 +2015,20 @@ buildAtmosphereVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
 GLFragmentShader
 buildAtmosphereFragmentShader(const ShaderProperties& props)
 {
+    bool transmissionOnly =
+        props.effects == LightingEffects::AtmosphereTransmission;
+    bool dualSource =
+        props.effects == LightingEffects::AtmosphereDualSource;
+
     std::string source(VersionHeader);
+#ifdef GL_ES
+    if (dualSource)
+        source += "#extension GL_EXT_blend_func_extended : require\n";
+#endif
     source += CommonHeader;
     source += FragmentHeader;
+    if (dualSource)
+        source += DeclareOutput("atmosphereTransmission", Shader_Vector4);
 
     source += DeclareLights(props);
     source += DeclareUniform("eyePosition", Shader_Vector3);
@@ -1988,8 +2037,11 @@ buildAtmosphereFragmentShader(const ShaderProperties& props)
     source += DeclareInput("position", Shader_Vector3);
     source += DeclareInput("normal", Shader_Vector3);
 
-    for (unsigned i = 0; i < props.nLights; i++)
-        source += DeclareLocal(ScatteredColor(i), Shader_Vector3);
+    if (!transmissionOnly)
+    {
+        for (unsigned i = 0; i < props.nLights; i++)
+            source += DeclareLocal(ScatteredColor(i), Shader_Vector3);
+    }
 
     source += "\nvoid main(void)\n{\n";
 
@@ -1998,25 +2050,29 @@ buildAtmosphereFragmentShader(const ShaderProperties& props)
     source += "vec3 eyeDir = normalize(eyePosition - nposition);\n";
     source += "float NV = dot(N, eyeDir);\n";
 
-    source += DeclareLocal("NL", Shader_Float);
     source += DeclareLocal("scatterEx", Shader_Vector3);
-    source += AtmosphericEffects(props);
-
-    // Sum the contributions from each light source
-    source += "vec3 color = vec3(0.0);\n";
-
-    // Only do scattering calculations for the primary light source
-    // TODO: Eventually handle multiple light sources, and removed the 'min'
-    // from the line below.
-    for (unsigned i = 0; i < std::min(static_cast<unsigned int>(props.nLights), 1u); i++)
+    if (transmissionOnly)
     {
-        source += "    float cosTheta = dot(eyeDir, " + LightProperty(i, "direction") + ");\n";
-        source += ScatteringPhaseFunctions(props);
-
-        source += "    color += (phRayleigh * rayleighCoeff + phMie * mieCoeff) * " + ScatteredColor(i) + ";\n";
+        source += AtmosphericTransmission();
+        source += "    fragColor = vec4(scatterEx, 1.0);\n";
     }
+    else
+    {
+        source += DeclareLocal("NL", Shader_Float);
+        source += AtmosphericEffects(props);
 
-    source += "    fragColor = vec4(color, dot(scatterEx, vec3(0.333)));\n";
+        // Sum the contributions from each light source, currently only the primary one.
+        source += "vec3 color = vec3(0.0);\n";
+        for (unsigned i = 0; i < std::min(static_cast<unsigned int>(props.nLights), 1u); i++)
+        {
+            source += "    float cosTheta = dot(eyeDir, " + LightProperty(i, "direction") + ");\n";
+            source += ScatteringPhaseFunctions(props);
+            source += "    color += (phRayleigh * rayleighCoeff + phMie * mieCoeff) * " + ScatteredColor(i) + ";\n";
+        }
+        source += "    fragColor = vec4(color, 0.0);\n";
+        if (dualSource)
+            source += "    atmosphereTransmission = vec4(scatterEx, 1.0);\n";
+    }
     source += "}\n";
 
     DumpFSSource(source);
@@ -2324,6 +2380,11 @@ buildProgram(const ShaderProperties& props, bool fisheyeEnabled)
         {
             builder.attach(std::move(vs));
             builder.attach(std::move(fs));
+            if (props.effects == LightingEffects::AtmosphereDualSource)
+            {
+                builder.bindFragmentOutput(0, 0, "fragColor");
+                builder.bindFragmentOutput(0, 1, "atmosphereTransmission");
+            }
             program = builder.link(status);
         }
     }
@@ -2846,6 +2907,9 @@ CelestiaGLProgram::initParameters()
         cloudHeight         = floatParam("cloudHeight");
         shadowTextureOffset = floatParam("cloudShadowTexOffset");
     }
+
+    if (props.effects == LightingEffects::CloudLighting)
+        cloudHorizon = floatParam("cloudHorizon");
 
     if (util::is_set(props.texUsage, TexUsage::ShadowMapTexture))
     {
