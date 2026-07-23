@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <iosfwd>
 #include <string>
 #include <vector>
@@ -86,6 +87,9 @@ bool SaveBrunetonAtmosphere(std::ostream& output,
                             const BrunetonAtmosphereData& data,
                             std::string& error);
 bool LoadBrunetonAtmosphere(std::istream& input,
+                            BrunetonAtmosphereData& data,
+                            std::string& error);
+bool LoadBrunetonAtmosphere(const std::filesystem::path& path,
                             BrunetonAtmosphereData& data,
                             std::string& error);
 
