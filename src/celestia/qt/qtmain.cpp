@@ -109,6 +109,9 @@ int main(int argc, char *argv[])
         QPixmap pixmap(splashDir.filePath("splash.png"));
         splash.emplace(pixmap);
         splash->setMask(pixmap.mask());
+#ifdef Q_OS_MACOS
+        splash->setAttribute(Qt::WA_ShowWithoutActivating);
+#endif
 
 
         // TODO: resolve issues with pixmap alpha channel
@@ -128,6 +131,9 @@ int main(int argc, char *argv[])
     }
 
     window.init(options);
+#ifdef Q_OS_MACOS
+    window.setAttribute(Qt::WA_ShowWithoutActivating);
+#endif
     window.show();
     window.startAppCore();
 
