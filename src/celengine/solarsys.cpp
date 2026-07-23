@@ -744,6 +744,14 @@ void ReadAtmosphere(Body* body,
     if (auto absorptionCoeff = atmosData.getVector3<float>("Absorption"); absorptionCoeff.has_value())
         atmosphere->absorptionCoeff = *absorptionCoeff;
 
+    if (auto lutFile = GetFilename(atmosData, "LUTFile"sv, "Invalid filename in Atmosphere LUTFile\n");
+        lutFile.has_value())
+    {
+        atmosphere->brunetonLutFile = lutFile->empty()
+            ? std::filesystem::path{}
+            : path / *lutFile;
+    }
+
     // Get the cloud map settings
     if (auto cloudHeight = atmosData.getLength<float>("CloudHeight"); cloudHeight.has_value())
         atmosphere->cloudHeight = *cloudHeight;
