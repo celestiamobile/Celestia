@@ -23,8 +23,8 @@ TEXTURES = (
     (3, "indirect_illuminance.tif", 2),
     (4, "multiple_scattering.tif", 3),
     (5, "single_aerosols_scattering.tif", 3),
-    (6, "theta_deviation.tif", 2),
 )
+THETA_DEVIATION = (6, "theta_deviation.tif", 2)
 
 TYPE_SIZES = {
     1: 1,   # BYTE
@@ -104,12 +104,18 @@ def read_tiff(path: Path, kind: int, dimensions: int) -> Texture:
 
     directory_offset = struct.unpack_from(byte_order + "I", data, 4)[0]
     pages: list[bytes] = []
+    visited_directories: set[int] = set()
     width = height = 0
     while directory_offset != 0:
+        if directory_offset in visited_directories:
+            raise ValueError(f"{path}: cyclic TIFF directory")
+        visited_directories.add(directory_offset)
         fields, directory_offset = _read_ifd(data, byte_order, directory_offset)
 
         page_width = fields.get(256, (0,))[0]
         page_height = fields.get(257, (0,))[0]
+        if page_width == 0 or page_height == 0:
+            raise ValueError(f"{path}: invalid TIFF dimensions")
         if width == 0:
             width, height = page_width, page_height
         elif (page_width, page_height) != (width, height):
@@ -160,9 +166,12 @@ def align(value: int, alignment: int) -> int:
 
 
 def pack(source: Path, destination: Path) -> None:
+    texture_specs = list(TEXTURES)
+    if (source / THETA_DEVIATION[1]).is_file():
+        texture_specs.append(THETA_DEVIATION)
     textures = [
         read_tiff(source / filename, kind, dimensions)
-        for kind, filename, dimensions in TEXTURES
+        for kind, filename, dimensions in texture_specs
     ]
 
     header_size = 24 + len(textures) * ENTRY_SIZE
@@ -198,7 +207,7 @@ def pack(source: Path, destination: Path) -> None:
             output.write(texture.pixels)
 
     print(f"Wrote {destination} ({destination.stat().st_size} bytes)")
-    for texture, (_, filename, _) in zip(textures, TEXTURES):
+    for texture, (_, filename, _) in zip(textures, texture_specs):
         print(
             f"  {filename}: {texture.width}x{texture.height}x{texture.depth} RGB32F"
         )

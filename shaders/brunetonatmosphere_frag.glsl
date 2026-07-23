@@ -516,6 +516,17 @@ void main(void)
     vec3 viewRay = normalize(mat3(uInverseModelView) * viewDirection);
     vec3 sunDirection = uSunDirection;
 
+    vec2 atmosphereIntersections =
+        intersectSphere(uCamera, viewRay, uTopRadius);
+    if (atmosphereIntersections.x > atmosphereIntersections.y ||
+        atmosphereIntersections.y < 0.0)
+    {
+        fragColor = uRenderMode == 0
+            ? vec4(1.0)
+            : vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+
     vec2 groundIntersections =
         intersectSphere(uCamera, viewRay, uBottomRadius);
     float groundDistance = groundIntersections.x > 0.0

@@ -804,6 +804,8 @@ void ReadAtmosphere(Body* body,
          (atmosphere->sunIlluminance.array() <= 0.0f).any() ||
          atmosphere->sunAngularRadius <= 0.0f ||
          atmosphere->scatteringTextureNuSize < 2 ||
+         atmosphere->scatteringTextureNuSize >
+             static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
          atmosphere->maxSunZenithAngle <= 0.0f))
     {
         GetLogger()->error("Incomplete Bruneton atmosphere metadata in {} definition.\n", body->getName());

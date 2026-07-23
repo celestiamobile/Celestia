@@ -33,6 +33,8 @@ constexpr std::uint32_t EntrySize = 40;
 constexpr std::uint32_t RGB32F = 1;
 constexpr std::uint32_t ChannelCount = 3;
 constexpr std::uint32_t MaximumDimension = 16384;
+constexpr std::uint64_t MaximumTextureBytes = std::uint64_t{ 256 } << 20;
+constexpr std::uint64_t MaximumTotalTextureBytes = std::uint64_t{ 512 } << 20;
 
 std::uint32_t
 readU32(const std::uint8_t* value)
@@ -121,6 +123,7 @@ BrunetonAtmosphereData::load(const std::filesystem::path& path)
     std::vector<Entry> entries;
     entries.reserve(textureCount);
     std::array<bool, 7> seen{};
+    std::uint64_t totalTextureBytes = 0;
     for (std::uint32_t i = 0; i < textureCount; ++i)
     {
         std::array<std::uint8_t, EntrySize> bytes{};
@@ -162,11 +165,14 @@ BrunetonAtmosphereData::load(const std::filesystem::path& path)
                                    entry.height * entry.depth;
         if (texelCount > std::numeric_limits<std::uint64_t>::max() / BytesPerTexel ||
             entry.size != texelCount * BytesPerTexel ||
+            entry.size > MaximumTextureBytes ||
+            totalTextureBytes > MaximumTotalTextureBytes - entry.size ||
             entry.offset < directoryEnd ||
             entry.offset > fileSize ||
             entry.size > fileSize - entry.offset)
             return fail("invalid texture payload");
 
+        totalTextureBytes += entry.size;
         entries.push_back(entry);
     }
 

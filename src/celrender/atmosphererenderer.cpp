@@ -744,6 +744,7 @@ AtmosphereRenderer::renderBruneton(
         renderComposite(-1, GL_LESS);
     }
 
+    glDepthFunc(GL_LEQUAL);
     glActiveTexture(GL_TEXTURE0);
 }
 
