@@ -27,6 +27,8 @@
 #include <celmath/vecgl.h>
 #include <celutil/indexlist.h>
 
+#include "brunetonatmospheremanager.h"
+
 using celestia::util::BuildIndexList;
 using celestia::util::IndexListCapacity;
 using ushort = unsigned short;
@@ -50,6 +52,15 @@ AtmosphereRenderer::AtmosphereRenderer(Renderer &renderer) :
 }
 
 AtmosphereRenderer::~AtmosphereRenderer() = default;
+
+void
+AtmosphereRenderer::requestBrunetonResource(const Atmosphere& atmosphere)
+{
+    if (atmosphere.brunetonLutFile.empty())
+        return;
+
+    m_renderer.getBrunetonAtmosphereManager()->find(atmosphere.brunetonLutFile);
+}
 
 void AtmosphereRenderer::initGL()
 {
@@ -311,6 +322,7 @@ AtmosphereRenderer::renderLegacy(
     bool                      lit,
     const Matrices           &m)
 {
+    requestBrunetonResource(atmosphere);
     computeLegacy(atmosphere, ls, center, orientation, semiAxes, sunDirection, pixSize, lit);
 
     ShaderProperties shadprop;
@@ -347,6 +359,8 @@ AtmosphereRenderer::render(
     const math::Frustum      &frustum,
     const Matrices           &m)
 {
+    requestBrunetonResource(atmosphere);
+
     ShaderProperties shadprop;
     shadprop.nLights = static_cast<ushort>(ls.nLights);
 

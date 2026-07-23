@@ -68,6 +68,8 @@ public:
     void initGL();
 
 private:
+    void requestBrunetonResource(const Atmosphere&);
+
     void computeLegacy(
         const Atmosphere         &atmosphere,
         const LightingState      &ls,
