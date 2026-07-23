@@ -62,6 +62,7 @@
 #include <celrender/asterismrenderer.h>
 #include <celrender/atmosphererenderer.h>
 #include <celrender/boundariesrenderer.h>
+#include <celrender/brunetonatmospheremanager.h>
 #include <celrender/cometrenderer.h>
 #include <celrender/eclipticlinerenderer.h>
 #include <celrender/legacylargestarrenderer.h>
@@ -411,6 +412,8 @@ bool Renderer::init(int winWidth, int winHeight,
                     std::shared_ptr<engine::ResourceSystem> resourceSystem)
 {
     m_resourceSystem = std::move(resourceSystem);
+    m_brunetonAtmosphereManager =
+        std::make_unique<celestia::render::BrunetonAtmosphereManager>(*m_resourceSystem);
     m_geometryManager = std::make_unique<RenderGeometryManager>(geometryManager, *m_resourceSystem);
     m_textureManager = std::make_unique<TextureManager>(texturePaths, resolution, *m_resourceSystem);
     detailOptions = _detailOptions;
