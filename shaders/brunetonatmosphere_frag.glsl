@@ -471,7 +471,7 @@ vec2 intersectSphere(vec3 origin, vec3 direction, float radius)
 
 void main(void)
 {
-    vec3 shellPoint = normalize(brunetonPosition) * uTopRadius;
+    vec3 shellPoint = brunetonPosition * uTopRadius;
     vec3 viewRay = normalize(shellPoint - uCamera);
     bool refractedIntoGround;
     viewRay = refractedRay(uCamera, viewRay, refractedIntoGround);

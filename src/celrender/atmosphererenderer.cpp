@@ -662,8 +662,6 @@ AtmosphereRenderer::renderBruneton(
     program->intParam("uHasSun") = ls.nLights == 0 ? 0 : 1;
     resources->bind(*program, atmosphere.refraction);
 
-    glFrontFace(GL_CW);
-
     math::Frustum shellFrustum = frustum;
     shellFrustum.transform(math::scale(1.0f / atmosphereScale));
 
@@ -691,7 +689,6 @@ AtmosphereRenderer::renderBruneton(
     }
 
     glActiveTexture(GL_TEXTURE0);
-    glFrontFace(GL_CCW);
 }
 
 } // namespace celestia::render
