@@ -10,6 +10,9 @@
 
 #pragma once
 
+#include <cstdint>
+#include <filesystem>
+
 #include <Eigen/Core>
 
 #include <celutil/color.h>
@@ -34,6 +37,13 @@ struct Atmosphere
     Eigen::Vector3f rayleighCoeff{ Eigen::Vector3f::Zero() };
     float rayleighScaleHeight{ 0.0f };
     Eigen::Vector3f absorptionCoeff{ Eigen::Vector3f::Zero() };
+
+    std::filesystem::path brunetonData;
+    Eigen::Vector3f sunIlluminance{ Eigen::Vector3f::Zero() };
+    float sunAngularRadius{ 0.0f };
+    std::uint32_t scatteringTextureNuSize{ 0 };
+    float maxSunZenithAngle{ 0.0f };
+    bool refraction{ false };
 
     float cloudShadowDepth{ 0.0f };
 };

@@ -744,6 +744,41 @@ void ReadAtmosphere(Body* body,
     if (auto absorptionCoeff = atmosData.getVector3<float>("Absorption"); absorptionCoeff.has_value())
         atmosphere->absorptionCoeff = *absorptionCoeff;
 
+    if (auto brunetonData = GetFilename(atmosData, "BrunetonData"sv, "Invalid filename in BrunetonData\n");
+        brunetonData.has_value())
+    {
+        atmosphere->brunetonData = brunetonData->empty()
+            ? std::filesystem::path{}
+            : path / *brunetonData;
+    }
+    if (auto sunIlluminance = atmosData.getVector3<float>("SunIlluminance"); sunIlluminance.has_value())
+        atmosphere->sunIlluminance = *sunIlluminance;
+    if (auto sunAngularRadius = atmosData.getNumber<float>("SunAngularRadius"); sunAngularRadius.has_value())
+        atmosphere->sunAngularRadius = *sunAngularRadius;
+    if (auto scatteringTextureNuSize = atmosData.getNumber<std::uint32_t>("ScatteringTextureNuSize");
+        scatteringTextureNuSize.has_value())
+    {
+        atmosphere->scatteringTextureNuSize = *scatteringTextureNuSize;
+    }
+    if (auto maxSunZenithAngle = atmosData.getNumber<float>("MaxSunZenithAngle");
+        maxSunZenithAngle.has_value())
+    {
+        atmosphere->maxSunZenithAngle = *maxSunZenithAngle;
+    }
+    if (auto refraction = atmosData.getBoolean("Refraction"); refraction.has_value())
+        atmosphere->refraction = *refraction;
+
+    if (!atmosphere->brunetonData.empty() &&
+        (atmosphere->height <= 0.0f ||
+         (atmosphere->sunIlluminance.array() <= 0.0f).any() ||
+         atmosphere->sunAngularRadius <= 0.0f ||
+         atmosphere->scatteringTextureNuSize < 2 ||
+         atmosphere->maxSunZenithAngle <= 0.0f))
+    {
+        GetLogger()->error("Incomplete Bruneton atmosphere metadata in {} definition.\n", body->getName());
+        atmosphere->brunetonData.clear();
+    }
+
     // Get the cloud map settings
     if (auto cloudHeight = atmosData.getLength<float>("CloudHeight"); cloudHeight.has_value())
         atmosphere->cloudHeight = *cloudHeight;
