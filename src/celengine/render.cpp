@@ -2569,6 +2569,18 @@ void Renderer::renderObject(const Vector3f& pos,
                               atmosphere->height > 0.0f &&
                               !insidePlanet &&
                               !atmosphere->brunetonData.empty();
+        if (renderBruneton)
+        {
+            m_atmosphereRenderer->render(
+                ri,
+                *atmosphere,
+                ls,
+                obj.orientation,
+                -(planetRotation * pos),
+                radius,
+                viewFrustum,
+                planetMVP);
+        }
 
         if (fade > 0 && util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
             atmosphere->height > 0.0f && !insidePlanet &&
@@ -2653,18 +2665,6 @@ void Renderer::renderObject(const Vector3f& pos,
             glFrontFace(GL_CCW);
         }
 
-        if (renderBruneton)
-        {
-            m_atmosphereRenderer->render(
-                ri,
-                *atmosphere,
-                ls,
-                obj.orientation,
-                -(planetRotation * pos),
-                radius,
-                viewFrustum,
-                planetMVP);
-        }
     }
 }
 

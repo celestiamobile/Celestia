@@ -114,6 +114,8 @@ private:
     std::vector<SkyContourPoint>  m_skyContour;
     gl::Buffer                    m_bo;
     gl::VertexObject              m_vo;
+    gl::Buffer                    m_brunetonScreenBO;
+    gl::VertexObject              m_brunetonScreenVO;
     std::map<std::filesystem::path, std::unique_ptr<BrunetonResources>> m_brunetonResources;
     bool                          m_initialized{ false };
 };

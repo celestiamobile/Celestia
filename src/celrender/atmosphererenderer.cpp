@@ -215,6 +215,22 @@ void AtmosphereRenderer::initGL()
         sizeof(SkyVertex),
         offsetof(SkyVertex, color));
     m_vo.setIndexBuffer(gl::Buffer(gl::Buffer::TargetHint::ElementArray), 0, gl::VertexObject::IndexType::UnsignedShort);
+
+    constexpr std::array<float, 9> screenTriangle{
+        -1.0f, -1.0f, 0.999998f,
+         3.0f, -1.0f, 0.999998f,
+        -1.0f,  3.0f, 0.999998f,
+    };
+    m_brunetonScreenBO = gl::Buffer(
+        gl::Buffer::TargetHint::Array,
+        screenTriangle);
+    m_brunetonScreenVO =
+        gl::VertexObject(gl::VertexObject::Primitive::Triangles);
+    m_brunetonScreenVO.addVertexBuffer(
+        m_brunetonScreenBO,
+        CelestiaGLProgram::VertexCoordAttributeIndex,
+        3,
+        gl::VertexObject::DataType::Float);
 }
 
 void
@@ -634,6 +650,8 @@ AtmosphereRenderer::renderBruneton(
     }
 
     float topRadius = radius + atmosphere.height;
+    bool useScreenSpace =
+        cameraPosition.norm() < topRadius + atmosphere.height;
     float atmosphereScale = topRadius / radius;
     Eigen::Vector3f sunDirection = ls.nLights == 0
         ? Eigen::Vector3f::UnitZ()
@@ -647,8 +665,8 @@ AtmosphereRenderer::renderBruneton(
     program->setMVPMatrices(*m.projection, shellModelView);
     program->vec3Param("uCamera") = cameraPosition;
     program->vec3Param("uSunDirection") = sunDirection;
-    program->mat4Param("uInverseMVP") =
-        ((*m.projection) * shellModelView).inverse();
+    program->mat4Param("uInverseProjection") = m.projection->inverse();
+    program->mat4Param("uInverseModelView") = shellModelView.inverse();
     program->vec4Param("uViewport") = Eigen::Vector4f(
         static_cast<float>(viewport[0]),
         static_cast<float>(viewport[1]),
@@ -670,18 +688,14 @@ AtmosphereRenderer::renderBruneton(
     program->intParam("uIrradianceTextureWidth") = irradiance.x();
     program->intParam("uIrradianceTextureHeight") = irradiance.y();
     program->intParam("uRefraction") = atmosphere.refraction ? 1 : 0;
-    program->intParam("uHasSun") = ls.nLights == 0 ? 0 : 1;
+    program->intParam("uFisheye") =
+        m_renderer.getShaderManager().isFisheyeEnabled() ? 1 : 0;
     resources->bind(*program, atmosphere.refraction);
 
-    bool insideAtmosphere = cameraPosition.norm() < topRadius;
-    if (insideAtmosphere)
-        glFrontFace(GL_CW);
+    program->intParam("uScreenSpace") = useScreenSpace ? 1 : 0;
 
     math::Frustum shellFrustum = frustum;
     shellFrustum.transform(math::scale(1.0f / atmosphereScale));
-    float shellPixelWidth = insideAtmosphere
-        ? std::min(ri.pixWidth, 1000.0f)
-        : ri.pixWidth;
 
     Renderer::PipelineState state;
     state.blending = true;
@@ -697,11 +711,19 @@ AtmosphereRenderer::renderBruneton(
         program->intParam("uRayTarget") = rayTarget;
         state.blendFunc = { blendSource, blendDestination };
         m_renderer.setPipelineState(state);
-        glDepthFunc(depthFunction);
-        m_renderer.m_lodSphere->render(LODSphereMesh::Normals,
-                                       shellFrustum,
-                                       shellPixelWidth,
-                                       nullptr);
+        if (useScreenSpace)
+        {
+            glDepthFunc(depthFunction);
+            m_brunetonScreenVO.draw(3);
+        }
+        else
+        {
+            glDepthFunc(depthFunction);
+            m_renderer.m_lodSphere->render(LODSphereMesh::Normals,
+                                           shellFrustum,
+                                           ri.pixWidth,
+                                           nullptr);
+        }
     };
 
     auto renderComposite = [&](int rayTarget, GLenum depthFunction)
@@ -711,7 +733,7 @@ AtmosphereRenderer::renderBruneton(
             renderPass(1, rayTarget, depthFunction, GL_ONE, GL_ONE);
     };
 
-    if (insideAtmosphere)
+    if (useScreenSpace)
     {
         renderComposite(0, GL_LESS);
         renderComposite(1, GL_GREATER);
@@ -723,8 +745,6 @@ AtmosphereRenderer::renderBruneton(
     }
 
     glActiveTexture(GL_TEXTURE0);
-    if (insideAtmosphere)
-        glFrontFace(GL_CCW);
 }
 
 } // namespace celestia::render

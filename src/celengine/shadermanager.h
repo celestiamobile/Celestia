@@ -370,6 +370,7 @@ public:
     CelestiaGLProgram* getShader(StaticShader, const GeomShaderParams* = nullptr);
 
     void setFisheyeEnabled(bool enabled);
+    bool isFisheyeEnabled() const { return m_fisheyeEnabled; }
 
 private:
     std::shared_ptr<CelestiaGLProgram> loadShader(StaticShader, const GeomShaderParams*);

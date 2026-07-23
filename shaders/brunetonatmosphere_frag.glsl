@@ -38,10 +38,11 @@ uniform int uScatteringTextureNuSize;
 uniform int uIrradianceTextureWidth;
 uniform int uIrradianceTextureHeight;
 uniform int uRefraction;
-uniform int uHasSun;
+uniform int uFisheye;
 uniform int uRenderMode;
 uniform int uRayTarget;
-uniform mat4 uInverseMVP;
+uniform mat4 uInverseProjection;
+uniform mat4 uInverseModelView;
 uniform vec4 uViewport;
 
 const float PI = 3.14159265358979323846;
@@ -444,17 +445,6 @@ vec3 skyLuminanceToPoint(vec3 camera,
            singleAerosolsScattering * aerosolPhaseFunction(nu);
 }
 
-vec3 sunAndSkyIlluminance(vec3 point,
-                          vec3 sunDirection,
-                          out vec3 skyIlluminance)
-{
-    float radius = length(point);
-    float muSun = dot(point, sunDirection) / radius;
-    skyIlluminance =
-        sampleLut(uIrradianceTexture, irradianceTextureUv(radius, muSun)).rgb;
-    return uSolarIlluminance * transmittanceToSun(radius, muSun);
-}
-
 vec3 refractedRay(vec3 camera, vec3 ray, out bool hitsGround)
 {
     if (uRefraction == 0)
@@ -498,10 +488,32 @@ void main(void)
 {
     vec2 ndc =
         (gl_FragCoord.xy - uViewport.xy) / uViewport.zw * 2.0 - 1.0;
-    vec4 nearPoint = uInverseMVP * vec4(ndc, -1.0, 1.0);
-    vec4 farPoint = uInverseMVP * vec4(ndc, 1.0, 1.0);
-    vec3 viewRay = normalize(
-        farPoint.xyz / farPoint.w - nearPoint.xyz / nearPoint.w);
+    vec3 viewDirection;
+    if (uFisheye != 0)
+    {
+        vec2 lensPosition =
+            vec2(ndc.x * uViewport.z / uViewport.w, ndc.y);
+        float lensRadius = length(lensPosition);
+        if (lensRadius > 1.0)
+            discard;
+        float phi = 0.5 * PI * lensRadius;
+        if (lensRadius > 0.0)
+        {
+            viewDirection = vec3(
+                sin(phi) * lensPosition / lensRadius,
+                -cos(phi));
+        }
+        else
+        {
+            viewDirection = vec3(0.0, 0.0, -1.0);
+        }
+    }
+    else
+    {
+        vec4 viewPoint = uInverseProjection * vec4(ndc, 1.0, 1.0);
+        viewDirection = normalize(viewPoint.xyz / viewPoint.w);
+    }
+    vec3 viewRay = normalize(mat3(uInverseModelView) * viewDirection);
     vec3 sunDirection = uSunDirection;
 
     vec2 groundIntersections =
@@ -515,7 +527,6 @@ void main(void)
 
     vec3 transmittance;
     vec3 inScatter;
-    vec3 surfaceFactor = vec3(1.0);
     if (hitsGround)
     {
         float surfaceDistance = groundDistance > 0.0
@@ -525,14 +536,6 @@ void main(void)
         vec3 surfacePoint = uCamera + viewRay * surfaceDistance;
         inScatter = skyLuminanceToPoint(
             uCamera, surfacePoint, sunDirection, transmittance);
-        if (uHasSun != 0)
-        {
-            vec3 skyIlluminance;
-            vec3 sunIlluminance = sunAndSkyIlluminance(
-                surfacePoint, sunDirection, skyIlluminance);
-            surfaceFactor =
-                (sunIlluminance + skyIlluminance) / uSolarIlluminance;
-        }
     }
     else
     {
@@ -542,13 +545,12 @@ void main(void)
 
     if (uRenderMode == 0)
     {
-        fragColor = vec4(clamp(transmittance * surfaceFactor, 0.0, 1.0), 1.0);
+        fragColor = vec4(clamp(transmittance, 0.0, 1.0), 1.0);
     }
     else
     {
-        float referenceIlluminance = max(
-            max(uSolarIlluminance.r, uSolarIlluminance.g),
-            uSolarIlluminance.b);
+        float referenceIlluminance =
+            dot(uSolarIlluminance, vec3(0.2126, 0.7152, 0.0722));
         fragColor = vec4(
             toneMap(max(inScatter / referenceIlluminance, vec3(0.0))),
             1.0);
