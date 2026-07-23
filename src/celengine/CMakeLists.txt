@@ -10,6 +10,8 @@ set(CELENGINE_SOURCES
   body.h
   boundaries.cpp
   boundaries.h
+  brunetonatmospherefile.cpp
+  brunetonatmospherefile.h
   category.cpp
   category.h
   completion.cpp
