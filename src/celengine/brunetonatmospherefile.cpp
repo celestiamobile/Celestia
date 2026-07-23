@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <fstream>
 #include <istream>
 #include <limits>
 #include <ostream>
@@ -804,6 +805,20 @@ LoadBrunetonAtmosphere(std::istream& input,
 
     data = std::move(loaded);
     return true;
+}
+
+bool
+LoadBrunetonAtmosphere(const std::filesystem::path& path,
+                       BrunetonAtmosphereData& data,
+                       std::string& error)
+{
+    std::ifstream input(path, std::ios::binary);
+    if (!input)
+    {
+        error = "could not open atmosphere file";
+        return false;
+    }
+    return LoadBrunetonAtmosphere(input, data, error);
 }
 
 } // namespace celestia::engine

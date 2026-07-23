@@ -226,3 +226,14 @@ TEST_CASE("Bruneton atmosphere file rejects inconsistent combined scattering")
     CHECK_FALSE(LoadBrunetonAtmosphere(input, loaded, error));
     CHECK(error == "single-Mie section is inconsistent with combined scattering");
 }
+
+TEST_CASE("Bruneton atmosphere file reports missing files")
+{
+    BrunetonAtmosphereData loaded;
+    std::string error;
+    CHECK_FALSE(LoadBrunetonAtmosphere(
+        std::filesystem::path("definitely-missing-bruneton-atmosphere.atm"),
+        loaded,
+        error));
+    CHECK(error == "could not open atmosphere file");
+}
