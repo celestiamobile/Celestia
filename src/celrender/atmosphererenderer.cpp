@@ -11,8 +11,10 @@
 #include "atmosphererenderer.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
+#include <string>
 
 #include <celcompat/numbers.h>
 #include <celengine/atmosphere.h>
@@ -26,6 +28,8 @@
 #include <celmath/mathlib.h>
 #include <celmath/vecgl.h>
 #include <celutil/indexlist.h>
+#include <celutil/logger.h>
+#include "brunetonatmosphere.h"
 
 using celestia::util::BuildIndexList;
 using celestia::util::IndexListCapacity;
@@ -42,7 +46,136 @@ constexpr int MinSkySlices = 30;
 
 constexpr int MaxVertices = MaxSkySlices * (MaxSkyRings + 1);
 constexpr int MaxIndices = IndexListCapacity(MaxSkySlices,  MaxSkyRings + 1);
+
+constexpr std::size_t BrunetonTextureCount = 6;
+
+std::size_t
+textureIndex(BrunetonTextureKind kind)
+{
+    return static_cast<std::size_t>(kind) - 1;
+}
 } // end unnamed namespace
+
+struct AtmosphereRenderer::BrunetonResources
+{
+    ~BrunetonResources()
+    {
+        glDeleteTextures(static_cast<GLsizei>(textures.size()), textures.data());
+    }
+
+    bool load(const std::filesystem::path& path)
+    {
+        BrunetonAtmosphereData data;
+        if (!data.load(path))
+            return false;
+
+        const BrunetonTextureData* phase =
+            data.find(BrunetonTextureKind::Phase);
+        const BrunetonTextureData* transmittance =
+            data.find(BrunetonTextureKind::Transmittance);
+        const BrunetonTextureData* irradiance =
+            data.find(BrunetonTextureKind::IndirectIlluminance);
+        const BrunetonTextureData* multiple =
+            data.find(BrunetonTextureKind::MultipleScattering);
+        const BrunetonTextureData* aerosols =
+            data.find(BrunetonTextureKind::SingleAerosolsScattering);
+        const BrunetonTextureData* theta =
+            data.find(BrunetonTextureKind::ThetaDeviation);
+        hasThetaDeviation = theta != nullptr;
+        if (phase->height != 2 ||
+            multiple->width != aerosols->width ||
+            multiple->height != aerosols->height ||
+            multiple->depth != aerosols->depth ||
+            (theta != nullptr &&
+             (theta->width != transmittance->width ||
+              theta->height != transmittance->height)) ||
+            irradiance->depth != 1)
+        {
+            util::GetLogger()->error(
+                "Incompatible Bruneton atmosphere texture dimensions in {}.\n", path);
+            return false;
+        }
+
+        while (glGetError() != GL_NO_ERROR)
+        {
+        }
+        glGenTextures(static_cast<GLsizei>(textures.size()), textures.data());
+        for (const BrunetonTextureData& texture : data.textures())
+        {
+            auto index = textureIndex(texture.kind);
+            dimensions[index] = {
+                static_cast<GLint>(texture.width),
+                static_cast<GLint>(texture.height),
+                static_cast<GLint>(texture.depth),
+            };
+
+            GLenum target = texture.dimensions == 3 ? GL_TEXTURE_3D : GL_TEXTURE_2D;
+            glBindTexture(target, textures[index]);
+#ifdef GL_ES
+            glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+#else
+            glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+#endif
+            glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            if (target == GL_TEXTURE_3D)
+            {
+                glTexParameteri(target, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+                glTexImage3D(target, 0, GL_RGB32F,
+                             dimensions[index].x(), dimensions[index].y(), dimensions[index].z(),
+                             0, GL_RGB, GL_FLOAT, texture.pixels.data());
+            }
+            else
+            {
+                glTexImage2D(target, 0, GL_RGB32F,
+                             dimensions[index].x(), dimensions[index].y(),
+                             0, GL_RGB, GL_FLOAT, texture.pixels.data());
+            }
+        }
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glBindTexture(GL_TEXTURE_3D, 0);
+        valid = glGetError() == GL_NO_ERROR;
+        if (!valid)
+            util::GetLogger()->error("Failed to upload Bruneton atmosphere textures from {}.\n", path);
+        return valid;
+    }
+
+    void bind(CelestiaGLProgram& program, bool refraction) const
+    {
+        constexpr std::array<GLenum, BrunetonTextureCount> targets{
+            GL_TEXTURE_2D,
+            GL_TEXTURE_2D,
+            GL_TEXTURE_2D,
+            GL_TEXTURE_3D,
+            GL_TEXTURE_3D,
+            GL_TEXTURE_2D,
+        };
+        constexpr std::array<const char*, BrunetonTextureCount> samplers{
+            "uPhaseTexture",
+            "uTransmittanceTexture",
+            "uIrradianceTexture",
+            "uMultipleScatteringTexture",
+            "uSingleAerosolsScatteringTexture",
+            "uThetaDeviationTexture",
+        };
+
+        std::size_t count = refraction ? textures.size() : textures.size() - 1;
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(i));
+            glBindTexture(targets[i], textures[i]);
+            program.samplerParam(samplers[i]) = static_cast<int>(i);
+        }
+    }
+
+    std::array<GLuint, BrunetonTextureCount> textures{};
+    std::array<Eigen::Vector3i, BrunetonTextureCount> dimensions{};
+    bool hasThetaDeviation{ false };
+    bool valid{ false };
+};
 
 AtmosphereRenderer::AtmosphereRenderer(Renderer &renderer) :
     m_renderer(renderer)
@@ -343,10 +476,17 @@ AtmosphereRenderer::render(
     const Atmosphere         &atmosphere,
     const LightingState      &ls,
     const Eigen::Quaternionf &/*planetOrientation*/,
+    const Eigen::Vector3f    &cameraPosition,
     float                     radius,
     const math::Frustum      &frustum,
     const Matrices           &m)
 {
+    if (!atmosphere.brunetonData.empty())
+    {
+        renderBruneton(ri, atmosphere, ls, cameraPosition, radius, frustum, m);
+        return;
+    }
+
     ShaderProperties shadprop;
     shadprop.nLights = static_cast<ushort>(ls.nLights);
 
@@ -436,6 +576,121 @@ AtmosphereRenderer::render(
                                        nullptr);
     }
 
+    glFrontFace(GL_CCW);
+}
+
+void
+AtmosphereRenderer::renderBruneton(
+    const RenderInfo         &ri,
+    const Atmosphere         &atmosphere,
+    const LightingState      &ls,
+    const Eigen::Vector3f    &cameraPosition,
+    float                     radius,
+    const math::Frustum      &frustum,
+    const Matrices           &m)
+{
+    auto [resourceIt, inserted] =
+        m_brunetonResources.try_emplace(atmosphere.brunetonData);
+    if (inserted)
+    {
+        resourceIt->second = std::make_unique<BrunetonResources>();
+        if (!resourceIt->second->load(atmosphere.brunetonData))
+            return;
+    }
+    BrunetonResources* resources = resourceIt->second.get();
+    if (resources == nullptr || !resources->valid)
+    {
+        return;
+    }
+
+    if (atmosphere.refraction && !resources->hasThetaDeviation)
+    {
+        util::GetLogger()->error(
+            "Bruneton atmosphere {} enables refraction but has no theta-deviation texture.\n",
+            atmosphere.brunetonData);
+        resources->valid = false;
+        return;
+    }
+
+    CelestiaGLProgram* program =
+        m_renderer.getShaderManager().getShader(StaticShader::BrunetonAtmosphere);
+    if (program == nullptr)
+        return;
+
+    const auto& dimensions = resources->dimensions;
+    const Eigen::Vector3i& transmittance =
+        dimensions[textureIndex(BrunetonTextureKind::Transmittance)];
+    const Eigen::Vector3i& irradiance =
+        dimensions[textureIndex(BrunetonTextureKind::IndirectIlluminance)];
+    const Eigen::Vector3i& scattering =
+        dimensions[textureIndex(BrunetonTextureKind::MultipleScattering)];
+    if (scattering.x() % static_cast<int>(atmosphere.scatteringTextureNuSize) != 0)
+    {
+        util::GetLogger()->error(
+            "Bruneton atmosphere {} has an invalid scattering Nu size.\n",
+            atmosphere.brunetonData);
+        resources->valid = false;
+        return;
+    }
+
+    float topRadius = radius + atmosphere.height;
+    float atmosphereScale = topRadius / radius;
+    Eigen::Vector3f sunDirection = ls.nLights == 0
+        ? Eigen::Vector3f::UnitZ()
+        : ls.lights[0].direction_obj.normalized();
+
+    program->use();
+    program->setMVPMatrices(*m.projection, (*m.modelview) * math::scale(atmosphereScale));
+    program->vec3Param("uCamera") = cameraPosition;
+    program->vec3Param("uSunDirection") = sunDirection;
+    program->vec3Param("uSolarIlluminance") = atmosphere.sunIlluminance;
+    program->floatParam("uBottomRadius") = radius;
+    program->floatParam("uTopRadius") = topRadius;
+    program->floatParam("uSunAngularRadius") = atmosphere.sunAngularRadius;
+    program->floatParam("uMuSMin") = std::cos(atmosphere.maxSunZenithAngle);
+    program->intParam("uTransmittanceTextureWidth") = transmittance.x();
+    program->intParam("uTransmittanceTextureHeight") = transmittance.y();
+    program->intParam("uScatteringTextureRSize") = scattering.z();
+    program->intParam("uScatteringTextureMuSize") = scattering.y();
+    program->intParam("uScatteringTextureNuSize") =
+        static_cast<int>(atmosphere.scatteringTextureNuSize);
+    program->intParam("uScatteringTextureMuSSize") =
+        scattering.x() / static_cast<int>(atmosphere.scatteringTextureNuSize);
+    program->intParam("uIrradianceTextureWidth") = irradiance.x();
+    program->intParam("uIrradianceTextureHeight") = irradiance.y();
+    program->intParam("uRefraction") = atmosphere.refraction ? 1 : 0;
+    program->intParam("uHasSun") = ls.nLights == 0 ? 0 : 1;
+    resources->bind(*program, atmosphere.refraction);
+
+    glFrontFace(GL_CW);
+
+    math::Frustum shellFrustum = frustum;
+    shellFrustum.transform(math::scale(1.0f / atmosphereScale));
+
+    Renderer::PipelineState state;
+    state.blending = true;
+    state.depthTest = true;
+
+    program->intParam("uRenderMode") = 0;
+    state.blendFunc = { GL_ZERO, GL_SRC_COLOR };
+    m_renderer.setPipelineState(state);
+    m_renderer.m_lodSphere->render(LODSphereMesh::Normals,
+                                   shellFrustum,
+                                   ri.pixWidth,
+                                   nullptr);
+
+    if (ls.nLights > 0)
+    {
+        program->intParam("uRenderMode") = 1;
+        state.blendFunc = { GL_ONE, GL_ONE };
+        m_renderer.setPipelineState(state);
+        m_renderer.m_lodSphere->render(LODSphereMesh::Normals,
+                                       shellFrustum,
+                                       ri.pixWidth,
+                                       nullptr);
+    }
+
+    glActiveTexture(GL_TEXTURE0);
     glFrontFace(GL_CCW);
 }
 

@@ -2563,8 +2563,15 @@ void Renderer::renderObject(const Vector3f& pos,
             fade = 1.0f;
         }
 
-        if (fade > 0 && util::is_set(renderFlags, RenderFlags::ShowAtmospheres) && atmosphere->height > 0.0f &&
-            !insidePlanet)
+        bool renderBruneton = fade > 0 &&
+                              util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
+                              atmosphere->height > 0.0f &&
+                              !insidePlanet &&
+                              !atmosphere->brunetonData.empty();
+
+        if (fade > 0 && util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
+            atmosphere->height > 0.0f && !insidePlanet &&
+            atmosphere->brunetonData.empty())
         {
             // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
             // TODO: convert old style atmopshere parameters
@@ -2575,6 +2582,7 @@ void Renderer::renderObject(const Vector3f& pos,
                     *atmosphere,
                     ls,
                     obj.orientation,
+                    -(planetRotation * pos),
                     radius,
                     viewFrustum,
                     planetMVP);
@@ -2642,6 +2650,19 @@ void Renderer::renderObject(const Vector3f& pos,
 
             glDisable(GL_POLYGON_OFFSET_FILL);
             glFrontFace(GL_CCW);
+        }
+
+        if (renderBruneton)
+        {
+            m_atmosphereRenderer->render(
+                ri,
+                *atmosphere,
+                ls,
+                obj.orientation,
+                -(planetRotation * pos),
+                radius,
+                viewFrustum,
+                planetMVP);
         }
     }
 }

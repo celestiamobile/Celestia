@@ -12,6 +12,9 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
+#include <map>
+#include <memory>
 #include <vector>
 
 #include <Eigen/Core>
@@ -61,6 +64,7 @@ public:
         const Atmosphere         &atmosphere,
         const LightingState      &ls,
         const Eigen::Quaternionf &planetOrientation,
+        const Eigen::Vector3f    &cameraPosition,
         float                     radius,
         const math::Frustum      &frustum,
         const Matrices           &m);
@@ -68,6 +72,17 @@ public:
     void initGL();
 
 private:
+    struct BrunetonResources;
+
+    void renderBruneton(
+        const RenderInfo         &ri,
+        const Atmosphere         &atmosphere,
+        const LightingState      &ls,
+        const Eigen::Vector3f    &cameraPosition,
+        float                     radius,
+        const math::Frustum      &frustum,
+        const Matrices           &m);
+
     void computeLegacy(
         const Atmosphere         &atmosphere,
         const LightingState      &ls,
@@ -99,6 +114,7 @@ private:
     std::vector<SkyContourPoint>  m_skyContour;
     gl::Buffer                    m_bo;
     gl::VertexObject              m_vo;
+    std::map<std::filesystem::path, std::unique_ptr<BrunetonResources>> m_brunetonResources;
     bool                          m_initialized{ false };
 };
 
