@@ -638,11 +638,22 @@ AtmosphereRenderer::renderBruneton(
     Eigen::Vector3f sunDirection = ls.nLights == 0
         ? Eigen::Vector3f::UnitZ()
         : ls.lights[0].direction_obj.normalized();
+    Eigen::Matrix4f shellModelView =
+        (*m.modelview) * math::scale(atmosphereScale);
+    std::array<int, 4> viewport;
+    m_renderer.getViewport(viewport);
 
     program->use();
-    program->setMVPMatrices(*m.projection, (*m.modelview) * math::scale(atmosphereScale));
+    program->setMVPMatrices(*m.projection, shellModelView);
     program->vec3Param("uCamera") = cameraPosition;
     program->vec3Param("uSunDirection") = sunDirection;
+    program->mat4Param("uInverseMVP") =
+        ((*m.projection) * shellModelView).inverse();
+    program->vec4Param("uViewport") = Eigen::Vector4f(
+        static_cast<float>(viewport[0]),
+        static_cast<float>(viewport[1]),
+        static_cast<float>(viewport[2]),
+        static_cast<float>(viewport[3]));
     program->vec3Param("uSolarIlluminance") = atmosphere.sunIlluminance;
     program->floatParam("uBottomRadius") = radius;
     program->floatParam("uTopRadius") = topRadius;
@@ -662,33 +673,58 @@ AtmosphereRenderer::renderBruneton(
     program->intParam("uHasSun") = ls.nLights == 0 ? 0 : 1;
     resources->bind(*program, atmosphere.refraction);
 
+    bool insideAtmosphere = cameraPosition.norm() < topRadius;
+    if (insideAtmosphere)
+        glFrontFace(GL_CW);
+
     math::Frustum shellFrustum = frustum;
     shellFrustum.transform(math::scale(1.0f / atmosphereScale));
+    float shellPixelWidth = insideAtmosphere
+        ? std::min(ri.pixWidth, 1000.0f)
+        : ri.pixWidth;
 
     Renderer::PipelineState state;
     state.blending = true;
     state.depthTest = true;
 
-    program->intParam("uRenderMode") = 0;
-    state.blendFunc = { GL_ZERO, GL_SRC_COLOR };
-    m_renderer.setPipelineState(state);
-    m_renderer.m_lodSphere->render(LODSphereMesh::Normals,
-                                   shellFrustum,
-                                   ri.pixWidth,
-                                   nullptr);
-
-    if (ls.nLights > 0)
+    auto renderPass = [&](int renderMode,
+                          int rayTarget,
+                          GLenum depthFunction,
+                          GLenum blendSource,
+                          GLenum blendDestination)
     {
-        program->intParam("uRenderMode") = 1;
-        state.blendFunc = { GL_ONE, GL_ONE };
+        program->intParam("uRenderMode") = renderMode;
+        program->intParam("uRayTarget") = rayTarget;
+        state.blendFunc = { blendSource, blendDestination };
         m_renderer.setPipelineState(state);
+        glDepthFunc(depthFunction);
         m_renderer.m_lodSphere->render(LODSphereMesh::Normals,
                                        shellFrustum,
-                                       ri.pixWidth,
+                                       shellPixelWidth,
                                        nullptr);
+    };
+
+    auto renderComposite = [&](int rayTarget, GLenum depthFunction)
+    {
+        renderPass(0, rayTarget, depthFunction, GL_ZERO, GL_SRC_COLOR);
+        if (ls.nLights > 0)
+            renderPass(1, rayTarget, depthFunction, GL_ONE, GL_ONE);
+    };
+
+    if (insideAtmosphere)
+    {
+        renderComposite(0, GL_LESS);
+        renderComposite(1, GL_GREATER);
+        glDepthFunc(GL_LESS);
+    }
+    else
+    {
+        renderComposite(-1, GL_LESS);
     }
 
     glActiveTexture(GL_TEXTURE0);
+    if (insideAtmosphere)
+        glFrontFace(GL_CCW);
 }
 
 } // namespace celestia::render

@@ -2447,6 +2447,8 @@ void Renderer::renderObject(const Vector3f& pos,
         {
             float atmosphereHeight = max(obj.atmosphere->cloudHeight,
                                          getAtmosphereShellHeight(obj.atmosphere->mieScaleHeight));
+            if (!obj.atmosphere->brunetonData.empty())
+                atmosphereHeight = max(atmosphereHeight, obj.atmosphere->height);
             if (atmosphereHeight > 0.0f)
             {
                 // If there's an atmosphere, we need to move the far plane
@@ -2563,8 +2565,7 @@ void Renderer::renderObject(const Vector3f& pos,
             fade = 1.0f;
         }
 
-        bool renderBruneton = fade > 0 &&
-                              util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
+        bool renderBruneton = util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
                               atmosphere->height > 0.0f &&
                               !insidePlanet &&
                               !atmosphere->brunetonData.empty();

@@ -40,8 +40,33 @@ uniform int uIrradianceTextureHeight;
 uniform int uRefraction;
 uniform int uHasSun;
 uniform int uRenderMode;
+uniform int uRayTarget;
+uniform mat4 uInverseMVP;
+uniform vec4 uViewport;
 
 const float PI = 3.14159265358979323846;
+
+vec3 toneMap(vec3 color)
+{
+    const float a = 0.15;
+    const float b = 0.50;
+    const float c = 0.10;
+    const float d = 0.20;
+    const float e = 0.02;
+    const float f = 0.30;
+    const float whitePoint = 11.2;
+
+    color *= 10.0;
+    vec3 mapped =
+        ((color * (a * color + c * b) + d * e) /
+             (color * (a * color + b) + d * f)) -
+        e / f;
+    float white =
+        ((whitePoint * (a * whitePoint + c * b) + d * e) /
+             (whitePoint * (a * whitePoint + b) + d * f)) -
+        e / f;
+    return mapped / white;
+}
 
 vec4 sampleLut(sampler2D lut, vec2 uv)
 {
@@ -471,34 +496,40 @@ vec2 intersectSphere(vec3 origin, vec3 direction, float radius)
 
 void main(void)
 {
-    vec3 shellPoint = brunetonPosition * uTopRadius;
-    vec3 viewRay = normalize(shellPoint - uCamera);
-    bool refractedIntoGround;
-    viewRay = refractedRay(uCamera, viewRay, refractedIntoGround);
+    vec2 ndc =
+        (gl_FragCoord.xy - uViewport.xy) / uViewport.zw * 2.0 - 1.0;
+    vec4 nearPoint = uInverseMVP * vec4(ndc, -1.0, 1.0);
+    vec4 farPoint = uInverseMVP * vec4(ndc, 1.0, 1.0);
+    vec3 viewRay = normalize(
+        farPoint.xyz / farPoint.w - nearPoint.xyz / nearPoint.w);
+    vec3 sunDirection = uSunDirection;
 
     vec2 groundIntersections =
         intersectSphere(uCamera, viewRay, uBottomRadius);
     float groundDistance = groundIntersections.x > 0.0
         ? groundIntersections.x
         : -1.0;
+    bool hitsGround = uRayTarget < 0
+        ? groundDistance > 0.0
+        : uRayTarget != 0;
 
     vec3 transmittance;
     vec3 inScatter;
     vec3 surfaceFactor = vec3(1.0);
-    if (groundDistance > 0.0 || refractedIntoGround)
+    if (hitsGround)
     {
-        float distance = groundDistance > 0.0
+        float surfaceDistance = groundDistance > 0.0
             ? groundDistance
             : distanceToBottomAtmosphereBoundary(
                   length(uCamera), dot(normalize(uCamera), viewRay));
-        vec3 surfacePoint = uCamera + viewRay * distance;
+        vec3 surfacePoint = uCamera + viewRay * surfaceDistance;
         inScatter = skyLuminanceToPoint(
-            uCamera, surfacePoint, uSunDirection, transmittance);
+            uCamera, surfacePoint, sunDirection, transmittance);
         if (uHasSun != 0)
         {
             vec3 skyIlluminance;
             vec3 sunIlluminance = sunAndSkyIlluminance(
-                surfacePoint, uSunDirection, skyIlluminance);
+                surfacePoint, sunDirection, skyIlluminance);
             surfaceFactor =
                 (sunIlluminance + skyIlluminance) / uSolarIlluminance;
         }
@@ -506,7 +537,7 @@ void main(void)
     else
     {
         inScatter =
-            skyLuminance(uCamera, viewRay, uSunDirection, transmittance);
+            skyLuminance(uCamera, viewRay, sunDirection, transmittance);
     }
 
     if (uRenderMode == 0)
@@ -518,6 +549,8 @@ void main(void)
         float referenceIlluminance = max(
             max(uSolarIlluminance.r, uSolarIlluminance.g),
             uSolarIlluminance.b);
-        fragColor = vec4(max(inScatter / referenceIlluminance, vec3(0.0)), 1.0);
+        fragColor = vec4(
+            toneMap(max(inScatter / referenceIlluminance, vec3(0.0))),
+            1.0);
     }
 }
