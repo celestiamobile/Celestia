@@ -27,7 +27,7 @@ drainErrors()
 }
 
 GLuint
-createTexture2D(const engine::BrunetonTextureData& data)
+createTexture2D(const engine::BrunetonTextureData& data, bool linearFiltering)
 {
     GLuint texture = 0;
     glGenTextures(1, &texture);
@@ -35,9 +35,9 @@ createTexture2D(const engine::BrunetonTextureData& data)
         return 0;
 
     glBindTexture(GL_TEXTURE_2D, texture);
-    // RGBA32F is not filterable in core GLES 3; shaders interpolate texels.
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    const GLint filter = linearFiltering ? GL_LINEAR : GL_NEAREST;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D,
@@ -92,7 +92,8 @@ BrunetonAtmosphereResource::BrunetonAtmosphereResource(
     m_transmittance(std::exchange(other.m_transmittance, 0)),
     m_scattering(std::exchange(other.m_scattering, 0)),
     m_singleMie(std::exchange(other.m_singleMie, 0)),
-    m_irradiance(std::exchange(other.m_irradiance, 0))
+    m_irradiance(std::exchange(other.m_irradiance, 0)),
+    m_manualFloatFiltering(std::exchange(other.m_manualFloatFiltering, false))
 {
 }
 
@@ -107,6 +108,8 @@ BrunetonAtmosphereResource::operator=(BrunetonAtmosphereResource&& other) noexce
         m_scattering = std::exchange(other.m_scattering, 0);
         m_singleMie = std::exchange(other.m_singleMie, 0);
         m_irradiance = std::exchange(other.m_irradiance, 0);
+        m_manualFloatFiltering =
+            std::exchange(other.m_manualFloatFiltering, false);
     }
     return *this;
 }
@@ -116,6 +119,8 @@ BrunetonAtmosphereResource::upload(const engine::BrunetonAtmosphereData& data)
 {
     release();
 
+    // Debug-only diagnostics: bracket this upload so unrelated GL errors are
+    // distinguishable from errors produced while creating the LUT textures.
     if (const GLenum previousError = drainErrors(); previousError != GL_NO_ERROR)
     {
         util::GetLogger()->warn(
@@ -133,11 +138,17 @@ BrunetonAtmosphereResource::upload(const engine::BrunetonAtmosphereData& data)
         glBindTexture(GL_TEXTURE_3D, static_cast<GLuint>(previous3D));
     };
 
-    m_transmittance = createTexture2D(data.transmittance);
+#ifdef GL_ES
+    const bool floatLinearFiltering = gl::OES_texture_float_linear;
+#else
+    constexpr bool floatLinearFiltering = true;
+#endif
+
+    m_transmittance = createTexture2D(data.transmittance, floatLinearFiltering);
     m_scattering = createTexture3D(data.scattering);
     if (!data.parameters.combinedScattering)
         m_singleMie = createTexture3D(data.singleMie);
-    m_irradiance = createTexture2D(data.irradiance);
+    m_irradiance = createTexture2D(data.irradiance, floatLinearFiltering);
 
     const bool complete =
         m_transmittance != 0 &&
@@ -156,6 +167,7 @@ BrunetonAtmosphereResource::upload(const engine::BrunetonAtmosphereData& data)
     }
 
     m_parameters = data.parameters;
+    m_manualFloatFiltering = !floatLinearFiltering;
     restoreBindings();
     return true;
 }
@@ -197,6 +209,7 @@ BrunetonAtmosphereResource::release() noexcept
     m_scattering = 0;
     m_singleMie = 0;
     m_irradiance = 0;
+    m_manualFloatFiltering = false;
 }
 
 } // namespace celestia::render
