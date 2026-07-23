@@ -1,0 +1,459 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Runtime subset of Eric Bruneton's precomputed atmospheric scattering model.
+// This shader intentionally outputs linear HDR values. Celestia applies
+// exposure and tone mapping as a post-processing effect.
+
+#ifdef GL_ES
+precision highp sampler2D;
+precision highp sampler3D;
+#endif
+
+#define IN(x) const in x
+#define OUT(x) out x
+#define assert(x)
+
+#define Length float
+#define Area float
+#define Number float
+#define InverseSolidAngle float
+#define IrradianceSpectrum vec3
+#define RadianceSpectrum vec3
+#define DimensionlessSpectrum vec3
+#define Position vec3
+#define Direction vec3
+#define TransmittanceTexture sampler2D
+#define ReducedScatteringTexture sampler3D
+
+const float PI = 3.14159265358979323846;
+const Length m = 1.0;
+const Area m2 = 1.0;
+const InverseSolidAngle sr = 1.0;
+const RadianceSpectrum watt_per_square_meter_per_sr_per_nm = vec3(1.0);
+
+const int TRANSMITTANCE_TEXTURE_WIDTH = 256;
+const int TRANSMITTANCE_TEXTURE_HEIGHT = 64;
+const int SCATTERING_TEXTURE_R_SIZE = 32;
+const int SCATTERING_TEXTURE_MU_SIZE = 128;
+const int SCATTERING_TEXTURE_MU_S_SIZE = 32;
+const int SCATTERING_TEXTURE_NU_SIZE = 8;
+
+struct AtmosphereParameters
+{
+    Length bottom_radius;
+    Length top_radius;
+    vec3 rayleigh_scattering;
+    vec3 mie_scattering;
+    Number mie_phase_function_g;
+    Number mu_s_min;
+};
+
+uniform AtmosphereParameters atmosphere;
+uniform sampler2D transmittance_texture;
+uniform sampler3D scattering_texture;
+uniform sampler3D single_mie_scattering_texture;
+uniform int combined_scattering_textures;
+uniform int manual_float_filtering;
+uniform vec3 camera;
+uniform vec3 earth_center;
+uniform vec3 sun_direction;
+uniform vec3 sky_spectral_radiance_to_luminance;
+
+in vec3 view_ray;
+
+Number ClampCosine(Number mu)
+{
+    return clamp(mu, Number(-1.0), Number(1.0));
+}
+
+Length ClampDistance(Length d)
+{
+    return max(d, 0.0 * m);
+}
+
+Length ClampRadius(IN(AtmosphereParameters) parameters, Length r)
+{
+    return clamp(r, parameters.bottom_radius, parameters.top_radius);
+}
+
+Length SafeSqrt(Area a)
+{
+    return sqrt(max(a, 0.0 * m2));
+}
+
+Length DistanceToTopAtmosphereBoundary(
+    IN(AtmosphereParameters) parameters,
+    Length r,
+    Number mu)
+{
+    Area discriminant =
+        r * r * (mu * mu - 1.0) +
+        parameters.top_radius * parameters.top_radius;
+    return ClampDistance(-r * mu + SafeSqrt(discriminant));
+}
+
+bool RayIntersectsGround(
+    IN(AtmosphereParameters) parameters,
+    Length r,
+    Number mu)
+{
+    return mu < 0.0 &&
+        r * r * (mu * mu - 1.0) +
+            parameters.bottom_radius * parameters.bottom_radius >=
+        0.0 * m2;
+}
+
+Number GetTextureCoordFromUnitRange(Number x, int texture_size)
+{
+    return 0.5 / Number(texture_size) +
+        x * (1.0 - 1.0 / Number(texture_size));
+}
+
+vec2 GetTransmittanceTextureUvFromRMu(
+    IN(AtmosphereParameters) parameters,
+    Length r,
+    Number mu)
+{
+    Length H = sqrt(
+        parameters.top_radius * parameters.top_radius -
+        parameters.bottom_radius * parameters.bottom_radius);
+    Length rho = SafeSqrt(
+        r * r - parameters.bottom_radius * parameters.bottom_radius);
+    Length d = DistanceToTopAtmosphereBoundary(parameters, r, mu);
+    Length d_min = parameters.top_radius - r;
+    Length d_max = rho + H;
+    Number x_mu = (d - d_min) / (d_max - d_min);
+    Number x_r = rho / H;
+    return vec2(
+        GetTextureCoordFromUnitRange(x_mu, TRANSMITTANCE_TEXTURE_WIDTH),
+        GetTextureCoordFromUnitRange(x_r, TRANSMITTANCE_TEXTURE_HEIGHT));
+}
+
+vec4 SampleFloatTexture2DLinear(sampler2D sampler, vec2 uv)
+{
+    ivec2 size = textureSize(sampler, 0);
+    vec2 position = uv * vec2(size) - vec2(0.5);
+    ivec2 lower = ivec2(floor(position));
+    vec2 weight = fract(position);
+    ivec2 maximum = size - ivec2(1);
+    ivec2 p00 = clamp(lower, ivec2(0), maximum);
+    ivec2 p10 = clamp(lower + ivec2(1, 0), ivec2(0), maximum);
+    ivec2 p01 = clamp(lower + ivec2(0, 1), ivec2(0), maximum);
+    ivec2 p11 = clamp(lower + ivec2(1), ivec2(0), maximum);
+    vec4 row0 = mix(
+        texelFetch(sampler, p00, 0),
+        texelFetch(sampler, p10, 0),
+        weight.x);
+    vec4 row1 = mix(
+        texelFetch(sampler, p01, 0),
+        texelFetch(sampler, p11, 0),
+        weight.x);
+    return mix(row0, row1, weight.y);
+}
+
+vec4 SampleFloatTexture2D(sampler2D sampler, vec2 uv)
+{
+    return manual_float_filtering != 0
+        ? SampleFloatTexture2DLinear(sampler, uv)
+        : texture(sampler, uv);
+}
+
+DimensionlessSpectrum GetTransmittanceToTopAtmosphereBoundary(
+    IN(AtmosphereParameters) parameters,
+    IN(TransmittanceTexture) texture_sampler,
+    Length r,
+    Number mu)
+{
+    vec2 uv = GetTransmittanceTextureUvFromRMu(parameters, r, mu);
+    return DimensionlessSpectrum(SampleFloatTexture2D(texture_sampler, uv));
+}
+
+DimensionlessSpectrum GetTransmittance(
+    IN(AtmosphereParameters) parameters,
+    IN(TransmittanceTexture) texture_sampler,
+    Length r,
+    Number mu,
+    Length d,
+    bool ray_r_mu_intersects_ground)
+{
+    Length r_d = ClampRadius(
+        parameters,
+        sqrt(d * d + 2.0 * r * mu * d + r * r));
+    Number mu_d = ClampCosine((r * mu + d) / r_d);
+
+    if (ray_r_mu_intersects_ground)
+    {
+        return min(
+            GetTransmittanceToTopAtmosphereBoundary(
+                parameters, texture_sampler, r_d, -mu_d) /
+            GetTransmittanceToTopAtmosphereBoundary(
+                parameters, texture_sampler, r, -mu),
+            DimensionlessSpectrum(1.0));
+    }
+
+    return min(
+        GetTransmittanceToTopAtmosphereBoundary(
+            parameters, texture_sampler, r, mu) /
+        GetTransmittanceToTopAtmosphereBoundary(
+            parameters, texture_sampler, r_d, mu_d),
+        DimensionlessSpectrum(1.0));
+}
+
+InverseSolidAngle RayleighPhaseFunction(Number nu)
+{
+    InverseSolidAngle k = 3.0 / (16.0 * PI * sr);
+    return k * (1.0 + nu * nu);
+}
+
+InverseSolidAngle MiePhaseFunction(Number g, Number nu)
+{
+    InverseSolidAngle k =
+        3.0 / (8.0 * PI * sr) * (1.0 - g * g) / (2.0 + g * g);
+    return k * (1.0 + nu * nu) /
+        pow(1.0 + g * g - 2.0 * g * nu, 1.5);
+}
+
+vec4 GetScatteringTextureUvwzFromRMuMuSNu(
+    IN(AtmosphereParameters) parameters,
+    Length r,
+    Number mu,
+    Number mu_s,
+    Number nu,
+    bool ray_r_mu_intersects_ground)
+{
+    Length H = sqrt(
+        parameters.top_radius * parameters.top_radius -
+        parameters.bottom_radius * parameters.bottom_radius);
+    Length rho = SafeSqrt(
+        r * r - parameters.bottom_radius * parameters.bottom_radius);
+    Number u_r =
+        GetTextureCoordFromUnitRange(rho / H, SCATTERING_TEXTURE_R_SIZE);
+
+    Length r_mu = r * mu;
+    Area discriminant =
+        r_mu * r_mu - r * r +
+        parameters.bottom_radius * parameters.bottom_radius;
+    Number u_mu;
+    if (ray_r_mu_intersects_ground)
+    {
+        Length d = -r_mu - SafeSqrt(discriminant);
+        Length d_min = r - parameters.bottom_radius;
+        Length d_max = rho;
+        u_mu = 0.5 - 0.5 * GetTextureCoordFromUnitRange(
+            d_max == d_min ? 0.0 : (d - d_min) / (d_max - d_min),
+            SCATTERING_TEXTURE_MU_SIZE / 2);
+    }
+    else
+    {
+        Length d = -r_mu + SafeSqrt(discriminant + H * H);
+        Length d_min = parameters.top_radius - r;
+        Length d_max = rho + H;
+        u_mu = 0.5 + 0.5 * GetTextureCoordFromUnitRange(
+            (d - d_min) / (d_max - d_min),
+            SCATTERING_TEXTURE_MU_SIZE / 2);
+    }
+
+    Length d = DistanceToTopAtmosphereBoundary(
+        parameters, parameters.bottom_radius, mu_s);
+    Length d_min = parameters.top_radius - parameters.bottom_radius;
+    Length d_max = H;
+    Number a = (d - d_min) / (d_max - d_min);
+    Length D = DistanceToTopAtmosphereBoundary(
+        parameters, parameters.bottom_radius, parameters.mu_s_min);
+    Number A = (D - d_min) / (d_max - d_min);
+    Number u_mu_s = GetTextureCoordFromUnitRange(
+        max(1.0 - a / A, 0.0) / (1.0 + a),
+        SCATTERING_TEXTURE_MU_S_SIZE);
+
+    Number u_nu = (nu + 1.0) / 2.0;
+    return vec4(u_nu, u_mu_s, u_mu, u_r);
+}
+
+vec3 GetExtrapolatedSingleMieScattering(
+    IN(AtmosphereParameters) parameters,
+    IN(vec4) scattering)
+{
+    if (scattering.r <= 0.0)
+        return vec3(0.0);
+
+    return scattering.rgb * scattering.a / scattering.r *
+        (parameters.rayleigh_scattering.r / parameters.mie_scattering.r) *
+        (parameters.mie_scattering / parameters.rayleigh_scattering);
+}
+
+IrradianceSpectrum GetCombinedScattering(
+    IN(AtmosphereParameters) parameters,
+    IN(ReducedScatteringTexture) scattering_sampler,
+    IN(ReducedScatteringTexture) single_mie_sampler,
+    Length r,
+    Number mu,
+    Number mu_s,
+    Number nu,
+    bool ray_r_mu_intersects_ground,
+    OUT(IrradianceSpectrum) single_mie_scattering)
+{
+    vec4 uvwz = GetScatteringTextureUvwzFromRMuMuSNu(
+        parameters,
+        r,
+        mu,
+        mu_s,
+        nu,
+        ray_r_mu_intersects_ground);
+    Number tex_coord_x =
+        uvwz.x * Number(SCATTERING_TEXTURE_NU_SIZE - 1);
+    Number tex_x = floor(tex_coord_x);
+    Number lerp = tex_coord_x - tex_x;
+    vec3 uvw0 = vec3(
+        (tex_x + uvwz.y) / Number(SCATTERING_TEXTURE_NU_SIZE),
+        uvwz.z,
+        uvwz.w);
+    vec3 uvw1 = vec3(
+        (tex_x + 1.0 + uvwz.y) / Number(SCATTERING_TEXTURE_NU_SIZE),
+        uvwz.z,
+        uvwz.w);
+
+    vec4 scattering0 = texture(scattering_sampler, uvw0);
+    vec4 scattering1 = texture(scattering_sampler, uvw1);
+    vec4 combined_scattering =
+        scattering0 * (1.0 - lerp) + scattering1 * lerp;
+    IrradianceSpectrum scattering =
+        IrradianceSpectrum(combined_scattering);
+
+    if (combined_scattering_textures != 0)
+    {
+        single_mie_scattering =
+            GetExtrapolatedSingleMieScattering(
+                parameters, combined_scattering);
+    }
+    else
+    {
+        single_mie_scattering = IrradianceSpectrum(
+            texture(single_mie_sampler, uvw0) * (1.0 - lerp) +
+            texture(single_mie_sampler, uvw1) * lerp);
+    }
+
+    return scattering;
+}
+
+RadianceSpectrum GetSkyRadiance(
+    IN(AtmosphereParameters) parameters,
+    IN(TransmittanceTexture) transmittance_sampler,
+    IN(ReducedScatteringTexture) scattering_sampler,
+    IN(ReducedScatteringTexture) single_mie_sampler,
+    Position camera_position,
+    IN(Direction) ray,
+    Length shadow_length,
+    IN(Direction) light_direction,
+    OUT(DimensionlessSpectrum) transmittance)
+{
+    Length r = length(camera_position);
+    Length rmu = dot(camera_position, ray);
+    Length distance_to_top_atmosphere_boundary = -rmu -
+        sqrt(
+            rmu * rmu - r * r +
+            parameters.top_radius * parameters.top_radius);
+    if (distance_to_top_atmosphere_boundary > 0.0 * m)
+    {
+        camera_position += ray * distance_to_top_atmosphere_boundary;
+        r = parameters.top_radius;
+        rmu += distance_to_top_atmosphere_boundary;
+    }
+    else if (r > parameters.top_radius)
+    {
+        transmittance = DimensionlessSpectrum(1.0);
+        return RadianceSpectrum(
+            0.0 * watt_per_square_meter_per_sr_per_nm);
+    }
+
+    Number mu = rmu / r;
+    Number mu_s = dot(camera_position, light_direction) / r;
+    Number nu = dot(ray, light_direction);
+    bool ray_r_mu_intersects_ground =
+        RayIntersectsGround(parameters, r, mu);
+
+    transmittance = ray_r_mu_intersects_ground
+        ? DimensionlessSpectrum(0.0)
+        : GetTransmittanceToTopAtmosphereBoundary(
+              parameters, transmittance_sampler, r, mu);
+    IrradianceSpectrum single_mie_scattering;
+    IrradianceSpectrum scattering;
+    if (shadow_length == 0.0 * m)
+    {
+        scattering = GetCombinedScattering(
+            parameters,
+            scattering_sampler,
+            single_mie_sampler,
+            r,
+            mu,
+            mu_s,
+            nu,
+            ray_r_mu_intersects_ground,
+            single_mie_scattering);
+    }
+    else
+    {
+        Length d = shadow_length;
+        Length r_p = ClampRadius(
+            parameters,
+            sqrt(d * d + 2.0 * r * mu * d + r * r));
+        Number mu_p = (r * mu + d) / r_p;
+        Number mu_s_p = (r * mu_s + d * nu) / r_p;
+
+        scattering = GetCombinedScattering(
+            parameters,
+            scattering_sampler,
+            single_mie_sampler,
+            r_p,
+            mu_p,
+            mu_s_p,
+            nu,
+            ray_r_mu_intersects_ground,
+            single_mie_scattering);
+        DimensionlessSpectrum shadow_transmittance = GetTransmittance(
+            parameters,
+            transmittance_sampler,
+            r,
+            mu,
+            shadow_length,
+            ray_r_mu_intersects_ground);
+        scattering *= shadow_transmittance;
+        single_mie_scattering *= shadow_transmittance;
+    }
+
+    return scattering * RayleighPhaseFunction(nu) +
+        single_mie_scattering *
+            MiePhaseFunction(parameters.mie_phase_function_g, nu);
+}
+
+vec3 GetSkyLuminance(
+    Position camera_position,
+    Direction ray,
+    Length shadow_length,
+    Direction light_direction,
+    out DimensionlessSpectrum transmittance)
+{
+    return GetSkyRadiance(
+               atmosphere,
+               transmittance_texture,
+               scattering_texture,
+               single_mie_scattering_texture,
+               camera_position,
+               ray,
+               shadow_length,
+               light_direction,
+               transmittance) *
+        sky_spectral_radiance_to_luminance;
+}
+
+void main()
+{
+    vec3 view_direction = normalize(view_ray);
+    vec3 transmittance;
+    vec3 luminance = GetSkyLuminance(
+        camera - earth_center,
+        view_direction,
+        0.0,
+        sun_direction,
+        transmittance);
+
+    fragColor = vec4(max(luminance, vec3(0.0)), 1.0);
+}
