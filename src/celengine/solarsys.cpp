@@ -627,6 +627,37 @@ GetFilename(const AssociativeArray& hash,
     return result;
 }
 
+std::optional<std::filesystem::path>
+GetRelativePath(const AssociativeArray& hash,
+                std::string_view key,
+                const char* errorMessage)
+{
+    const std::string* value = hash.getString(key);
+    if (!value)
+        return std::nullopt;
+    if (value->empty())
+        return std::filesystem::path{};
+
+    std::filesystem::path path = std::filesystem::u8path(*value);
+    if (path.is_absolute())
+    {
+        GetLogger()->error(errorMessage);
+        return std::nullopt;
+    }
+
+    for (const auto& component : path)
+    {
+        if (component == "." || component == ".." ||
+            !util::U8FileName(component.u8string(), false).has_value())
+        {
+            GetLogger()->error(errorMessage);
+            return std::nullopt;
+        }
+    }
+
+    return path;
+}
+
 Selection
 GetParentObject(const PlanetarySystem* system)
 {
@@ -744,7 +775,7 @@ void ReadAtmosphere(Body* body,
     if (auto absorptionCoeff = atmosData.getVector3<float>("Absorption"); absorptionCoeff.has_value())
         atmosphere->absorptionCoeff = *absorptionCoeff;
 
-    if (auto brunetonData = GetFilename(atmosData, "BrunetonData"sv, "Invalid filename in BrunetonData\n");
+    if (auto brunetonData = GetRelativePath(atmosData, "BrunetonData"sv, "Invalid filename in BrunetonData\n");
         brunetonData.has_value())
     {
         atmosphere->brunetonData = brunetonData->empty()
