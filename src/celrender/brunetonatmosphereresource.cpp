@@ -35,6 +35,7 @@ createTexture2D(const engine::BrunetonTextureData& data)
         return 0;
 
     glBindTexture(GL_TEXTURE_2D, texture);
+    // RGBA32F is not filterable in core GLES 3; shaders interpolate texels.
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -122,6 +123,16 @@ BrunetonAtmosphereResource::upload(const engine::BrunetonAtmosphereData& data)
             previousError);
     }
 
+    GLint previous2D = 0;
+    GLint previous3D = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &previous2D);
+    glGetIntegerv(GL_TEXTURE_BINDING_3D, &previous3D);
+    const auto restoreBindings = [previous2D, previous3D]()
+    {
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previous2D));
+        glBindTexture(GL_TEXTURE_3D, static_cast<GLuint>(previous3D));
+    };
+
     m_transmittance = createTexture2D(data.transmittance);
     m_scattering = createTexture3D(data.scattering);
     if (!data.parameters.combinedScattering)
@@ -140,12 +151,12 @@ BrunetonAtmosphereResource::upload(const engine::BrunetonAtmosphereData& data)
             "Failed to upload Bruneton atmosphere LUTs (GL error 0x{:x}).\n",
             error);
         release();
+        restoreBindings();
         return false;
     }
 
     m_parameters = data.parameters;
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glBindTexture(GL_TEXTURE_3D, 0);
+    restoreBindings();
     return true;
 }
 
