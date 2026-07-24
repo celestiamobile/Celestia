@@ -617,13 +617,9 @@ void main()
             transmittance);
     }
 
-    vec3 scaled_luminance = max(luminance, vec3(0.0));
-    // Temporary reference-demo comparison path. Celestia normally applies
-    // tone mapping and output transfer functions in its post-process.
-    vec3 tone_mapped_luminance = pow(
-        vec3(1.0) - exp(-scaled_luminance * 10.0),
-        vec3(1.0 / 2.2));
+    vec3 scaled_luminance =
+        max(luminance * luminance_scale, vec3(0.0));
     fragColor = render_mode == 0
         ? vec4(clamp(transmittance, 0.0, 1.0), 1.0)
-        : vec4(tone_mapped_luminance, 1.0);
+        : vec4(scaled_luminance, 1.0);
 }
