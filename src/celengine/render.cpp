@@ -129,6 +129,22 @@ static constexpr float MaxFarNearRatio      = 2000000.0f;
 
 static constexpr float MinRelativeOccluderRadius = 0.005f;
 
+static bool
+canIntegrateBrunetonClouds(const Atmosphere* atmosphere,
+                           const LightingState& lights,
+                           const Texture* cloudTexture,
+                           const Texture* cloudNormalMap)
+{
+    return atmosphere != nullptr &&
+           atmosphere->cloudHeight > 0.0f &&
+           lights.nLights > 0 &&
+           cloudTexture != nullptr &&
+           cloudNormalMap == nullptr &&
+           cloudTexture->getLODCount() == 1 &&
+           cloudTexture->getUTileCount(0) == 1 &&
+           cloudTexture->getVTileCount(0) == 1;
+}
+
 // Size at which the orbit cache will be flushed of old orbit paths
 static constexpr unsigned int OrbitCacheCullThreshold = 200;
 // Age in frames at which unused orbit paths may be eliminated from the cache
@@ -2547,6 +2563,10 @@ void Renderer::renderObject(const Vector3f& pos,
         !getShaderManager().isErrorProgram(brunetonProgram)
             ? m_brunetonAtmosphereManager->find(atmosphere->brunetonLutFile)
             : nullptr;
+    const bool integrateBrunetonClouds =
+        brunetonResource != nullptr &&
+        canIntegrateBrunetonClouds(
+            atmosphere, ls, cloudTex, cloudNormalMap);
     Atmosphere effectiveAtmosphere;
     const Atmosphere* surfaceAtmosphere = atmosphere;
     if (brunetonResource != nullptr)
@@ -2660,7 +2680,9 @@ void Renderer::renderObject(const Vector3f& pos,
         }
 
         // If there's a cloud layer, we'll render it now.
-        if (cloudTex != nullptr && !insidePlanet)
+        if (cloudTex != nullptr &&
+            !insidePlanet &&
+            !integrateBrunetonClouds)
         {
             float cloudScale = 1.0f + atmosphere->cloudHeight / radius;
             Matrix4f cmv = math::scale(planetMV, cloudScale);
@@ -3212,6 +3234,45 @@ bool Renderer::renderBrunetonAtmospheres(const FramebufferObject& source,
         assert(lights.nLights <= MaxLights);
         lights.ambientColor = ambientColor.toVector3();
 
+        Texture* cloudTexture = nullptr;
+        Texture* cloudNormalMap = nullptr;
+        if (util::is_set(renderFlags, RenderFlags::ShowCloudMaps))
+        {
+            if (atmosphere->cloudTexture !=
+                util::TextureHandle::Invalid)
+            {
+                cloudTexture =
+                    m_textureManager->find(
+                        atmosphere->cloudTexture);
+            }
+            if (atmosphere->cloudNormalMap !=
+                util::TextureHandle::Invalid)
+            {
+                cloudNormalMap =
+                    m_textureManager->find(
+                        atmosphere->cloudNormalMap);
+            }
+        }
+
+        if (!canIntegrateBrunetonClouds(
+                atmosphere,
+                lights,
+                cloudTexture,
+                cloudNormalMap))
+        {
+            cloudTexture = nullptr;
+        }
+
+        float cloudTextureOffset = 0.0f;
+        if (atmosphere->cloudSpeed != 0.0f)
+        {
+            cloudTextureOffset = static_cast<float>(
+                -math::pfmod(
+                    m_renderTime * atmosphere->cloudSpeed * 0.5 *
+                        celestia::numbers::inv_pi,
+                    1.0));
+        }
+
         RenderInfo ri;
         ri.eyePos_obj = eyePosition;
         ri.orientation =
@@ -3223,7 +3284,10 @@ bool Renderer::renderBrunetonAtmospheres(const FramebufferObject& source,
             matrices,
             *resource,
             atmosphere->brunetonLuminanceScale,
-            radius);
+            radius,
+            cloudTexture,
+            atmosphere->cloudHeight,
+            cloudTextureOffset);
     }
 
     return true;

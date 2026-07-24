@@ -26,6 +26,7 @@ class Renderer;
 struct RenderInfo;
 class LightingState;
 struct Matrices;
+class Texture;
 
 namespace celestia::math
 {
@@ -73,7 +74,10 @@ public:
         const Matrices&,
         const BrunetonAtmosphereResource&,
         float luminanceScale,
-        float bodyRadius);
+        float bodyRadius,
+        Texture* cloudTexture,
+        float cloudHeight,
+        float cloudTextureOffset);
 
     void setSceneDepth(
         GLuint depthTexture,

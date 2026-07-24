@@ -22,6 +22,7 @@
 #include <celengine/render.h>
 #include <celengine/renderinfo.h>
 #include <celengine/shadermanager.h>
+#include <celengine/texture.h>
 #include <celengine/brunetonatmospherefile.h>
 #include <celmath/frustum.h>
 #include <celmath/mathlib.h>
@@ -373,7 +374,10 @@ AtmosphereRenderer::renderBruneton(
     const Matrices& m,
     const BrunetonAtmosphereResource& resource,
     float luminanceScale,
-    float bodyRadius)
+    float bodyRadius,
+    Texture* cloudTexture,
+    float cloudHeight,
+    float cloudTextureOffset)
 {
     auto* program =
         m_renderer.getShaderManager().getShader(StaticShader::BrunetonAtmosphere);
@@ -394,6 +398,11 @@ AtmosphereRenderer::renderBruneton(
         parameters.bottomRadius;
     FloatShaderParameter(programId, "atmosphere.top_radius") =
         parameters.topRadius;
+    Vec3ShaderParameter(programId, "atmosphere.solar_irradiance") =
+        Eigen::Map<const Eigen::Vector3f>(
+            parameters.solarIrradiance.data());
+    FloatShaderParameter(programId, "atmosphere.sun_angular_radius") =
+        parameters.sunAngularRadius;
     Vec3ShaderParameter(programId, "atmosphere.rayleigh_scattering") =
         Eigen::Map<const Eigen::Vector3f>(parameters.rayleighScattering.data());
     Vec3ShaderParameter(programId, "atmosphere.mie_scattering") =
@@ -442,6 +451,22 @@ AtmosphereRenderer::renderBruneton(
     IntegerShaderParameter(programId, "single_mie_scattering_texture") = 2;
     IntegerShaderParameter(programId, "scene_depth_texture") = 3;
     IntegerShaderParameter(programId, "depth_partition_texture") = 4;
+    IntegerShaderParameter(programId, "irradiance_texture") = 5;
+
+    TextureTile cloudTile(0);
+    const bool renderClouds =
+        cloudTexture != nullptr &&
+        (cloudTile = cloudTexture->getTile(0, 0, 0)).texID != 0;
+    IntegerShaderParameter(programId, "render_clouds") =
+        renderClouds ? 1 : 0;
+    IntegerShaderParameter(programId, "cloud_texture") = 6;
+    IntegerShaderParameter(programId, "cloud_texture_has_alpha") =
+        renderClouds && cloudTexture->hasAlpha() ? 1 : 0;
+    FloatShaderParameter(programId, "cloud_radius") =
+        parameters.bottomRadius *
+        (1.0f + cloudHeight / bodyRadius);
+    FloatShaderParameter(programId, "cloud_texture_offset") =
+        cloudTextureOffset;
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, resource.transmittanceTexture());
@@ -457,6 +482,12 @@ AtmosphereRenderer::renderBruneton(
     glBindTexture(GL_TEXTURE_2D, m_sceneDepthTexture);
     glActiveTexture(GL_TEXTURE4);
     glBindTexture(GL_TEXTURE_2D, m_depthPartitionTexture);
+    glActiveTexture(GL_TEXTURE5);
+    glBindTexture(GL_TEXTURE_2D, resource.irradianceTexture());
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(
+        GL_TEXTURE_2D,
+        renderClouds ? cloudTile.texID : resource.transmittanceTexture());
     glActiveTexture(GL_TEXTURE0);
 
     Renderer::PipelineState state;
