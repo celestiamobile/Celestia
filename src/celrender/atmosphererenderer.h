@@ -74,7 +74,7 @@ public:
         const Matrices&,
         const BrunetonAtmosphereResource&,
         float luminanceScale,
-        float bodyRadius,
+        const Eigen::Vector3f& bodySemiAxes,
         Texture* cloudTexture,
         float cloudHeight,
         float cloudTextureOffset);

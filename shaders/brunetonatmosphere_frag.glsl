@@ -70,7 +70,6 @@ uniform vec3 earth_center;
 uniform vec3 sun_direction;
 uniform vec3 sky_spectral_radiance_to_luminance;
 uniform float luminance_scale;
-uniform float lut_units_per_km;
 uniform float cloud_radius;
 uniform float cloud_texture_offset;
 uniform vec2 viewport_size;
@@ -712,8 +711,10 @@ Length GetSceneDistance()
         (near_far.y + near_far.x -
          ndc_z * (near_far.y - near_far.x));
     Direction ray_view = normalize(view_ray_view);
+    float model_units_per_km =
+        length(view_ray) / max(length(view_ray_view), 1.0e-6);
     return view_z / max(-ray_view.z, 1.0e-6) *
-        lut_units_per_km;
+        model_units_per_km;
 }
 
 Length CorrectGroundEndpoint(

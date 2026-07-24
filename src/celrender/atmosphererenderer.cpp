@@ -374,7 +374,7 @@ AtmosphereRenderer::renderBruneton(
     const Matrices& m,
     const BrunetonAtmosphereResource& resource,
     float luminanceScale,
-    float bodyRadius,
+    const Eigen::Vector3f& bodySemiAxes,
     Texture* cloudTexture,
     float cloudHeight,
     float cloudTextureOffset)
@@ -390,6 +390,8 @@ AtmosphereRenderer::renderBruneton(
 
     Eigen::Matrix4f modelFromView = Eigen::Matrix4f::Identity();
     modelFromView.topLeftCorner<3, 3>() =
+        (parameters.bottomRadius *
+         bodySemiAxes.cwiseInverse()).asDiagonal() *
         ri.orientation.conjugate().toRotationMatrix();
     Mat4ShaderParameter(programId, "model_from_view") = modelFromView;
     Mat4ShaderParameter(programId, "view_from_clip") = m.projection->inverse();
@@ -415,10 +417,14 @@ AtmosphereRenderer::renderBruneton(
     Vec3ShaderParameter(programId, "camera") =
         ri.eyePos_obj * parameters.bottomRadius;
     Vec3ShaderParameter(programId, "earth_center") = Eigen::Vector3f::Zero();
-    Vec3ShaderParameter(programId, "sun_direction") =
+    Eigen::Vector3f sunDirection =
         ls.nLights == 0
             ? Eigen::Vector3f::UnitZ()
             : ls.lights[0].direction_obj;
+    sunDirection =
+        (parameters.bottomRadius *
+         bodySemiAxes.cwiseInverse()).cwiseProduct(sunDirection).normalized();
+    Vec3ShaderParameter(programId, "sun_direction") = sunDirection;
     Eigen::Vector3f skyRadianceToLuminance = Eigen::Vector3f::Ones();
     if (parameters.valueMode == engine::BrunetonLutValueMode::Radiance)
     {
@@ -429,8 +435,6 @@ AtmosphereRenderer::renderBruneton(
     Vec3ShaderParameter(programId, "sky_spectral_radiance_to_luminance") =
         skyRadianceToLuminance;
     FloatShaderParameter(programId, "luminance_scale") = luminanceScale;
-    FloatShaderParameter(programId, "lut_units_per_km") =
-        parameters.bottomRadius / bodyRadius;
     Vec2ShaderParameter(programId, "viewport_size") =
         Eigen::Vector2f(
             static_cast<float>(m_sceneWidth),
@@ -464,7 +468,7 @@ AtmosphereRenderer::renderBruneton(
         renderClouds && cloudTexture->hasAlpha() ? 1 : 0;
     FloatShaderParameter(programId, "cloud_radius") =
         parameters.bottomRadius *
-        (1.0f + cloudHeight / bodyRadius);
+        (1.0f + cloudHeight / bodySemiAxes.maxCoeff());
     FloatShaderParameter(programId, "cloud_texture_offset") =
         cloudTextureOffset;
 

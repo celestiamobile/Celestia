@@ -3286,7 +3286,7 @@ bool Renderer::renderBrunetonAtmospheres(const FramebufferObject& source,
             matrices,
             *resource,
             atmosphere->brunetonLuminanceScale,
-            radius,
+            scaleFactors,
             cloudTexture,
             atmosphere->cloudHeight,
             cloudTextureOffset);
