@@ -527,6 +527,11 @@ class Renderer
                           float nearPlaneDistance,
                           const Matrices&);
 
+    void renderBrunetonAtmosphere(Body& body,
+                                  const Eigen::Vector3f& pos,
+                                  const Observer& observer,
+                                  const Matrices&);
+
     void renderStar(const Star& star,
                     const Eigen::Vector3f& pos,
                     float distance,
