@@ -75,6 +75,7 @@ public:
         const BrunetonAtmosphereResource&,
         float luminanceScale,
         const Eigen::Vector3f& bodySemiAxes,
+        GLuint surfaceDepthTexture,
         Texture* cloudTexture,
         float cloudHeight,
         float cloudTextureOffset);

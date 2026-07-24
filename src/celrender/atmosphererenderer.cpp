@@ -375,6 +375,7 @@ AtmosphereRenderer::renderBruneton(
     const BrunetonAtmosphereResource& resource,
     float luminanceScale,
     const Eigen::Vector3f& bodySemiAxes,
+    GLuint surfaceDepthTexture,
     Texture* cloudTexture,
     float cloudHeight,
     float cloudTextureOffset)
@@ -461,6 +462,7 @@ AtmosphereRenderer::renderBruneton(
     IntegerShaderParameter(programId, "scene_depth_texture") = 3;
     IntegerShaderParameter(programId, "depth_partition_texture") = 4;
     IntegerShaderParameter(programId, "irradiance_texture") = 5;
+    IntegerShaderParameter(programId, "surface_depth_texture") = 7;
 
     TextureTile cloudTile(0);
     const bool renderClouds =
@@ -497,6 +499,8 @@ AtmosphereRenderer::renderBruneton(
     glBindTexture(
         GL_TEXTURE_2D,
         renderClouds ? cloudTile.texID : resource.transmittanceTexture());
+    glActiveTexture(GL_TEXTURE7);
+    glBindTexture(GL_TEXTURE_2D, surfaceDepthTexture);
     glActiveTexture(GL_TEXTURE0);
 
     Renderer::PipelineState state;
