@@ -683,13 +683,16 @@ vec2 RaySphereIntersections(
     return vec2(-b - root, -b + root);
 }
 
-Length GetSceneDistance()
+Length GetSceneDistance(out Length uncertainty)
 {
     vec2 uv =
         (gl_FragCoord.xy - viewport_origin) / viewport_size;
     float depth = texture(scene_depth_texture, uv).r;
     if (depth >= 1.0)
+    {
+        uncertainty = 0.0;
         return 1.0e30;
+    }
 
     float count = float(depth_partition_count);
     int partition_index = clamp(
@@ -706,21 +709,47 @@ Length GetSceneDistance()
         depth_partition_texture,
         ivec2(partition_index, 0),
         0).rg;
+    float denominator =
+        near_far.y + near_far.x -
+        ndc_z * (near_far.y - near_far.x);
     float view_z =
         2.0 * near_far.x * near_far.y /
-        (near_far.y + near_far.x -
-         ndc_z * (near_far.y - near_far.x));
+        denominator;
     Direction ray_view = normalize(view_ray_view);
     float model_units_per_km =
         length(view_ray) / max(length(view_ray_view), 1.0e-6);
-    return view_z / max(-ray_view.z, 1.0e-6) *
-        model_units_per_km;
+    float distance_scale =
+        model_units_per_km / max(-ray_view.z, 1.0e-6);
+
+    // The packed scene depth is 24-bit. Allow a small conservative envelope
+    // for quantization and rasterized surface triangles; with a very close
+    // near plane, even this can represent substantial distance at the horizon.
+    const float surface_depth_error_steps = 256.0;
+    float local_depth_step =
+        count * surface_depth_error_steps / 16777215.0;
+    float ndc_z_near =
+        (max(local_depth - local_depth_step, 0.0) * 2.0 - 1.0);
+    float ndc_z_far =
+        (min(local_depth + local_depth_step, 1.0) * 2.0 - 1.0);
+    float view_z_near =
+        2.0 * near_far.x * near_far.y /
+        (near_far.y + near_far.x -
+         ndc_z_near * (near_far.y - near_far.x));
+    float view_z_far =
+        2.0 * near_far.x * near_far.y /
+        (near_far.y + near_far.x -
+         ndc_z_far * (near_far.y - near_far.x));
+    uncertainty =
+        max(view_z - view_z_near, view_z_far - view_z) *
+        distance_scale;
+    return view_z * distance_scale;
 }
 
 Length CorrectGroundEndpoint(
     Position camera_position,
     Direction ray,
-    Length scene_distance)
+    Length scene_distance,
+    Length scene_distance_uncertainty)
 {
     vec2 ground_intersections = RaySphereIntersections(
         camera_position, ray, atmosphere.bottom_radius);
@@ -732,7 +761,8 @@ Length CorrectGroundEndpoint(
 
     Length pixel_tolerance =
         max(length(dFdx(ray)), length(dFdy(ray))) *
-        ground_intersections.x;
+        ground_intersections.x +
+        scene_distance_uncertainty;
     vec3 ray_dx = dFdx(ray);
     vec3 ray_dy = dFdy(ray);
     vec2 adjacent_ground[4] = vec2[4](
@@ -857,9 +887,14 @@ void main()
     vec3 view_direction = normalize(view_ray);
     vec3 transmittance;
     Position camera_position = camera - earth_center;
-    Length scene_distance = GetSceneDistance();
+    Length scene_distance_uncertainty;
+    Length scene_distance =
+        GetSceneDistance(scene_distance_uncertainty);
     scene_distance = CorrectGroundEndpoint(
-        camera_position, view_direction, scene_distance);
+        camera_position,
+        view_direction,
+        scene_distance,
+        scene_distance_uncertainty);
     vec2 atmosphere_intersections = RaySphereIntersections(
         camera_position, view_direction, atmosphere.top_radius);
 
