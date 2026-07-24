@@ -37,5 +37,6 @@ struct RenderInfo
     float lunarLambert{ 0.0f };
     float pixWidth{ 1.0f };
     float pointScale{ 1.0f };
+    float surfaceBodyId{ 0.0f };
     bool isStar{ false };
 };

@@ -1613,6 +1613,13 @@ void Renderer::render(const Observer& observer,
             {
                 return a.distance > b.distance;
             });
+        for (std::size_t i = 0;
+             i < m_brunetonAtmospheres.size();
+             ++i)
+        {
+            m_brunetonAtmospheres[i].surfaceBodyId =
+                static_cast<GLint>(i + 1);
+        }
     }
 
     // Sort the annotations
@@ -1948,6 +1955,8 @@ static void renderSphereUnlit(const RenderInfo& ri,
 
     ShaderProperties shadprop;
     shadprop.texUsage = TexUsage::TextureCoordTransform;
+    if (ri.surfaceBodyId > 0.0f)
+        shadprop.texUsage |= TexUsage::SurfaceId;
 
     // Set up the textures used by this object
     if (ri.baseTex != nullptr)
@@ -1979,6 +1988,8 @@ static void renderSphereUnlit(const RenderInfo& ri,
     prog->textureOffset = 0.0f;
     prog->ambientColor = ri.color.toVector3();
     prog->opacity = 1.0f;
+    if (util::is_set(shadprop.texUsage, TexUsage::SurfaceId))
+        prog->surfaceBodyId = ri.surfaceBodyId;
     if (ri.isStar)
         prog->eyePosition = ri.eyePos_obj;
 
@@ -2357,10 +2368,10 @@ void Renderer::renderObject(const Vector3f& pos,
                             float farPlaneDistance,
                             const RenderProperties& obj,
                             const LightingState& ls,
-                            const Matrices &m,
-                            Body* body)
+                            const Matrices &m)
 {
     RenderInfo ri;
+    ri.surfaceBodyId = obj.surfaceBodyId;
     double now = observer.getTime();
 
     float altitude = static_cast<float>(distance - obj.radius);
@@ -2528,26 +2539,6 @@ void Renderer::renderObject(const Vector3f& pos,
     // largest semiaxis.)
     auto viewFrustum = projectionMode->getFrustum(nearPlaneDistance / radius, frustumFarPlane / radius, observer.getZoom());
     viewFrustum.transform(invMV);
-
-    if (body != nullptr &&
-        obj.geometry == engine::GeometryHandle::Invalid)
-    {
-        auto atmosphereEntry = std::find_if(
-            m_brunetonAtmospheres.begin(),
-            m_brunetonAtmospheres.end(),
-            [body](const BrunetonAtmosphereEntry& entry)
-            {
-                return entry.body == body;
-            });
-        if (atmosphereEntry != m_brunetonAtmospheres.end())
-        {
-            atmosphereEntry->surfaceProjection = *m.projection;
-            atmosphereEntry->surfaceModelView = planetMV;
-            atmosphereEntry->surfaceFrustum = viewFrustum;
-            atmosphereEntry->surfacePixWidth = ri.pixWidth;
-            atmosphereEntry->depthPartition = currentIntervalIndex;
-        }
-    }
 
     // Get cloud layer parameters
     Texture* cloudTex       = nullptr;
@@ -3117,9 +3108,22 @@ void Renderer::renderPlanet(Body& body,
             lights.ringShadows[li].texLod = lod;
         }
 
+        auto atmosphereEntry = std::find_if(
+            m_brunetonAtmospheres.begin(),
+            m_brunetonAtmospheres.end(),
+            [&body](const BrunetonAtmosphereEntry& entry)
+            {
+                return entry.body == &body;
+            });
+        if (atmosphereEntry != m_brunetonAtmospheres.end())
+        {
+            rp.surfaceBodyId =
+                static_cast<float>(
+                    atmosphereEntry->surfaceBodyId);
+        }
         renderObject(pos, distance, observer,
                      nearPlaneDistance, farPlaneDistance,
-                     rp, lights, m, &body);
+                     rp, lights, m);
 
         if (bodyFeaturesManager->hasLocations(&body) && util::is_set(labelMode, RenderLabels::LocationLabels))
         {
@@ -3178,24 +3182,6 @@ bool Renderer::renderBrunetonAtmospheres(const FramebufferObject& source,
         originX,
         originY);
 
-    if (m_brunetonSurfaceFBO == nullptr ||
-        m_brunetonSurfaceFBO->width() != source.width() ||
-        m_brunetonSurfaceFBO->height() != source.height())
-    {
-        m_brunetonSurfaceFBO = std::make_unique<FramebufferObject>(
-            source.width(),
-            source.height(),
-            FramebufferObject::Attachment::Depth);
-    }
-    if (!m_brunetonSurfaceFBO->isValid())
-        return false;
-
-    auto destination = FramebufferObject::wrapCurrentBinding();
-    std::array<GLint, 4> savedViewport{};
-    std::array<GLfloat, 2> savedDepthRange{};
-    glGetIntegerv(GL_VIEWPORT, savedViewport.data());
-    glGetFloatv(GL_DEPTH_RANGE, savedDepthRange.data());
-
     const BodyFeaturesManager* bodyFeaturesManager =
         GetBodyFeaturesManager();
     Matrices matrices = { &m_projMatrix, &m_modelMatrix };
@@ -3222,85 +3208,6 @@ bool Renderer::renderBrunetonAtmospheres(const FramebufferObject& source,
                 atmosphere->brunetonLutFile);
         if (resource == nullptr)
             continue;
-
-        if (!m_brunetonSurfaceFBO->bind())
-            return false;
-
-        glViewport(
-            0,
-            0,
-            static_cast<GLsizei>(source.width()),
-            static_cast<GLsizei>(source.height()));
-        PipelineState depthState;
-        depthState.depthMask = true;
-        depthState.depthTest = true;
-        setPipelineState(depthState);
-        glClear(GL_DEPTH_BUFFER_BIT);
-
-        if (entry.surfaceFrustum.has_value() &&
-            entry.depthPartition >= 0)
-        {
-            auto* depthProgram =
-                getShaderManager().getShader(StaticShader::Depth);
-            if (depthProgram == nullptr ||
-                getShaderManager().isErrorProgram(depthProgram))
-            {
-                destination.bind();
-                glViewport(
-                    savedViewport[0],
-                    savedViewport[1],
-                    savedViewport[2],
-                    savedViewport[3]);
-                glDepthRange(savedDepthRange[0], savedDepthRange[1]);
-                return false;
-            }
-
-            const float partitionSize =
-                1.0f / static_cast<float>(depthPartitions.size());
-            glDepthRange(
-                1.0f -
-                    static_cast<float>(entry.depthPartition + 1) *
-                        partitionSize,
-                1.0f -
-                    static_cast<float>(entry.depthPartition) *
-                        partitionSize);
-
-            depthProgram->use();
-            depthProgram->setMVPMatrices(
-                entry.surfaceProjection,
-                entry.surfaceModelView);
-            const GLboolean cullFaceEnabled =
-                glIsEnabled(GL_CULL_FACE);
-            GLint cullFaceMode;
-            GLint frontFaceMode;
-            glGetIntegerv(GL_CULL_FACE_MODE, &cullFaceMode);
-            glGetIntegerv(GL_FRONT_FACE, &frontFaceMode);
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_BACK);
-            glFrontFace(GL_CCW);
-            m_lodSphere->render(
-                0,
-                *entry.surfaceFrustum,
-                entry.surfacePixWidth,
-                nullptr,
-                0,
-                depthProgram);
-            glCullFace(cullFaceMode);
-            glFrontFace(frontFaceMode);
-            if (!cullFaceEnabled)
-                glDisable(GL_CULL_FACE);
-        }
-
-        const bool resolved = m_brunetonSurfaceFBO->resolve();
-        const bool rebound = destination.bind();
-        glViewport(
-            savedViewport[0],
-            savedViewport[1],
-            savedViewport[2],
-            savedViewport[3]);
-        glDepthRange(savedDepthRange[0], savedDepthRange[1]);
-        if (!resolved || !rebound)
-            return false;
 
         const float radius = body.getRadius();
         const Vector3f semiAxes = body.getSemiAxes() / radius;
@@ -3407,7 +3314,8 @@ bool Renderer::renderBrunetonAtmospheres(const FramebufferObject& source,
             *resource,
             atmosphere->brunetonLuminanceScale,
             scaleFactors,
-            m_brunetonSurfaceFBO->depthTexture(),
+            source.colorTexture(),
+            entry.surfaceBodyId,
             cloudTexture,
             atmosphere->cloudHeight,
             cloudTextureOffset);
@@ -3582,7 +3490,7 @@ void Renderer::renderStar(const Star& star,
 
         renderObject(pos, distance, observer,
                      nearPlaneDistance, farPlaneDistance,
-                     rp, LightingState(), m, nullptr);
+                     rp, LightingState(), m);
     }
 
     renderObjectAsPoint(PointObjectInfo{pos, distance, star.getRadius()},
