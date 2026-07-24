@@ -22,12 +22,13 @@
 #include <celengine/render.h>
 #include <celengine/renderinfo.h>
 #include <celengine/shadermanager.h>
+#include <celengine/brunetonatmospherefile.h>
 #include <celmath/frustum.h>
 #include <celmath/mathlib.h>
 #include <celmath/vecgl.h>
 #include <celutil/indexlist.h>
 
-#include "brunetonatmospheremanager.h"
+#include "brunetonatmosphereresource.h"
 
 using celestia::util::BuildIndexList;
 using celestia::util::IndexListCapacity;
@@ -52,15 +53,6 @@ AtmosphereRenderer::AtmosphereRenderer(Renderer &renderer) :
 }
 
 AtmosphereRenderer::~AtmosphereRenderer() = default;
-
-void
-AtmosphereRenderer::requestBrunetonResource(const Atmosphere& atmosphere)
-{
-    if (atmosphere.brunetonLutFile.empty())
-        return;
-
-    m_renderer.getBrunetonAtmosphereManager()->find(atmosphere.brunetonLutFile);
-}
 
 void AtmosphereRenderer::initGL()
 {
@@ -93,6 +85,27 @@ void AtmosphereRenderer::initGL()
         sizeof(SkyVertex),
         offsetof(SkyVertex, color));
     m_vo.setIndexBuffer(gl::Buffer(gl::Buffer::TargetHint::ElementArray), 0, gl::VertexObject::IndexType::UnsignedShort);
+
+    constexpr std::array<std::array<float, 4>, 4> vertices
+    {{
+        {{ -1.0f, -1.0f, 0.0f, 1.0f }},
+        {{  1.0f, -1.0f, 0.0f, 1.0f }},
+        {{ -1.0f,  1.0f, 0.0f, 1.0f }},
+        {{  1.0f,  1.0f, 0.0f, 1.0f }},
+    }};
+    m_brunetonBo = gl::Buffer(gl::Buffer::TargetHint::Array);
+    m_brunetonBo.setData(vertices);
+    m_brunetonVo =
+        gl::VertexObject(gl::VertexObject::Primitive::TriangleStrip);
+    m_brunetonVo.addVertexBuffer(
+        m_brunetonBo,
+        CelestiaGLProgram::VertexCoordAttributeIndex,
+        4,
+        gl::VertexObject::DataType::Float,
+        false,
+        sizeof(vertices[0]),
+        0);
+    m_brunetonVo.setCount(static_cast<GLsizei>(vertices.size()));
 }
 
 void
@@ -310,6 +323,97 @@ AtmosphereRenderer::computeLegacy(
     BuildIndexList(static_cast<ushort>(nRings), static_cast<ushort>(nSlices), m_skyIndices);
 }
 
+bool
+AtmosphereRenderer::renderBruneton(
+    const RenderInfo& ri,
+    const LightingState& ls,
+    const Matrices& m,
+    const BrunetonAtmosphereResource& resource,
+    float luminanceScale)
+{
+    auto* program =
+        m_renderer.getShaderManager().getShader(StaticShader::BrunetonAtmosphere);
+    if (program == nullptr)
+        return false;
+
+    const auto& parameters = resource.parameters();
+    const GLuint programId = program->getID();
+    program->use();
+
+    Eigen::Matrix4f modelFromView = Eigen::Matrix4f::Identity();
+    modelFromView.topLeftCorner<3, 3>() =
+        ri.orientation.conjugate().toRotationMatrix();
+    Mat4ShaderParameter(programId, "model_from_view") = modelFromView;
+    Mat4ShaderParameter(programId, "view_from_clip") = m.projection->inverse();
+
+    FloatShaderParameter(programId, "atmosphere.bottom_radius") =
+        parameters.bottomRadius;
+    FloatShaderParameter(programId, "atmosphere.top_radius") =
+        parameters.topRadius;
+    Vec3ShaderParameter(programId, "atmosphere.rayleigh_scattering") =
+        Eigen::Map<const Eigen::Vector3f>(parameters.rayleighScattering.data());
+    Vec3ShaderParameter(programId, "atmosphere.mie_scattering") =
+        Eigen::Map<const Eigen::Vector3f>(parameters.mieScattering.data());
+    FloatShaderParameter(programId, "atmosphere.mie_phase_function_g") =
+        parameters.miePhaseFunctionG;
+    FloatShaderParameter(programId, "atmosphere.mu_s_min") =
+        parameters.muSMin;
+
+    Vec3ShaderParameter(programId, "camera") =
+        ri.eyePos_obj * parameters.bottomRadius;
+    Vec3ShaderParameter(programId, "earth_center") = Eigen::Vector3f::Zero();
+    Vec3ShaderParameter(programId, "sun_direction") =
+        ls.nLights == 0
+            ? Eigen::Vector3f::UnitZ()
+            : ls.lights[0].direction_obj;
+    Eigen::Vector3f skyRadianceToLuminance = Eigen::Vector3f::Ones();
+    if (parameters.valueMode == engine::BrunetonLutValueMode::Radiance)
+    {
+        skyRadianceToLuminance =
+            Eigen::Map<const Eigen::Vector3f>(
+                parameters.skySpectralRadianceToLuminance.data());
+    }
+    Vec3ShaderParameter(programId, "sky_spectral_radiance_to_luminance") =
+        skyRadianceToLuminance;
+    FloatShaderParameter(programId, "luminance_scale") = luminanceScale;
+
+    IntegerShaderParameter(programId, "combined_scattering_textures") =
+        parameters.combinedScattering ? 1 : 0;
+    IntegerShaderParameter(programId, "manual_float_filtering") =
+        resource.usesManualFloatFiltering() ? 1 : 0;
+    IntegerShaderParameter(programId, "transmittance_texture") = 0;
+    IntegerShaderParameter(programId, "scattering_texture") = 1;
+    IntegerShaderParameter(programId, "single_mie_scattering_texture") = 2;
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, resource.transmittanceTexture());
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_3D, resource.scatteringTexture());
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(
+        GL_TEXTURE_3D,
+        parameters.combinedScattering
+            ? resource.scatteringTexture()
+            : resource.singleMieTexture());
+    glActiveTexture(GL_TEXTURE0);
+
+    Renderer::PipelineState state;
+    state.blending = true;
+    state.blendFunc = { GL_ZERO, GL_SRC_COLOR };
+    m_renderer.setPipelineState(state);
+    IntegerShaderParameter(programId, "render_mode") = 0;
+    m_brunetonVo.draw();
+
+    if (ls.nLights == 0)
+        return true;
+
+    state.blendFunc = { GL_ONE, GL_ONE };
+    m_renderer.setPipelineState(state);
+    IntegerShaderParameter(programId, "render_mode") = 1;
+    m_brunetonVo.draw();
+    return true;
+}
+
 void
 AtmosphereRenderer::renderLegacy(
     const Atmosphere         &atmosphere,
@@ -322,7 +426,6 @@ AtmosphereRenderer::renderLegacy(
     bool                      lit,
     const Matrices           &m)
 {
-    requestBrunetonResource(atmosphere);
     computeLegacy(atmosphere, ls, center, orientation, semiAxes, sunDirection, pixSize, lit);
 
     ShaderProperties shadprop;
@@ -359,8 +462,6 @@ AtmosphereRenderer::render(
     const math::Frustum      &frustum,
     const Matrices           &m)
 {
-    requestBrunetonResource(atmosphere);
-
     ShaderProperties shadprop;
     shadprop.nLights = static_cast<ushort>(ls.nLights);
 

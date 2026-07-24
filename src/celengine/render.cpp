@@ -52,6 +52,7 @@
 #include <celastro/astro.h>
 #include <celastro/date.h>
 #include <celcompat/numbers.h>
+#include <celengine/fisheyeprojectionmode.h>
 #include <celengine/observer.h>
 #include <celephem/rotation.h>
 #include <celmath/frustum.h>
@@ -2491,13 +2492,37 @@ void Renderer::renderObject(const Vector3f& pos,
             cloudTexOffset = (float) (-math::pfmod(now * atmosphere->cloudSpeed * 0.5 * celestia::numbers::inv_pi, 1.0));
     }
 
+    const bool useBruneton =
+        atmosphere != nullptr &&
+        !atmosphere->brunetonLutFile.empty() &&
+        util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
+        !insidePlanet &&
+        dynamic_cast<const engine::FisheyeProjectionMode*>(
+            projectionMode.get()) == nullptr;
+    auto* brunetonProgram = useBruneton
+        ? getShaderManager().getShader(StaticShader::BrunetonAtmosphere)
+        : nullptr;
+    auto* brunetonResource =
+        brunetonProgram != nullptr &&
+        !getShaderManager().isErrorProgram(brunetonProgram)
+            ? m_brunetonAtmosphereManager->find(atmosphere->brunetonLutFile)
+            : nullptr;
+    Atmosphere effectiveAtmosphere;
+    const Atmosphere* surfaceAtmosphere = atmosphere;
+    if (brunetonResource != nullptr)
+    {
+        effectiveAtmosphere = *atmosphere;
+        effectiveAtmosphere.mieScaleHeight = 0.0f;
+        surfaceAtmosphere = &effectiveAtmosphere;
+    }
+
     if (obj.geometry == engine::GeometryHandle::Invalid)
     {
         // A null model indicates that this body is a sphere
         if (lit)
         {
             renderEllipsoid_GLSL(ri, ls,
-                                 atmosphere, cloudTexOffset,
+                                 surfaceAtmosphere, cloudTexOffset,
                                  scaleFactors,
                                  renderFlags,
                                  obj.orientation,
@@ -2522,7 +2547,7 @@ void Renderer::renderObject(const Vector3f& pos,
                                 ri,
                                 texOverride,
                                 ls,
-                                obj.atmosphere,
+                                surfaceAtmosphere,
                                 geometryScale,
                                 renderFlags,
                                 obj.orientation,
@@ -2538,17 +2563,6 @@ void Renderer::renderObject(const Vector3f& pos,
                                       planetMVP, this);
         }
         glActiveTexture(GL_TEXTURE0);
-    }
-
-    if (showRings)
-    {
-        // calculate ring segment size in pixels, actual size is segmentSizeInPixels * tan(segmentAngle)
-        float segmentSizeInPixels = 2.0f * obj.rings->outerRadius / (max(nearPlaneDistance, altitude) * pixelSize);
-        m_ringRenderer->renderRings(*obj.rings, ri, ls,
-                                    radius, 1.0f - obj.semiAxes.y(),
-                                    util::is_set(renderFlags, RenderFlags::ShowRingShadows) && lit,
-                                    segmentSizeInPixels,
-                                    ringsMVP, true);
     }
 
     if (atmosphere != nullptr)
@@ -2570,7 +2584,9 @@ void Renderer::renderObject(const Vector3f& pos,
             fade = 1.0f;
         }
 
-        if (fade > 0 && util::is_set(renderFlags, RenderFlags::ShowAtmospheres) && atmosphere->height > 0.0f &&
+        if (brunetonResource == nullptr && fade > 0 &&
+            util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
+            atmosphere->height > 0.0f &&
             !insidePlanet)
         {
             // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
@@ -2630,7 +2646,7 @@ void Renderer::renderObject(const Vector3f& pos,
             if (lit)
             {
                 renderClouds_GLSL(ri, ls,
-                                  atmosphere,
+                                  surfaceAtmosphere,
                                   cloudTex,
                                   cloudNormalMap,
                                   cloudTexOffset,
@@ -2650,6 +2666,27 @@ void Renderer::renderObject(const Vector3f& pos,
             glDisable(GL_POLYGON_OFFSET_FILL);
             glFrontFace(GL_CCW);
         }
+    }
+
+    if (brunetonResource != nullptr)
+    {
+        m_atmosphereRenderer->renderBruneton(
+            ri,
+            ls,
+            planetMVP,
+            *brunetonResource,
+            atmosphere->brunetonLuminanceScale);
+    }
+
+    if (showRings)
+    {
+        // calculate ring segment size in pixels, actual size is segmentSizeInPixels * tan(segmentAngle)
+        float segmentSizeInPixels = 2.0f * obj.rings->outerRadius / (max(nearPlaneDistance, altitude) * pixelSize);
+        m_ringRenderer->renderRings(*obj.rings, ri, ls,
+                                    radius, 1.0f - obj.semiAxes.y(),
+                                    util::is_set(renderFlags, RenderFlags::ShowRingShadows) && lit,
+                                    segmentSizeInPixels,
+                                    ringsMVP, true);
     }
 }
 
