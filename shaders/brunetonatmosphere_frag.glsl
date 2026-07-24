@@ -716,6 +716,61 @@ Length GetSceneDistance()
         lut_units_per_km;
 }
 
+Length CorrectGroundEndpoint(
+    Position camera_position,
+    Direction ray,
+    Length scene_distance)
+{
+    if (scene_distance >= 1.0e29 ||
+        length(camera_position) <= atmosphere.top_radius)
+    {
+        return scene_distance;
+    }
+
+    vec2 ground_intersections = RaySphereIntersections(
+        camera_position, ray, atmosphere.bottom_radius);
+    if (ground_intersections.x < 0.0)
+        return scene_distance;
+
+    Length pixel_tolerance =
+        max(length(dFdx(ray)), length(dFdy(ray))) *
+        ground_intersections.x;
+    vec3 ray_dx = dFdx(ray);
+    vec3 ray_dy = dFdy(ray);
+    vec2 adjacent_ground[4] = vec2[4](
+        RaySphereIntersections(
+            camera_position,
+            normalize(ray - ray_dx),
+            atmosphere.bottom_radius),
+        RaySphereIntersections(
+            camera_position,
+            normalize(ray + ray_dx),
+            atmosphere.bottom_radius),
+        RaySphereIntersections(
+            camera_position,
+            normalize(ray - ray_dy),
+            atmosphere.bottom_radius),
+        RaySphereIntersections(
+            camera_position,
+            normalize(ray + ray_dy),
+            atmosphere.bottom_radius));
+    for (int i = 0; i < 4; ++i)
+    {
+        if (adjacent_ground[i].x >= 0.0)
+        {
+            pixel_tolerance = max(
+                pixel_tolerance,
+                abs(
+                    adjacent_ground[i].x -
+                    ground_intersections.x));
+        }
+    }
+    return scene_distance >=
+            ground_intersections.x - pixel_tolerance
+        ? ground_intersections.x
+        : scene_distance;
+}
+
 vec2 GetCloudTextureUv(Position position)
 {
     Direction normal = normalize(position);
@@ -805,6 +860,8 @@ void main()
     vec3 transmittance;
     Position camera_position = camera - earth_center;
     Length scene_distance = GetSceneDistance();
+    scene_distance = CorrectGroundEndpoint(
+        camera_position, view_direction, scene_distance);
     vec2 atmosphere_intersections = RaySphereIntersections(
         camera_position, view_direction, atmosphere.top_radius);
 
