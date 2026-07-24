@@ -60,6 +60,7 @@ constexpr std::array StaticShaderBaseNames
     "galaxy150"sv,
     "globular"sv,
     "largestar"sv,
+    "linearcopy"sv,
     "psfstarglow"sv,
     "psfstarglowlarge"sv,
     "psfstarpoint"sv,

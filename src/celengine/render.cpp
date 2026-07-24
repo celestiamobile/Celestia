@@ -1350,13 +1350,6 @@ void Renderer::renderItem(const RenderListEntry& rle,
                      m);
         break;
 
-    case RenderListEntry::RenderableBrunetonAtmosphere:
-        renderBrunetonAtmosphere(*rle.body,
-                                 rle.position,
-                                 observer,
-                                 m);
-        break;
-
     case RenderListEntry::RenderableRingSystem:
         renderRingSystem(*rle.body,
                          rle.position,
@@ -1397,6 +1390,7 @@ void Renderer::render(const Observer& observer,
 {
     // Get the observer's time
     double now = observer.getTime();
+    m_renderTime = now;
     realTime = observer.getRealTime();
 
     frameCount++;
@@ -1451,6 +1445,7 @@ void Renderer::render(const Observer& observer,
     lightSourceList.clear();
     secondaryIlluminators.clear();
     nearStars.clear();
+    m_brunetonAtmospheres.clear();
 
     // See if we want to use AutoMag.
     if (util::is_set(renderFlags, RenderFlags::ShowAutoMag))
@@ -1567,6 +1562,43 @@ void Renderer::render(const Observer& observer,
     renderBackgroundAnnotations(FontStyle::Normal);
 
     removeInvisibleItems(frustum);
+
+    if (m_brunetonPostprocessEnabled &&
+        util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
+        dynamic_cast<const engine::FisheyeProjectionMode*>(
+            projectionMode.get()) == nullptr)
+    {
+        const BodyFeaturesManager* bodyFeaturesManager =
+            GetBodyFeaturesManager();
+        for (const auto& entry : renderList)
+        {
+            if (entry.renderableType != RenderListEntry::RenderableBody ||
+                entry.discSizeInPixels <= 1.0f)
+            {
+                continue;
+            }
+
+            const Atmosphere* atmosphere =
+                bodyFeaturesManager->getAtmosphere(entry.body);
+            if (atmosphere == nullptr ||
+                atmosphere->brunetonLutFile.empty())
+            {
+                continue;
+            }
+
+            m_brunetonAtmospheres.push_back(
+                { entry.body, entry.position, entry.distance });
+        }
+
+        std::sort(
+            m_brunetonAtmospheres.begin(),
+            m_brunetonAtmospheres.end(),
+            [](const BrunetonAtmosphereEntry& a,
+               const BrunetonAtmosphereEntry& b)
+            {
+                return a.distance > b.distance;
+            });
+    }
 
     // Sort the annotations
     sort(depthSortedAnnotations.begin(), depthSortedAnnotations.end());
@@ -2501,6 +2533,7 @@ void Renderer::renderObject(const Vector3f& pos,
     }
 
     const bool useBruneton =
+        m_brunetonPostprocessEnabled &&
         atmosphere != nullptr &&
         !atmosphere->brunetonLutFile.empty() &&
         util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
@@ -3079,87 +3112,123 @@ void Renderer::renderPlanet(Body& body,
 }
 
 
-void Renderer::renderBrunetonAtmosphere(Body& body,
-                                        const Vector3f& pos,
-                                        const Observer& observer,
-                                        const Matrices& m)
+bool Renderer::renderBrunetonAtmospheres(const FramebufferObject& source,
+                                         int width,
+                                         int height,
+                                         int originX,
+                                         int originY)
 {
-    const BodyFeaturesManager* bodyFeaturesManager = GetBodyFeaturesManager();
-    const Atmosphere* atmosphere = bodyFeaturesManager->getAtmosphere(&body);
-    if (atmosphere == nullptr ||
-        atmosphere->brunetonLutFile.empty() ||
-        !util::is_set(renderFlags, RenderFlags::ShowAtmospheres) ||
-        dynamic_cast<const engine::FisheyeProjectionMode*>(
-            projectionMode.get()) != nullptr)
+    if (m_brunetonAtmospheres.empty() || depthPartitions.empty())
+        return true;
+
+    std::vector<Eigen::Vector2f> partitionNearFar;
+    partitionNearFar.reserve(depthPartitions.size());
+    for (const auto& partition : depthPartitions)
     {
-        return;
+        partitionNearFar.emplace_back(
+            -partition.nearZ,
+            -partition.farZ);
+    }
+    m_atmosphereRenderer->setSceneDepth(
+        source.depthTexture(),
+        partitionNearFar,
+        width,
+        height,
+        originX,
+        originY);
+
+    const BodyFeaturesManager* bodyFeaturesManager =
+        GetBodyFeaturesManager();
+    Matrices matrices = { &m_projMatrix, &m_modelMatrix };
+
+    for (const auto& entry : m_brunetonAtmospheres)
+    {
+        Body& body = *entry.body;
+        const Atmosphere* atmosphere =
+            bodyFeaturesManager->getAtmosphere(&body);
+        if (atmosphere == nullptr)
+            continue;
+
+        auto* program =
+            getShaderManager().getShader(
+                StaticShader::BrunetonAtmosphere);
+        if (program == nullptr ||
+            getShaderManager().isErrorProgram(program))
+        {
+            continue;
+        }
+
+        auto* resource =
+            m_brunetonAtmosphereManager->find(
+                atmosphere->brunetonLutFile);
+        if (resource == nullptr)
+            continue;
+
+        const float radius = body.getRadius();
+        const Vector3f semiAxes = body.getSemiAxes() / radius;
+        const Quaterniond q =
+            body.getRotationModel(m_renderTime)->spin(m_renderTime) *
+            body.getEclipticToEquatorial(m_renderTime);
+        const Quaternionf orientation =
+            body.getGeometryOrientation() * q.cast<float>();
+
+        const engine::GeometryHandle geometryHandle =
+            body.getGeometry();
+        const RenderGeometry* geometry = nullptr;
+        if (geometryHandle != engine::GeometryHandle::Invalid)
+            geometry = m_geometryManager->find(geometryHandle);
+
+        Vector3f scaleFactors;
+        bool isNormalized = false;
+        if (geometry == nullptr || geometry->isNormalized())
+        {
+            scaleFactors = radius * semiAxes;
+            isNormalized = true;
+        }
+        else
+        {
+            scaleFactors =
+                Vector3f::Constant(body.getGeometryScale());
+        }
+
+        const Matrix3f planetRotation =
+            orientation.toRotationMatrix();
+        const Vector3f eyePosition =
+            -(planetRotation * entry.position)
+                 .cwiseQuotient(scaleFactors);
+        if (geometryHandle == engine::GeometryHandle::Invalid &&
+            eyePosition.squaredNorm() < 1.0f)
+        {
+            continue;
+        }
+
+        LightingState lights;
+        setupObjectLighting(
+            lightSourceList,
+            secondaryIlluminators,
+            orientation,
+            scaleFactors,
+            entry.position,
+            isNormalized,
+            lights);
+        assert(lights.nLights <= MaxLights);
+        lights.ambientColor = ambientColor.toVector3();
+
+        RenderInfo ri;
+        ri.eyePos_obj = eyePosition;
+        ri.orientation =
+            getCameraOrientationf() * orientation.conjugate();
+
+        m_atmosphereRenderer->renderBruneton(
+            ri,
+            lights,
+            matrices,
+            *resource,
+            atmosphere->brunetonLuminanceScale,
+            radius);
     }
 
-    auto* program =
-        getShaderManager().getShader(StaticShader::BrunetonAtmosphere);
-    if (program == nullptr || getShaderManager().isErrorProgram(program))
-        return;
-
-    auto* resource =
-        m_brunetonAtmosphereManager->find(atmosphere->brunetonLutFile);
-    if (resource == nullptr)
-        return;
-
-    const float radius = body.getRadius();
-    const Vector3f semiAxes = body.getSemiAxes() / radius;
-    const double now = observer.getTime();
-    const Quaterniond q = body.getRotationModel(now)->spin(now) *
-                          body.getEclipticToEquatorial(now);
-    const Quaternionf orientation =
-        body.getGeometryOrientation() * q.cast<float>();
-
-    const engine::GeometryHandle geometryHandle = body.getGeometry();
-    const RenderGeometry* geometry = nullptr;
-    if (geometryHandle != engine::GeometryHandle::Invalid)
-        geometry = m_geometryManager->find(geometryHandle);
-
-    Vector3f scaleFactors;
-    bool isNormalized = false;
-    if (geometry == nullptr || geometry->isNormalized())
-    {
-        scaleFactors = radius * semiAxes;
-        isNormalized = true;
-    }
-    else
-    {
-        scaleFactors = Vector3f::Constant(body.getGeometryScale());
-    }
-
-    const Matrix3f planetRotation = orientation.toRotationMatrix();
-    const Vector3f eyePosition =
-        -(planetRotation * pos.cwiseQuotient(scaleFactors));
-    if (geometryHandle == engine::GeometryHandle::Invalid &&
-        eyePosition.squaredNorm() < 1.0f)
-    {
-        return;
-    }
-
-    LightingState lights;
-    setupObjectLighting(lightSourceList,
-                        secondaryIlluminators,
-                        orientation,
-                        scaleFactors,
-                        pos,
-                        isNormalized,
-                        lights);
-    assert(lights.nLights <= MaxLights);
-    lights.ambientColor = ambientColor.toVector3();
-
-    RenderInfo ri;
-    ri.eyePos_obj = eyePosition;
-    ri.orientation = getCameraOrientationf() * orientation.conjugate();
-
-    m_atmosphereRenderer->renderBruneton(
-        ri,
-        lights,
-        m,
-        *resource,
-        atmosphere->brunetonLuminanceScale);
+    return true;
 }
 
 
@@ -3559,29 +3628,6 @@ void Renderer::addRenderListEntries(RenderListEntry& rle,
             rle.isOpaque = false;
             rle.radius = rings->outerRadius;
             rle.discSizeInPixels = ringDiscSize;
-            renderList.push_back(rle);
-        }
-    }
-
-    if (const Atmosphere* atmosphere =
-            bodyFeaturesManager->getAtmosphere(&body);
-        atmosphere != nullptr &&
-        !atmosphere->brunetonLutFile.empty() &&
-        util::is_set(renderFlags, RenderFlags::ShowAtmospheres))
-    {
-        const float atmosphereRadius =
-            body.getRadius() +
-            max(atmosphere->height, atmosphere->cloudHeight);
-        const float atmosphereDiscSize =
-            (atmosphereRadius / rle.distance) / pixelSize;
-        if (atmosphereDiscSize > 1.0f)
-        {
-            rle.renderableType =
-                RenderListEntry::RenderableBrunetonAtmosphere;
-            rle.body = &body;
-            rle.isOpaque = false;
-            rle.radius = atmosphereRadius;
-            rle.discSizeInPixels = atmosphereDiscSize;
             renderList.push_back(rle);
         }
     }
@@ -5423,7 +5469,6 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
         case RenderListEntry::RenderableCometTail:
         case RenderListEntry::RenderableReferenceMark:
         case RenderListEntry::RenderableRingSystem:
-        case RenderListEntry::RenderableBrunetonAtmosphere:
             radius = ri.radius;
             cullRadius = radius;
             convex = false;

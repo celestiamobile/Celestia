@@ -37,6 +37,7 @@ enum class StaticShader
     Galaxy150,
     Globular,
     LargeStar,
+    LinearCopy,
     PsfStarGlow,
     PsfStarGlowLarge,
     PsfStarPoint,

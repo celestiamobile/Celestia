@@ -72,7 +72,16 @@ public:
         const LightingState&,
         const Matrices&,
         const BrunetonAtmosphereResource&,
-        float luminanceScale);
+        float luminanceScale,
+        float bodyRadius);
+
+    void setSceneDepth(
+        GLuint depthTexture,
+        const std::vector<Eigen::Vector2f>& partitionNearFar,
+        int width,
+        int height,
+        int originX,
+        int originY);
 
     void initGL();
 
@@ -110,6 +119,13 @@ private:
     gl::VertexObject              m_vo;
     gl::Buffer                    m_brunetonBo;
     gl::VertexObject              m_brunetonVo;
+    GLuint                        m_depthPartitionTexture{ 0 };
+    GLuint                        m_sceneDepthTexture{ 0 };
+    int                           m_depthPartitionCount{ 0 };
+    int                           m_sceneWidth{ 0 };
+    int                           m_sceneHeight{ 0 };
+    int                           m_sceneOriginX{ 0 };
+    int                           m_sceneOriginY{ 0 };
     bool                          m_initialized{ false };
 };
 

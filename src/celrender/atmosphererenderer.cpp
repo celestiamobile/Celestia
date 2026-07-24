@@ -52,7 +52,50 @@ AtmosphereRenderer::AtmosphereRenderer(Renderer &renderer) :
 {
 }
 
-AtmosphereRenderer::~AtmosphereRenderer() = default;
+AtmosphereRenderer::~AtmosphereRenderer()
+{
+    if (m_depthPartitionTexture != 0)
+        glDeleteTextures(1, &m_depthPartitionTexture);
+}
+
+void
+AtmosphereRenderer::setSceneDepth(
+    GLuint depthTexture,
+    const std::vector<Eigen::Vector2f>& partitionNearFar,
+    int width,
+    int height,
+    int originX,
+    int originY)
+{
+    m_sceneDepthTexture = depthTexture;
+    m_depthPartitionCount =
+        static_cast<int>(partitionNearFar.size());
+    m_sceneWidth = width;
+    m_sceneHeight = height;
+    m_sceneOriginX = originX;
+    m_sceneOriginY = originY;
+
+    if (m_depthPartitionTexture == 0)
+        glGenTextures(1, &m_depthPartitionTexture);
+
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, m_depthPartitionTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        GL_RG32F,
+        static_cast<GLsizei>(partitionNearFar.size()),
+        1,
+        0,
+        GL_RG,
+        GL_FLOAT,
+        partitionNearFar.data());
+    glActiveTexture(GL_TEXTURE0);
+}
 
 void AtmosphereRenderer::initGL()
 {
@@ -329,7 +372,8 @@ AtmosphereRenderer::renderBruneton(
     const LightingState& ls,
     const Matrices& m,
     const BrunetonAtmosphereResource& resource,
-    float luminanceScale)
+    float luminanceScale,
+    float bodyRadius)
 {
     auto* program =
         m_renderer.getShaderManager().getShader(StaticShader::BrunetonAtmosphere);
@@ -376,6 +420,18 @@ AtmosphereRenderer::renderBruneton(
     Vec3ShaderParameter(programId, "sky_spectral_radiance_to_luminance") =
         skyRadianceToLuminance;
     FloatShaderParameter(programId, "luminance_scale") = luminanceScale;
+    FloatShaderParameter(programId, "lut_units_per_km") =
+        parameters.bottomRadius / bodyRadius;
+    Vec2ShaderParameter(programId, "viewport_size") =
+        Eigen::Vector2f(
+            static_cast<float>(m_sceneWidth),
+            static_cast<float>(m_sceneHeight));
+    Vec2ShaderParameter(programId, "viewport_origin") =
+        Eigen::Vector2f(
+            static_cast<float>(m_sceneOriginX),
+            static_cast<float>(m_sceneOriginY));
+    IntegerShaderParameter(programId, "depth_partition_count") =
+        m_depthPartitionCount;
 
     IntegerShaderParameter(programId, "combined_scattering_textures") =
         parameters.combinedScattering ? 1 : 0;
@@ -384,6 +440,8 @@ AtmosphereRenderer::renderBruneton(
     IntegerShaderParameter(programId, "transmittance_texture") = 0;
     IntegerShaderParameter(programId, "scattering_texture") = 1;
     IntegerShaderParameter(programId, "single_mie_scattering_texture") = 2;
+    IntegerShaderParameter(programId, "scene_depth_texture") = 3;
+    IntegerShaderParameter(programId, "depth_partition_texture") = 4;
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, resource.transmittanceTexture());
@@ -395,6 +453,10 @@ AtmosphereRenderer::renderBruneton(
         parameters.combinedScattering
             ? resource.scatteringTexture()
             : resource.singleMieTexture());
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, m_sceneDepthTexture);
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, m_depthPartitionTexture);
     glActiveTexture(GL_TEXTURE0);
 
     Renderer::PipelineState state;
