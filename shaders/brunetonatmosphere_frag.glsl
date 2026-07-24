@@ -23,6 +23,7 @@ precision highp sampler3D;
 #define Direction vec3
 #define TransmittanceTexture sampler2D
 #define ReducedScatteringTexture sampler3D
+#define IrradianceTexture sampler2D
 
 const float PI = 3.14159265358979323846;
 const Length m = 1.0;
@@ -36,9 +37,13 @@ const int SCATTERING_TEXTURE_R_SIZE = 32;
 const int SCATTERING_TEXTURE_MU_SIZE = 128;
 const int SCATTERING_TEXTURE_MU_S_SIZE = 32;
 const int SCATTERING_TEXTURE_NU_SIZE = 8;
+const int IRRADIANCE_TEXTURE_WIDTH = 64;
+const int IRRADIANCE_TEXTURE_HEIGHT = 16;
 
 struct AtmosphereParameters
 {
+    vec3 solar_irradiance;
+    float sun_angular_radius;
     Length bottom_radius;
     Length top_radius;
     vec3 rayleigh_scattering;
@@ -51,17 +56,23 @@ uniform AtmosphereParameters atmosphere;
 uniform sampler2D transmittance_texture;
 uniform sampler3D scattering_texture;
 uniform sampler3D single_mie_scattering_texture;
+uniform sampler2D irradiance_texture;
 uniform sampler2D scene_depth_texture;
 uniform sampler2D depth_partition_texture;
+uniform sampler2D cloud_texture;
 uniform int combined_scattering_textures;
 uniform int manual_float_filtering;
 uniform int depth_partition_count;
+uniform int render_clouds;
+uniform int cloud_texture_has_alpha;
 uniform vec3 camera;
 uniform vec3 earth_center;
 uniform vec3 sun_direction;
 uniform vec3 sky_spectral_radiance_to_luminance;
 uniform float luminance_scale;
 uniform float lut_units_per_km;
+uniform float cloud_radius;
+uniform float cloud_texture_offset;
 uniform vec2 viewport_size;
 uniform vec2 viewport_origin;
 uniform int render_mode;
@@ -205,6 +216,71 @@ DimensionlessSpectrum GetTransmittance(
         GetTransmittanceToTopAtmosphereBoundary(
             parameters, texture_sampler, r_d, mu_d),
         DimensionlessSpectrum(1.0));
+}
+
+DimensionlessSpectrum GetTransmittanceToSun(
+    IN(AtmosphereParameters) parameters,
+    IN(TransmittanceTexture) texture_sampler,
+    Length r,
+    Number mu_s)
+{
+    Number sin_theta_h = parameters.bottom_radius / r;
+    Number cos_theta_h =
+        -SafeSqrt(1.0 - sin_theta_h * sin_theta_h);
+    return GetTransmittanceToTopAtmosphereBoundary(
+               parameters, texture_sampler, r, mu_s) *
+        smoothstep(
+            -sin_theta_h * parameters.sun_angular_radius,
+            sin_theta_h * parameters.sun_angular_radius,
+            mu_s - cos_theta_h);
+}
+
+vec2 GetIrradianceTextureUvFromRMuS(
+    IN(AtmosphereParameters) parameters,
+    Length r,
+    Number mu_s)
+{
+    Number x_r =
+        (r - parameters.bottom_radius) /
+        (parameters.top_radius - parameters.bottom_radius);
+    Number x_mu_s = mu_s * 0.5 + 0.5;
+    return vec2(
+        GetTextureCoordFromUnitRange(
+            x_mu_s, IRRADIANCE_TEXTURE_WIDTH),
+        GetTextureCoordFromUnitRange(
+            x_r, IRRADIANCE_TEXTURE_HEIGHT));
+}
+
+IrradianceSpectrum GetIrradiance(
+    IN(AtmosphereParameters) parameters,
+    IN(IrradianceTexture) texture_sampler,
+    Length r,
+    Number mu_s)
+{
+    vec2 uv =
+        GetIrradianceTextureUvFromRMuS(parameters, r, mu_s);
+    return IrradianceSpectrum(
+        SampleFloatTexture2D(texture_sampler, uv));
+}
+
+IrradianceSpectrum GetSunAndSkyIrradiance(
+    IN(AtmosphereParameters) parameters,
+    IN(TransmittanceTexture) transmittance_sampler,
+    IN(IrradianceTexture) irradiance_sampler,
+    IN(Position) point,
+    IN(Direction) normal,
+    IN(Direction) light_direction,
+    OUT(IrradianceSpectrum) sky_irradiance)
+{
+    Length r = length(point);
+    Number mu_s = dot(point, light_direction) / r;
+    sky_irradiance =
+        GetIrradiance(parameters, irradiance_sampler, r, mu_s) *
+        (1.0 + dot(normal, point) / r) * 0.5;
+    return parameters.solar_irradiance *
+        GetTransmittanceToSun(
+            parameters, transmittance_sampler, r, mu_s) *
+        max(dot(normal, light_direction), 0.0);
 }
 
 InverseSolidAngle RayleighPhaseFunction(Number nu)
@@ -625,6 +701,89 @@ Length GetSceneDistance()
         lut_units_per_km;
 }
 
+vec2 GetCloudTextureUv(Position position)
+{
+    Direction normal = normalize(position);
+    return vec2(
+        cloud_texture_offset -
+            atan(normal.z, normal.x) / (2.0 * PI),
+        0.5 - asin(clamp(normal.y, -1.0, 1.0)) / PI);
+}
+
+vec4 SampleCloud(Position origin, Direction ray, Length distance)
+{
+    vec4 sample_value = textureLod(
+        cloud_texture,
+        GetCloudTextureUv(origin + ray * distance),
+        0.0);
+    float density = cloud_texture_has_alpha != 0
+        ? sample_value.a
+        : sample_value.r;
+    return vec4(sample_value.rgb, density);
+}
+
+vec4 GetCloudColor(
+    Position origin,
+    Direction ray,
+    Length surface_distance)
+{
+    Length thickness =
+        (cloud_radius - atmosphere.bottom_radius) * 0.5;
+    if (render_clouds == 0 || thickness <= 0.0)
+        return vec4(0.0);
+
+    vec2 outer_intersections =
+        RaySphereIntersections(origin, ray, cloud_radius);
+    if (outer_intersections.y < 0.0 ||
+        outer_intersections.x > outer_intersections.y)
+    {
+        return vec4(0.0);
+    }
+
+    if (outer_intersections.x < 0.0 &&
+        surface_distance < outer_intersections.y)
+    {
+        return vec4(0.0);
+    }
+
+    Length cloud_distance = outer_intersections.x < 0.0
+        ? outer_intersections.y
+        : outer_intersections.x;
+    if (cloud_distance >= surface_distance)
+        return vec4(0.0);
+
+    Position cloud_point = origin + ray * cloud_distance;
+    vec3 cloud_transmittance;
+    vec3 front_scattering = GetSkyLuminanceToPoint(
+        origin,
+        cloud_point,
+        0.0,
+        sun_direction,
+        cloud_transmittance);
+
+    vec3 sky_irradiance;
+    vec3 sun_irradiance = GetSunAndSkyIrradiance(
+        atmosphere,
+        transmittance_texture,
+        irradiance_texture,
+        cloud_point,
+        normalize(cloud_point),
+        sun_direction,
+        sky_irradiance);
+
+    vec4 cloud_sample =
+        SampleCloud(origin, ray, cloud_distance);
+    float alpha = clamp(cloud_sample.a, 0.0, 1.0);
+    if (alpha <= 0.0)
+        return vec4(0.0);
+
+    vec3 cloud_radiance =
+        front_scattering +
+        cloud_transmittance * cloud_sample.rgb *
+            (sun_irradiance + sky_irradiance) / PI;
+    return vec4(cloud_radiance, alpha);
+}
+
 void main()
 {
     vec3 view_direction = normalize(view_ray);
@@ -636,6 +795,7 @@ void main()
 
     vec3 luminance = vec3(0.0);
     transmittance = vec3(1.0);
+    vec4 cloud = vec4(0.0);
     Length atmosphere_entry =
         max(atmosphere_intersections.x, 0.0);
     if (atmosphere_intersections.y > atmosphere_entry &&
@@ -662,11 +822,24 @@ void main()
                 sun_direction,
                 transmittance);
         }
+
+        cloud = GetCloudColor(
+            camera_position,
+            view_direction,
+            scene_distance);
     }
 
     vec3 scaled_luminance =
-        max(luminance * luminance_scale, vec3(0.0));
+        max(
+            mix(luminance, cloud.rgb, cloud.a) *
+                luminance_scale,
+            vec3(0.0));
     fragColor = render_mode == 0
-        ? vec4(clamp(transmittance, 0.0, 1.0), 1.0)
+        ? vec4(
+              clamp(
+                  transmittance * (1.0 - cloud.a),
+                  0.0,
+                  1.0),
+              1.0)
         : vec4(scaled_luminance, 1.0);
 }
