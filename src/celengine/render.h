@@ -13,6 +13,7 @@
 #include <array>
 #include <list>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -32,6 +33,7 @@
 #include <celengine/texmanager.h>
 #include <celengine/textlayout.h>
 #include <celimage/pixelformat.h>
+#include <celmath/frustum.h>
 #include <celrender/rendererfwd.h>
 #include "rendercolors.h"
 #include "renderflags.h"
@@ -470,6 +472,11 @@ class Renderer
         Body* body;
         Eigen::Vector3f position;
         double distance;
+        Eigen::Matrix4f surfaceProjection;
+        Eigen::Matrix4f surfaceModelView;
+        std::optional<celestia::math::Frustum> surfaceFrustum;
+        float surfacePixWidth{ 0.0f };
+        int depthPartition{ -1 };
     };
 
  private:
@@ -529,7 +536,8 @@ class Renderer
                       float farPlaneDistance,
                       const RenderProperties& obj,
                       const LightingState&,
-                      const Matrices&);
+                      const Matrices&,
+                      Body*);
 
     void renderPlanet(Body& body,
                       const Eigen::Vector3f& pos,
@@ -808,6 +816,7 @@ class Renderer
     // Size of a texture used in shadow mapping
     unsigned m_shadowMapSize { 0 };
     std::unique_ptr<FramebufferObject> m_shadowFBO;
+    std::unique_ptr<FramebufferObject> m_brunetonSurfaceFBO;
 
     std::unique_ptr<celestia::gl::VertexObject> m_markerVO;
     std::unique_ptr<celestia::gl::Buffer> m_markerBO;
