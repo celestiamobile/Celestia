@@ -414,8 +414,13 @@ AtmosphereRenderer::renderBruneton(
     FloatShaderParameter(programId, "atmosphere.mu_s_min") =
         parameters.muSMin;
 
-    Vec3ShaderParameter(programId, "camera") =
-        ri.eyePos_obj * parameters.bottomRadius;
+    Eigen::Vector3f camera = ri.eyePos_obj * parameters.bottomRadius;
+    const float cameraRadius = camera.norm();
+    const float minimumCameraRadius =
+        std::nextafter(parameters.bottomRadius, parameters.topRadius);
+    if (cameraRadius > 0.0f && cameraRadius < minimumCameraRadius)
+        camera *= minimumCameraRadius / cameraRadius;
+    Vec3ShaderParameter(programId, "camera") = camera;
     Vec3ShaderParameter(programId, "earth_center") = Eigen::Vector3f::Zero();
     Eigen::Vector3f sunDirection =
         ls.nLights == 0
