@@ -3216,8 +3216,12 @@ bool Renderer::renderBrunetonAtmospheres(const FramebufferObject& source,
         const Vector3f eyePosition =
             -(planetRotation * entry.position)
                  .cwiseQuotient(scaleFactors);
-        if (geometryHandle == engine::GeometryHandle::Invalid &&
-            eyePosition.squaredNorm() < 1.0f)
+        bool insideBody =
+            geometryHandle == engine::GeometryHandle::Invalid &&
+            (scaleFactors.x() == scaleFactors.y() && scaleFactors.x() == scaleFactors.z()
+                 ? entry.distance < static_cast<double>(scaleFactors.x())
+                 : eyePosition.squaredNorm() < 1.0f);
+        if (geometryHandle == engine::GeometryHandle::Invalid && insideBody)
         {
             continue;
         }

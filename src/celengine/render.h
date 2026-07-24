@@ -467,7 +467,7 @@ class Renderer
     {
         Body* body;
         Eigen::Vector3f position;
-        float distance;
+        double distance;
     };
 
  private:
