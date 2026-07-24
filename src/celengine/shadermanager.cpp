@@ -1457,6 +1457,8 @@ buildFragmentShader(const ShaderProperties& props)
         source += ScatteringConstantDeclarations(props);
 
     source += DeclareUniform("eyePosition", Shader_Vector3);
+    if (util::is_set(props.texUsage, TexUsage::SurfaceId))
+        source += DeclareUniform("surfaceBodyId", Shader_Float);
 
     if (util::is_set(props.lightModel, LightingModel::LunarLambertModel))
         source += DeclareUniform("lunarLambert", Shader_Float);
@@ -1809,6 +1811,9 @@ buildFragmentShader(const ShaderProperties& props)
         source += "float lineHalfPx = fwidth(lineU) * 0.5;\n";
         source += "fragColor.a *= 1.0 - smoothstep(lineEdge - lineHalfPx, lineEdge + lineHalfPx, abs(lineU));\n";
     }
+
+    if (util::is_set(props.texUsage, TexUsage::SurfaceId))
+        source += "fragColor.a = -surfaceBodyId;\n";
 
     source += "}\n";
 
@@ -2913,6 +2918,7 @@ CelestiaGLProgram::initParameters()
     }
 
     opacity      = floatParam("opacity");
+    surfaceBodyId = floatParam("surfaceBodyId");
     ambientColor = vec3Param("ambientColor");
 
     if (util::is_set(props.texUsage, TexUsage::RingShadowTexture))

@@ -58,7 +58,7 @@ uniform sampler3D scattering_texture;
 uniform sampler3D single_mie_scattering_texture;
 uniform sampler2D irradiance_texture;
 uniform sampler2D scene_depth_texture;
-uniform sampler2D surface_depth_texture;
+uniform sampler2D surface_id_texture;
 uniform sampler2D depth_partition_texture;
 uniform sampler2D cloud_texture;
 uniform int combined_scattering_textures;
@@ -66,6 +66,7 @@ uniform int manual_float_filtering;
 uniform int depth_partition_count;
 uniform int render_clouds;
 uniform int cloud_texture_has_alpha;
+uniform float surface_body_id;
 uniform vec3 camera;
 uniform vec3 earth_center;
 uniform vec3 sun_direction;
@@ -715,66 +716,17 @@ Length ReconstructSceneDistance(
     return view_z * distance_scale;
 }
 
-Length GetSceneDistance(out bool is_ground_surface)
+Length GetSceneDistance()
 {
     vec2 uv =
         (gl_FragCoord.xy - viewport_origin) / viewport_size;
     float depth = texture(scene_depth_texture, uv).r;
-    ivec2 surface_size = textureSize(surface_depth_texture, 0);
-    ivec2 surface_pixel = clamp(
-        ivec2(gl_FragCoord.xy - viewport_origin),
-        ivec2(0),
-        surface_size - ivec2(1));
     Direction ray_view = normalize(view_ray_view);
     float model_units_per_km =
         length(view_ray) / max(length(view_ray_view), 1.0e-6);
     float distance_scale =
         model_units_per_km / max(-ray_view.z, 1.0e-6);
-
-    Length scene_distance =
-        ReconstructSceneDistance(depth, distance_scale);
-    Length surface_distance = 1.0e30;
-    for (int y = -1; y <= 1; ++y)
-    {
-        for (int x = -1; x <= 1; ++x)
-        {
-            ivec2 sample_pixel = clamp(
-                surface_pixel + ivec2(x, y),
-                ivec2(0),
-                surface_size - ivec2(1));
-            float surface_depth =
-                texelFetch(
-                    surface_depth_texture,
-                    sample_pixel,
-                    0).r;
-            surface_distance = min(
-                surface_distance,
-                ReconstructSceneDistance(
-                    surface_depth,
-                    distance_scale));
-        }
-    }
-    is_ground_surface =
-        surface_distance < 1.0e29 &&
-        scene_distance >= surface_distance;
-    return scene_distance;
-}
-
-Length CorrectGroundEndpoint(
-    Position camera_position,
-    Direction ray,
-    Length scene_distance,
-    bool is_ground_surface)
-{
-    vec2 ground_intersections = RaySphereIntersections(
-        camera_position, ray, atmosphere.bottom_radius);
-    if (ground_intersections.x < 0.0)
-        return scene_distance;
-
-    if (scene_distance >= ground_intersections.x ||
-        is_ground_surface)
-        return ground_intersections.x;
-    return scene_distance;
+    return ReconstructSceneDistance(depth, distance_scale);
 }
 
 vec2 GetCloudTextureUv(Position position)
@@ -865,14 +817,22 @@ void main()
     vec3 view_direction = normalize(view_ray);
     vec3 transmittance;
     Position camera_position = camera - earth_center;
-    bool is_ground_surface;
-    Length scene_distance =
-        GetSceneDistance(is_ground_surface);
-    scene_distance = CorrectGroundEndpoint(
-        camera_position,
-        view_direction,
-        scene_distance,
-        is_ground_surface);
+    Length scene_distance = GetSceneDistance();
+    vec2 surface_uv =
+        (gl_FragCoord.xy - viewport_origin) / viewport_size;
+    float visible_surface_id =
+        -texture(surface_id_texture, surface_uv).a;
+    // MSAA resolves can blend IDs at silhouettes; validation bounds the
+    // resulting differences to antialiased edge pixels.
+    if (abs(visible_surface_id - surface_body_id) < 0.25)
+    {
+        vec2 ground_intersections = RaySphereIntersections(
+            camera_position,
+            view_direction,
+            atmosphere.bottom_radius);
+        if (ground_intersections.x >= 0.0)
+            scene_distance = ground_intersections.x;
+    }
     vec2 atmosphere_intersections = RaySphereIntersections(
         camera_position, view_direction, atmosphere.top_radius);
 

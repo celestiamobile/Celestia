@@ -147,6 +147,8 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
     ShaderProperties shadprop;
     shadprop.texUsage = TexUsage::TextureCoordTransform;
     shadprop.nLights = std::min(ls.nLights, MaxShaderLights);
+    if (ri.surfaceBodyId > 0.0f)
+        shadprop.texUsage |= TexUsage::SurfaceId;
 
     // Inside the planet, draw the surface as an opaque black shell; low detail avoids patch-culling holes.
     if (insidePlanet)
@@ -333,6 +335,8 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
     prog->setLightParameters(ls, ri.color, ri.specularColor, Color::Black);
 
     prog->eyePosition = ls.eyePos_obj;
+    if (util::is_set(shadprop.texUsage, TexUsage::SurfaceId))
+        prog->surfaceBodyId = ri.surfaceBodyId;
     prog->shininess = ri.specularPower;
     if (util::is_set(shadprop.lightModel, LightingModel::LunarLambertModel))
         prog->lunarLambert = ri.lunarLambert;

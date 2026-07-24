@@ -456,6 +456,7 @@ class Renderer
         Eigen::Vector3f semiAxes{ Eigen::Vector3f::Ones() };
         float radius{ 1.0f };
         float geometryScale{ 1.0f };
+        float surfaceBodyId{ 0.0f };
         celestia::engine::GeometryHandle geometry{ celestia::engine::GeometryHandle::Invalid };
 	bool isStar{ false };
     };
@@ -472,11 +473,7 @@ class Renderer
         Body* body;
         Eigen::Vector3f position;
         double distance;
-        Eigen::Matrix4f surfaceProjection;
-        Eigen::Matrix4f surfaceModelView;
-        std::optional<celestia::math::Frustum> surfaceFrustum;
-        float surfacePixWidth{ 0.0f };
-        int depthPartition{ -1 };
+        GLint surfaceBodyId{ 0 };
     };
 
  private:
@@ -536,8 +533,7 @@ class Renderer
                       float farPlaneDistance,
                       const RenderProperties& obj,
                       const LightingState&,
-                      const Matrices&,
-                      Body*);
+                      const Matrices&);
 
     void renderPlanet(Body& body,
                       const Eigen::Vector3f& pos,
@@ -816,7 +812,6 @@ class Renderer
     // Size of a texture used in shadow mapping
     unsigned m_shadowMapSize { 0 };
     std::unique_ptr<FramebufferObject> m_shadowFBO;
-    std::unique_ptr<FramebufferObject> m_brunetonSurfaceFBO;
 
     std::unique_ptr<celestia::gl::VertexObject> m_markerVO;
     std::unique_ptr<celestia::gl::Buffer> m_markerBO;
