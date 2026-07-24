@@ -722,16 +722,13 @@ Length CorrectGroundEndpoint(
     Direction ray,
     Length scene_distance)
 {
-    if (scene_distance >= 1.0e29 ||
-        length(camera_position) <= atmosphere.top_radius)
-    {
-        return scene_distance;
-    }
-
     vec2 ground_intersections = RaySphereIntersections(
         camera_position, ray, atmosphere.bottom_radius);
     if (ground_intersections.x < 0.0)
         return scene_distance;
+
+    if (scene_distance >= 1.0e29)
+        return ground_intersections.x;
 
     Length pixel_tolerance =
         max(length(dFdx(ray)), length(dFdy(ray))) *
