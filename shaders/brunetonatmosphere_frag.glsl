@@ -419,6 +419,17 @@ IrradianceSpectrum GetCombinedScattering(
     return scattering;
 }
 
+Area GetRaySphereDiscriminant(
+    Position origin,
+    Direction ray,
+    Length radius)
+{
+    Length projected_distance = dot(origin, ray);
+    Position perpendicular =
+        origin - ray * projected_distance;
+    return radius * radius - dot(perpendicular, perpendicular);
+}
+
 RadianceSpectrum GetSkyRadiance(
     IN(AtmosphereParameters) parameters,
     IN(TransmittanceTexture) transmittance_sampler,
@@ -432,9 +443,10 @@ RadianceSpectrum GetSkyRadiance(
 {
     Length r = length(camera_position);
     Length rmu = dot(camera_position, ray);
-    Area discriminant =
-        rmu * rmu - r * r +
-        parameters.top_radius * parameters.top_radius;
+    Area discriminant = GetRaySphereDiscriminant(
+        camera_position,
+        ray,
+        parameters.top_radius);
     if (discriminant < 0.0 * m2)
     {
         transmittance = DimensionlessSpectrum(1.0);
@@ -530,10 +542,12 @@ RadianceSpectrum GetSkyRadianceToPoint(
     Direction ray = normalize(point - camera_position);
     Length r = length(camera_position);
     Length rmu = dot(camera_position, ray);
+    Area discriminant = GetRaySphereDiscriminant(
+        camera_position,
+        ray,
+        parameters.top_radius);
     Length distance_to_top_atmosphere_boundary = -rmu -
-        sqrt(
-            rmu * rmu - r * r +
-            parameters.top_radius * parameters.top_radius);
+        SafeSqrt(discriminant);
     if (distance_to_top_atmosphere_boundary > 0.0 * m)
     {
         camera_position += ray * distance_to_top_atmosphere_boundary;
@@ -661,7 +675,8 @@ vec2 RaySphereIntersections(
     Length radius)
 {
     Length b = dot(origin, ray);
-    Area discriminant = b * b - dot(origin, origin) + radius * radius;
+    Area discriminant =
+        GetRaySphereDiscriminant(origin, ray, radius);
     if (discriminant < 0.0)
         return vec2(-1.0);
 
