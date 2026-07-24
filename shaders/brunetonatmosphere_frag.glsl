@@ -538,6 +538,8 @@ vec3 GetSkyLuminance(
     Direction light_direction,
     out DimensionlessSpectrum transmittance)
 {
+    // Temporary reference-demo comparison path: the demo currently has
+    // "use luminance" disabled, so it tone maps raw spectral radiance.
     return GetSkyRadiance(
                atmosphere,
                transmittance_texture,
@@ -547,8 +549,7 @@ vec3 GetSkyLuminance(
                ray,
                shadow_length,
                light_direction,
-               transmittance) *
-        sky_spectral_radiance_to_luminance;
+               transmittance);
 }
 
 vec3 GetSkyLuminanceToPoint(
@@ -558,6 +559,7 @@ vec3 GetSkyLuminanceToPoint(
     Direction light_direction,
     out DimensionlessSpectrum transmittance)
 {
+    // Temporary reference-demo comparison path: keep raw spectral radiance.
     return GetSkyRadianceToPoint(
                atmosphere,
                transmittance_texture,
@@ -567,8 +569,7 @@ vec3 GetSkyLuminanceToPoint(
                point,
                shadow_length,
                light_direction,
-               transmittance) *
-        sky_spectral_radiance_to_luminance;
+               transmittance);
 }
 
 vec2 RaySphereIntersections(
@@ -616,7 +617,13 @@ void main()
             transmittance);
     }
 
+    vec3 scaled_luminance = max(luminance, vec3(0.0));
+    // Temporary reference-demo comparison path. Celestia normally applies
+    // tone mapping and output transfer functions in its post-process.
+    vec3 tone_mapped_luminance = pow(
+        vec3(1.0) - exp(-scaled_luminance * 10.0),
+        vec3(1.0 / 2.2));
     fragColor = render_mode == 0
         ? vec4(clamp(transmittance, 0.0, 1.0), 1.0)
-        : vec4(max(luminance * luminance_scale, vec3(0.0)), 1.0);
+        : vec4(tone_mapped_luminance, 1.0);
 }
