@@ -22,7 +22,6 @@ struct RenderListEntry
     {
         RenderableStar,
         RenderableBody,
-        RenderableBrunetonAtmosphere,
         RenderableRingSystem,
         RenderableCometTail,
         RenderableReferenceMark,

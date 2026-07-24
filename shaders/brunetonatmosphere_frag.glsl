@@ -51,16 +51,23 @@ uniform AtmosphereParameters atmosphere;
 uniform sampler2D transmittance_texture;
 uniform sampler3D scattering_texture;
 uniform sampler3D single_mie_scattering_texture;
+uniform sampler2D scene_depth_texture;
+uniform sampler2D depth_partition_texture;
 uniform int combined_scattering_textures;
 uniform int manual_float_filtering;
+uniform int depth_partition_count;
 uniform vec3 camera;
 uniform vec3 earth_center;
 uniform vec3 sun_direction;
 uniform vec3 sky_spectral_radiance_to_luminance;
 uniform float luminance_scale;
+uniform float lut_units_per_km;
+uniform vec2 viewport_size;
+uniform vec2 viewport_origin;
 uniform int render_mode;
 
 in vec3 view_ray;
+in vec3 view_ray_view;
 
 Number ClampCosine(Number mu)
 {
@@ -586,35 +593,75 @@ vec2 RaySphereIntersections(
     return vec2(-b - root, -b + root);
 }
 
+Length GetSceneDistance()
+{
+    vec2 uv =
+        (gl_FragCoord.xy - viewport_origin) / viewport_size;
+    float depth = texture(scene_depth_texture, uv).r;
+    if (depth >= 1.0)
+        return 1.0e30;
+
+    float count = float(depth_partition_count);
+    int partition_index = clamp(
+        int(floor((1.0 - depth) * count)),
+        0,
+        depth_partition_count - 1);
+    float range_min =
+        1.0 - float(partition_index + 1) / count;
+    float local_depth =
+        clamp((depth - range_min) * count, 0.0, 1.0);
+    float ndc_z = local_depth * 2.0 - 1.0;
+
+    vec2 near_far = texelFetch(
+        depth_partition_texture,
+        ivec2(partition_index, 0),
+        0).rg;
+    float view_z =
+        2.0 * near_far.x * near_far.y /
+        (near_far.y + near_far.x -
+         ndc_z * (near_far.y - near_far.x));
+    Direction ray_view = normalize(view_ray_view);
+    return view_z / max(-ray_view.z, 1.0e-6) *
+        lut_units_per_km;
+}
+
 void main()
 {
     vec3 view_direction = normalize(view_ray);
     vec3 transmittance;
     Position camera_position = camera - earth_center;
-    vec2 ground_intersections = RaySphereIntersections(
-        camera_position,
-        view_direction,
-        atmosphere.bottom_radius);
-    vec3 luminance;
-    if (ground_intersections.x > 0.0)
+    Length scene_distance = GetSceneDistance();
+    vec2 atmosphere_intersections = RaySphereIntersections(
+        camera_position, view_direction, atmosphere.top_radius);
+
+    vec3 luminance = vec3(0.0);
+    transmittance = vec3(1.0);
+    Length atmosphere_entry =
+        max(atmosphere_intersections.x, 0.0);
+    if (atmosphere_intersections.y > atmosphere_entry &&
+        scene_distance >= atmosphere_entry)
     {
-        Position point =
-            camera_position + view_direction * ground_intersections.x;
-        luminance = GetSkyLuminanceToPoint(
-            camera_position,
-            point,
-            0.0,
-            sun_direction,
-            transmittance);
-    }
-    else
-    {
-        luminance = GetSkyLuminance(
-            camera_position,
-            view_direction,
-            0.0,
-            sun_direction,
-            transmittance);
+        if (scene_distance < atmosphere_intersections.y)
+        {
+            Position point =
+                camera_position +
+                view_direction * scene_distance;
+            luminance = GetSkyLuminanceToPoint(
+                camera_position,
+                point,
+                0.0,
+                sun_direction,
+                transmittance);
+        }
+        else
+        {
+            luminance = GetSkyLuminance(
+                camera_position,
+                view_direction,
+                0.0,
+                sun_direction,
+                transmittance);
+        }
     }
 
     vec3 scaled_luminance =

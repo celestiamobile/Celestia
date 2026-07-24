@@ -2078,6 +2078,7 @@ void CelestiaCore::draw(View* view)
         fbo = view->getFBO(0);
     }
     bool process = fbo != nullptr && viewportEffects[0]->preprocess(renderer, fbo);
+    renderer->setBrunetonPostprocessEnabled(process);
 
     auto x = static_cast<int>(view->x * static_cast<float>(metrics.width));
     auto y = static_cast<int>(view->y * static_cast<float>(metrics.height));
@@ -2630,6 +2631,8 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
                                                                      metrics.screenDpi);
     }
     renderer->setProjectionMode(projectionMode);
+
+    viewportEffects.push_back(std::make_unique<BrunetonViewportEffect>());
 
     if (!config->viewportEffect.empty() && config->viewportEffect != "none")
     {

@@ -65,6 +65,28 @@ private:
     bool initialized{ false };
 };
 
+class BrunetonViewportEffect : public ViewportEffect
+{
+public:
+    ~BrunetonViewportEffect() override = default;
+
+    FramebufferObject::Attachment sourceAttachments() const override
+    {
+        return FramebufferObject::Attachment::Color |
+               FramebufferObject::Attachment::Depth;
+    }
+
+    bool needsFloatSource() const override { return true; }
+    bool render(Renderer*, FramebufferObject*, int width, int height) override;
+
+private:
+    void initialize();
+
+    celestia::gl::VertexObject vo;
+    celestia::gl::Buffer bo;
+    bool initialized{ false };
+};
+
 class WarpMeshViewportEffect : public ViewportEffect //NOSONAR
 {
 public:

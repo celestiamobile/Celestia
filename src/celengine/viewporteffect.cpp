@@ -122,6 +122,75 @@ void PassthroughViewportEffect::initialize()
         2 * sizeof(float));
 }
 
+bool BrunetonViewportEffect::render(Renderer* renderer,
+                                    FramebufferObject* fbo,
+                                    int width,
+                                    int height)
+{
+    auto* program =
+        renderer->getShaderManager().getShader(StaticShader::LinearCopy);
+    if (program == nullptr)
+        return false;
+
+    initialize();
+
+    program->use();
+    program->samplerParam("tex") = 0;
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, fbo->colorTexture());
+    renderer->setPipelineState(ps);
+    vo.draw();
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    std::array<GLint, 4> viewport{};
+    glGetIntegerv(GL_VIEWPORT, viewport.data());
+    return renderer->renderBrunetonAtmospheres(
+        *fbo,
+        width,
+        height,
+        viewport[0],
+        viewport[1]);
+}
+
+void BrunetonViewportEffect::initialize()
+{
+    if (initialized)
+        return;
+    initialized = true;
+
+    static constexpr std::array quadVertices = {
+        -1.0f,  1.0f, 0.0f, 1.0f,
+        -1.0f, -1.0f, 0.0f, 0.0f,
+         1.0f, -1.0f, 1.0f, 0.0f,
+
+        -1.0f,  1.0f, 0.0f, 1.0f,
+         1.0f, -1.0f, 1.0f, 0.0f,
+         1.0f,  1.0f, 1.0f, 1.0f
+    };
+
+    vo = gl::VertexObject(gl::VertexObject::Primitive::Triangles);
+    bo = gl::Buffer(gl::Buffer::TargetHint::Array,
+                    quadVertices,
+                    gl::Buffer::BufferUsage::StaticDraw);
+    vo.setCount(6);
+    vo.addVertexBuffer(
+        bo,
+        CelestiaGLProgram::VertexCoordAttributeIndex,
+        2,
+        gl::VertexObject::DataType::Float,
+        false,
+        4 * sizeof(float),
+        0);
+    vo.addVertexBuffer(
+        bo,
+        CelestiaGLProgram::TextureCoord0AttributeIndex,
+        2,
+        gl::VertexObject::DataType::Float,
+        false,
+        4 * sizeof(float),
+        2 * sizeof(float));
+}
+
 WarpMeshViewportEffect::WarpMeshViewportEffect(std::unique_ptr<WarpMesh>&& _mesh) :
     mesh(std::move(_mesh))
 {

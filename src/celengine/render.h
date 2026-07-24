@@ -429,6 +429,16 @@ class Renderer
     {
         return m_brunetonAtmosphereManager.get();
     }
+    void setBrunetonPostprocessEnabled(bool enabled) noexcept
+    {
+        m_brunetonPostprocessEnabled = enabled;
+    }
+    bool renderBrunetonAtmospheres(
+        const FramebufferObject&,
+        int width,
+        int height,
+        int originX,
+        int originY);
 
  public:
     struct RenderProperties
@@ -451,6 +461,13 @@ class Renderer
         int index;
         float nearZ;
         float farZ;
+    };
+
+    struct BrunetonAtmosphereEntry
+    {
+        Body* body;
+        Eigen::Vector3f position;
+        float distance;
     };
 
  private:
@@ -526,11 +543,6 @@ class Renderer
                           const Observer& observer,
                           float nearPlaneDistance,
                           const Matrices&);
-
-    void renderBrunetonAtmosphere(Body& body,
-                                  const Eigen::Vector3f& pos,
-                                  const Observer& observer,
-                                  const Matrices&);
 
     void renderStar(const Star& star,
                     const Eigen::Vector3f& pos,
@@ -726,6 +738,7 @@ class Renderer
     std::vector<RenderListEntry> renderList;
     std::vector<SecondaryIlluminator> secondaryIlluminators;
     std::vector<DepthBufferPartition> depthPartitions;
+    std::vector<BrunetonAtmosphereEntry> m_brunetonAtmospheres;
     std::vector<Annotation> backgroundAnnotations;
     std::vector<Annotation> foregroundAnnotations;
     std::vector<Annotation> depthSortedAnnotations;
@@ -751,6 +764,8 @@ class Renderer
     std::uint32_t frameCount{ 0 };
 
     int currentIntervalIndex{ 0 };
+    double m_renderTime{ 0.0 };
+    bool m_brunetonPostprocessEnabled{ false };
 
     PipelineState m_pipelineState;
 
