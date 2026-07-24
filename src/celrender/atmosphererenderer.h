@@ -35,6 +35,8 @@ class Frustum;
 namespace celestia::render
 {
 
+class BrunetonAtmosphereResource;
+
 class AtmosphereRenderer
 {
 public:
@@ -65,11 +67,16 @@ public:
         const math::Frustum      &frustum,
         const Matrices           &m);
 
+    bool renderBruneton(
+        const RenderInfo&,
+        const LightingState&,
+        const Matrices&,
+        const BrunetonAtmosphereResource&,
+        float luminanceScale);
+
     void initGL();
 
 private:
-    void requestBrunetonResource(const Atmosphere&);
-
     void computeLegacy(
         const Atmosphere         &atmosphere,
         const LightingState      &ls,
@@ -101,6 +108,8 @@ private:
     std::vector<SkyContourPoint>  m_skyContour;
     gl::Buffer                    m_bo;
     gl::VertexObject              m_vo;
+    gl::Buffer                    m_brunetonBo;
+    gl::VertexObject              m_brunetonVo;
     bool                          m_initialized{ false };
 };
 

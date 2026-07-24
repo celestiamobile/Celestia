@@ -57,6 +57,8 @@ uniform vec3 camera;
 uniform vec3 earth_center;
 uniform vec3 sun_direction;
 uniform vec3 sky_spectral_radiance_to_luminance;
+uniform float luminance_scale;
+uniform int render_mode;
 
 in vec3 view_ray;
 
@@ -347,10 +349,17 @@ RadianceSpectrum GetSkyRadiance(
 {
     Length r = length(camera_position);
     Length rmu = dot(camera_position, ray);
+    Area discriminant =
+        rmu * rmu - r * r +
+        parameters.top_radius * parameters.top_radius;
+    if (discriminant < 0.0 * m2)
+    {
+        transmittance = DimensionlessSpectrum(1.0);
+        return RadianceSpectrum(
+            0.0 * watt_per_square_meter_per_sr_per_nm);
+    }
     Length distance_to_top_atmosphere_boundary = -rmu -
-        sqrt(
-            rmu * rmu - r * r +
-            parameters.top_radius * parameters.top_radius);
+        sqrt(discriminant);
     if (distance_to_top_atmosphere_boundary > 0.0 * m)
     {
         camera_position += ray * distance_to_top_atmosphere_boundary;
@@ -424,6 +433,104 @@ RadianceSpectrum GetSkyRadiance(
             MiePhaseFunction(parameters.mie_phase_function_g, nu);
 }
 
+RadianceSpectrum GetSkyRadianceToPoint(
+    IN(AtmosphereParameters) parameters,
+    IN(TransmittanceTexture) transmittance_sampler,
+    IN(ReducedScatteringTexture) scattering_sampler,
+    IN(ReducedScatteringTexture) single_mie_sampler,
+    Position camera_position,
+    IN(Position) point,
+    Length shadow_length,
+    IN(Direction) light_direction,
+    OUT(DimensionlessSpectrum) transmittance)
+{
+    Direction ray = normalize(point - camera_position);
+    Length r = length(camera_position);
+    Length rmu = dot(camera_position, ray);
+    Length distance_to_top_atmosphere_boundary = -rmu -
+        sqrt(
+            rmu * rmu - r * r +
+            parameters.top_radius * parameters.top_radius);
+    if (distance_to_top_atmosphere_boundary > 0.0 * m)
+    {
+        camera_position += ray * distance_to_top_atmosphere_boundary;
+        r = parameters.top_radius;
+        rmu += distance_to_top_atmosphere_boundary;
+    }
+
+    Number mu = rmu / r;
+    Number mu_s = dot(camera_position, light_direction) / r;
+    Number nu = dot(ray, light_direction);
+    Length d = length(point - camera_position);
+    bool ray_r_mu_intersects_ground =
+        RayIntersectsGround(parameters, r, mu);
+
+    transmittance = GetTransmittance(
+        parameters,
+        transmittance_sampler,
+        r,
+        mu,
+        d,
+        ray_r_mu_intersects_ground);
+
+    IrradianceSpectrum single_mie_scattering;
+    IrradianceSpectrum scattering = GetCombinedScattering(
+        parameters,
+        scattering_sampler,
+        single_mie_sampler,
+        r,
+        mu,
+        mu_s,
+        nu,
+        ray_r_mu_intersects_ground,
+        single_mie_scattering);
+
+    d = max(d - shadow_length, 0.0 * m);
+    Length r_p = ClampRadius(
+        parameters,
+        sqrt(d * d + 2.0 * r * mu * d + r * r));
+    Number mu_p = (r * mu + d) / r_p;
+    Number mu_s_p = (r * mu_s + d * nu) / r_p;
+
+    IrradianceSpectrum single_mie_scattering_p;
+    IrradianceSpectrum scattering_p = GetCombinedScattering(
+        parameters,
+        scattering_sampler,
+        single_mie_sampler,
+        r_p,
+        mu_p,
+        mu_s_p,
+        nu,
+        ray_r_mu_intersects_ground,
+        single_mie_scattering_p);
+
+    DimensionlessSpectrum shadow_transmittance = transmittance;
+    if (shadow_length > 0.0 * m)
+    {
+        shadow_transmittance = GetTransmittance(
+            parameters,
+            transmittance_sampler,
+            r,
+            mu,
+            d,
+            ray_r_mu_intersects_ground);
+    }
+    scattering -= shadow_transmittance * scattering_p;
+    single_mie_scattering -=
+        shadow_transmittance * single_mie_scattering_p;
+    if (combined_scattering_textures != 0)
+    {
+        single_mie_scattering = GetExtrapolatedSingleMieScattering(
+            parameters,
+            vec4(scattering, single_mie_scattering.r));
+    }
+
+    single_mie_scattering *= smoothstep(0.0, 0.01, mu_s);
+    return scattering * RayleighPhaseFunction(nu) +
+        single_mie_scattering *
+            MiePhaseFunction(parameters.mie_phase_function_g, nu);
+}
+
 vec3 GetSkyLuminance(
     Position camera_position,
     Direction ray,
@@ -444,16 +551,72 @@ vec3 GetSkyLuminance(
         sky_spectral_radiance_to_luminance;
 }
 
+vec3 GetSkyLuminanceToPoint(
+    Position camera_position,
+    Position point,
+    Length shadow_length,
+    Direction light_direction,
+    out DimensionlessSpectrum transmittance)
+{
+    return GetSkyRadianceToPoint(
+               atmosphere,
+               transmittance_texture,
+               scattering_texture,
+               single_mie_scattering_texture,
+               camera_position,
+               point,
+               shadow_length,
+               light_direction,
+               transmittance) *
+        sky_spectral_radiance_to_luminance;
+}
+
+vec2 RaySphereIntersections(
+    Position origin,
+    Direction ray,
+    Length radius)
+{
+    Length b = dot(origin, ray);
+    Area discriminant = b * b - dot(origin, origin) + radius * radius;
+    if (discriminant < 0.0)
+        return vec2(-1.0);
+
+    Length root = sqrt(discriminant);
+    return vec2(-b - root, -b + root);
+}
+
 void main()
 {
     vec3 view_direction = normalize(view_ray);
     vec3 transmittance;
-    vec3 luminance = GetSkyLuminance(
-        camera - earth_center,
+    Position camera_position = camera - earth_center;
+    vec2 ground_intersections = RaySphereIntersections(
+        camera_position,
         view_direction,
-        0.0,
-        sun_direction,
-        transmittance);
+        atmosphere.bottom_radius);
+    vec3 luminance;
+    if (ground_intersections.x > 0.0)
+    {
+        Position point =
+            camera_position + view_direction * ground_intersections.x;
+        luminance = GetSkyLuminanceToPoint(
+            camera_position,
+            point,
+            0.0,
+            sun_direction,
+            transmittance);
+    }
+    else
+    {
+        luminance = GetSkyLuminance(
+            camera_position,
+            view_direction,
+            0.0,
+            sun_direction,
+            transmittance);
+    }
 
-    fragColor = vec4(max(luminance, vec3(0.0)), 1.0);
+    fragColor = render_mode == 0
+        ? vec4(clamp(transmittance, 0.0, 1.0), 1.0)
+        : vec4(max(luminance * luminance_scale, vec3(0.0)), 1.0);
 }

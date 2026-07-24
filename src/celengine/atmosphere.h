@@ -40,4 +40,5 @@ struct Atmosphere
     float cloudShadowDepth{ 0.0f };
 
     std::filesystem::path brunetonLutFile;
+    float brunetonLuminanceScale{ 1.0e-5f };
 };

@@ -243,6 +243,7 @@ public:
     ~CelestiaGLProgram() = default;
 
     void use() const { program.use(); }
+    GLuint getID() const noexcept { return program.getID(); }
 
     void setLightParameters(const LightingState& ls,
                             Color materialDiffuse,
@@ -392,6 +393,10 @@ public:
     CelestiaGLProgram* getShader(const ShaderProperties&);
     CelestiaGLProgram* getShader(StaticShader, const GeomShaderParams* = nullptr);
     CelestiaGLProgram* getShader(StaticShader, StaticShaderOptions, const GeomShaderParams* = nullptr);
+    bool isErrorProgram(const CelestiaGLProgram* program) const noexcept
+    {
+        return program != nullptr && program == m_errorProgram.get();
+    }
 
     void setFisheyeEnabled(bool enabled);
 

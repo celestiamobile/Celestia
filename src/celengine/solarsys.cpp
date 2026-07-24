@@ -11,6 +11,7 @@
 // of the License, or (at your option) any later version.
 
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <istream>
@@ -750,6 +751,14 @@ void ReadAtmosphere(Body* body,
         atmosphere->brunetonLutFile = lutFile->empty()
             ? std::filesystem::path{}
             : path / *lutFile;
+    }
+    if (auto luminanceScale = atmosData.getNumber<float>("LUTLuminanceScale");
+        luminanceScale.has_value())
+    {
+        if (std::isfinite(*luminanceScale) && *luminanceScale > 0.0f)
+            atmosphere->brunetonLuminanceScale = *luminanceScale;
+        else
+            GetLogger()->error("Atmosphere LUTLuminanceScale must be finite and positive.\n");
     }
 
     // Get the cloud map settings
