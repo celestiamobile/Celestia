@@ -12,6 +12,8 @@ find_package(Threads REQUIRED)
 add_library(brunetonprecompute_core STATIC
   brunetonbaker.cpp
   brunetonbaker.h
+  brunetoninput.cpp
+  brunetoninput.h
   brunetonprecompute.cpp
   brunetonprecompute.h
   brunetonvec.h)

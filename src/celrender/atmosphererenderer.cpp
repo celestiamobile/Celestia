@@ -464,6 +464,7 @@ AtmosphereRenderer::renderBruneton(
     IntegerShaderParameter(programId, "depth_partition_texture") = 4;
     IntegerShaderParameter(programId, "irradiance_texture") = 5;
     IntegerShaderParameter(programId, "surface_id_texture") = 7;
+    IntegerShaderParameter(programId, "phase_texture") = 8;
     FloatShaderParameter(programId, "surface_body_id") =
         static_cast<float>(surfaceBodyId);
 
@@ -500,6 +501,8 @@ AtmosphereRenderer::renderBruneton(
         renderClouds ? cloudTile.texID : resource.transmittanceTexture());
     glActiveTexture(GL_TEXTURE7);
     glBindTexture(GL_TEXTURE_2D, surfaceIdTexture);
+    glActiveTexture(GL_TEXTURE8);
+    glBindTexture(GL_TEXTURE_2D, resource.phaseTexture());
     glActiveTexture(GL_TEXTURE0);
 
     Renderer::PipelineState state;

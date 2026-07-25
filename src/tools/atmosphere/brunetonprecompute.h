@@ -47,6 +47,13 @@ struct DensityProfileLayer {
 
 struct DensityProfile {
   DensityProfileLayer layers[2];
+  std::vector<double> altitudes;
+  std::vector<double> densities;
+};
+
+struct PhaseFunction {
+  std::vector<double> angles;
+  std::vector<dvec3> values;
 };
 
 // All parameters are expressed in the shader length unit (km for the demo:
@@ -60,10 +67,13 @@ struct AtmosphereParameters {
   double top_radius = 0.0;
   DensityProfile rayleigh_density;
   dvec3 rayleigh_scattering;
+  dvec3 rayleigh_extinction;
   DensityProfile mie_density;
   dvec3 mie_scattering;
   dvec3 mie_extinction;
   double mie_phase_function_g = 0.0;
+  PhaseFunction rayleigh_phase;
+  PhaseFunction mie_phase;
   DensityProfile absorption_density;
   dvec3 absorption_extinction;
   dvec3 ground_albedo;

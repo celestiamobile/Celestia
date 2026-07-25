@@ -12,6 +12,8 @@
 using celestia::tools::BrunetonBakeSettings;
 using celestia::tools::MakeAnalyticEarthPhaseTexture;
 using celestia::tools::MakePhysicalEarthParameters;
+using celestia::tools::MakeTabulatedPhaseTexture;
+using celestia::tools::TabulatedAtmosphereInput;
 using celestia::tools::ValidateBrunetonBakeSettings;
 
 TEST_CASE("Bruneton baker validates configuration")
@@ -32,7 +34,7 @@ TEST_CASE("Bruneton baker validates configuration")
     settings = {};
     settings.phaseSampleCount = 1;
     CHECK_FALSE(ValidateBrunetonBakeSettings(settings, error));
-    CHECK(error == "phase sample count must be between 2 and 65536");
+    CHECK(error == "phase sample count must be between 64 and 65536");
 
     settings = {};
     settings.threadCount = 65;
@@ -89,7 +91,41 @@ TEST_CASE("Bruneton baker phase rows are normalized")
             CHECK(texture.texels[offset + 3] == 1.0f);
             integral += texture.texels[offset] * std::sin(theta) * weight * step;
         }
+
         integral *= 2.0 * Pi;
         CHECK(integral == doctest::Approx(1.0).epsilon(row == 0 ? 1.0e-5 : 2.0e-4));
     }
+}
+
+TEST_CASE("Bruneton baker preserves tabulated RGB phase rows")
+{
+    TabulatedAtmosphereInput input;
+    input.molecules.phase.wavelengthsNm = { 440.0, 550.0, 680.0 };
+    input.aerosols.phase.wavelengthsNm = { 440.0, 550.0, 680.0 };
+    input.molecules.phase.anglesRad = {
+        0.0, 3.14159265358979323846 / 2.0, 3.14159265358979323846
+    };
+    input.aerosols.phase.anglesRad = input.molecules.phase.anglesRad;
+    input.molecules.phase.values = {
+        1.0, 1.5, 2.0,
+        3.0, 3.5, 4.0,
+        5.0, 5.5, 6.0,
+    };
+    input.aerosols.phase.values = {
+        7.0, 7.5, 8.0,
+        9.0, 9.5, 10.0,
+        11.0, 11.5, 12.0,
+    };
+
+    const auto texture = MakeTabulatedPhaseTexture(input);
+    REQUIRE(texture.width == 3);
+    REQUIRE(texture.height == 2);
+    CHECK(texture.texels[0] == 5.0f);
+    CHECK(texture.texels[1] == 3.0f);
+    CHECK(texture.texels[2] == 1.0f);
+    CHECK(texture.texels[4] == 5.5f);
+    const auto aerosolOffset = static_cast<std::size_t>(3) * 4;
+    CHECK(texture.texels[aerosolOffset] == 11.0f);
+    CHECK(texture.texels[aerosolOffset + 1] == 9.0f);
+    CHECK(texture.texels[aerosolOffset + 2] == 7.0f);
 }

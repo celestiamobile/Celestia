@@ -14,6 +14,7 @@
 #include <celengine/brunetonatmospherefile.h>
 
 #include "brunetonbaker.h"
+#include "brunetoninput.h"
 
 namespace
 {
@@ -29,7 +30,9 @@ printUsage(std::ostream& output)
         << "  --top-radius-km VALUE     LUT sphere top radius (default 6478.1366)\n"
         << "  --orders VALUE            Scattering orders, 1..16 (default 4)\n"
         << "  --threads VALUE           Worker threads, 0..64; 0 selects hardware (default 0)\n"
-        << "  --phase-samples VALUE     Samples per phase-function row (default 1024)\n"
+        << "  --phase-samples VALUE     Analytic phase samples, 64..65536 (default 1024)\n"
+        << "  --input FILE              Bake a validated 3-wavelength table manifest\n"
+        << "  --validate-input FILE     Validate a tabulated-input manifest and exit\n"
         << "  --no-half                 Do not emulate binary16 intermediate scattering\n"
         << "  -h, --help                Show this help\n";
 }
@@ -128,6 +131,10 @@ main(int argc, char** argv)
 {
     celestia::tools::BrunetonBakeSettings settings;
     std::filesystem::path outputPath;
+    std::filesystem::path inputManifest;
+    std::filesystem::path validationManifest;
+    bool radiusOptionSpecified = false;
+    bool phaseSampleOptionSpecified = false;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -152,15 +159,34 @@ main(int argc, char** argv)
             const std::string_view value{ argv[i] };
             bool parsed = false;
             if (argument == "--bottom-radius-km")
+            {
                 parsed = parseDouble(value, settings.bottomRadiusKm);
+                radiusOptionSpecified = true;
+            }
             else if (argument == "--top-radius-km")
+            {
                 parsed = parseDouble(value, settings.topRadiusKm);
+                radiusOptionSpecified = true;
+            }
             else if (argument == "--orders")
                 parsed = parseInt(value, settings.scatteringOrders);
             else if (argument == "--threads")
                 parsed = parseInt(value, settings.threadCount);
             else if (argument == "--phase-samples")
+            {
                 parsed = parseUnsigned(value, settings.phaseSampleCount);
+                phaseSampleOptionSpecified = true;
+            }
+            else if (argument == "--input")
+            {
+                inputManifest = value;
+                parsed = true;
+            }
+            else if (argument == "--validate-input")
+            {
+                validationManifest = value;
+                parsed = true;
+            }
             else
             {
                 std::cerr << "unknown option: " << argument << '\n';
@@ -181,9 +207,47 @@ main(int argc, char** argv)
         outputPath = argument;
     }
 
+    if (!validationManifest.empty())
+    {
+        if (!outputPath.empty() || !inputManifest.empty())
+        {
+            std::cerr << "--validate-input cannot be combined with --input "
+                         "or an output path\n";
+            return 2;
+        }
+        celestia::tools::TabulatedAtmosphereInput input;
+        std::string error;
+        if (!celestia::tools::LoadTabulatedAtmosphereInput(
+                validationManifest, input, error))
+        {
+            std::cerr << error << '\n';
+            return 1;
+        }
+        std::cout << "Valid tabulated atmosphere: "
+                  << input.molecules.scattering.wavelengthsNm.size()
+                  << " wavelengths, "
+                  << input.molecules.phase.anglesRad.size()
+                  << " molecular phase angles, "
+                  << input.aerosols.phase.anglesRad.size()
+                  << " aerosol phase angles\n";
+        return 0;
+    }
+
     if (outputPath.empty())
     {
         printUsage(std::cerr);
+        return 2;
+    }
+    if (!inputManifest.empty() && radiusOptionSpecified)
+    {
+        std::cerr << "tabulated input radii come from the manifest; "
+                     "do not use radius options with --input\n";
+        return 2;
+    }
+    if (!inputManifest.empty() && phaseSampleOptionSpecified)
+    {
+        std::cerr << "tabulated phase resolution comes from the input table; "
+                     "do not use --phase-samples with --input\n";
         return 2;
     }
     std::error_code existsError;
@@ -207,13 +271,35 @@ main(int argc, char** argv)
         return 2;
     }
 
-    std::cout << "Baking physical Earth: radius " << settings.bottomRadiusKm
-              << ".." << settings.topRadiusKm << " km, "
-              << settings.scatteringOrders << " scattering orders, "
+    celestia::tools::TabulatedAtmosphereInput tabulatedInput;
+    if (!inputManifest.empty() &&
+        !celestia::tools::LoadTabulatedAtmosphereInput(
+            inputManifest, tabulatedInput, error))
+    {
+        std::cerr << error << '\n';
+        return 1;
+    }
+
+    if (inputManifest.empty())
+    {
+        std::cout << "Baking physical Earth: radius " << settings.bottomRadiusKm
+                  << ".." << settings.topRadiusKm << " km, ";
+    }
+    else
+    {
+        std::cout << "Baking tabulated atmosphere from " << inputManifest
+                  << ": radius " << tabulatedInput.bottomRadiusM / 1000.0
+                  << ".." << tabulatedInput.topRadiusM / 1000.0 << " km, ";
+    }
+    std::cout << settings.scatteringOrders << " scattering orders, "
               << settings.phaseSampleCount << " phase samples\n";
     const auto start = std::chrono::steady_clock::now();
     celestia::engine::BrunetonAtmosphereData data;
-    if (!celestia::tools::BakePhysicalEarthAtmosphere(settings, data, error))
+    const bool baked = inputManifest.empty()
+        ? celestia::tools::BakePhysicalEarthAtmosphere(settings, data, error)
+        : celestia::tools::BakeTabulatedAtmosphere(
+              tabulatedInput, settings, data, error);
+    if (!baked)
     {
         std::cerr << "precomputation failed: " << error << '\n';
         return 1;

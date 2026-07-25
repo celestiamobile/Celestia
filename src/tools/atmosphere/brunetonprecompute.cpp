@@ -111,6 +111,17 @@ double GetLayerDensity(const DensityProfileLayer& layer, double altitude) {
 }
 
 double GetProfileDensity(const DensityProfile& profile, double altitude) {
+  if (!profile.altitudes.empty()) {
+    if (altitude <= profile.altitudes.front()) return profile.densities.front();
+    if (altitude >= profile.altitudes.back()) return profile.densities.back();
+    auto upper = std::upper_bound(profile.altitudes.begin(),
+                                  profile.altitudes.end(), altitude);
+    size_t right = size_t(upper - profile.altitudes.begin());
+    size_t left = right - 1;
+    double t = (altitude - profile.altitudes[left]) /
+               (profile.altitudes[right] - profile.altitudes[left]);
+    return mixd(profile.densities[left], profile.densities[right], t);
+  }
   return altitude < profile.layers[0].width
              ? GetLayerDensity(profile.layers[0], altitude)
              : GetLayerDensity(profile.layers[1], altitude);
@@ -134,7 +145,7 @@ double ComputeOpticalLengthToTopAtmosphereBoundary(
 dvec3 ComputeTransmittanceToTopAtmosphereBoundary(const Atm& atm, double r,
                                                   double mu) {
   return vexp(-(
-      atm.rayleigh_scattering *
+      atm.rayleigh_extinction *
           ComputeOpticalLengthToTopAtmosphereBoundary(
               atm, atm.rayleigh_density, r, mu) +
       atm.mie_extinction *
@@ -279,6 +290,30 @@ double MiePhaseFunction(double g, double nu) {
   return k * (1.0 + nu * nu) / std::pow(1.0 + g * g - 2.0 * g * nu, 1.5);
 }
 
+dvec3 SamplePhaseFunction(const PhaseFunction& phase, double nu) {
+  double theta = std::acos(clampd(nu, -1.0, 1.0));
+  if (theta <= phase.angles.front()) return phase.values.front();
+  if (theta >= phase.angles.back()) return phase.values.back();
+  auto upper = std::upper_bound(phase.angles.begin(), phase.angles.end(), theta);
+  size_t right = size_t(upper - phase.angles.begin());
+  size_t left = right - 1;
+  double t = (theta - phase.angles[left]) /
+             (phase.angles[right] - phase.angles[left]);
+  return phase.values[left] * (1.0 - t) + phase.values[right] * t;
+}
+
+dvec3 RayleighPhase(const Atm& atm, double nu) {
+  return atm.rayleigh_phase.angles.empty()
+             ? dvec3(RayleighPhaseFunction(nu))
+             : SamplePhaseFunction(atm.rayleigh_phase, nu);
+}
+
+dvec3 MiePhase(const Atm& atm, double nu) {
+  return atm.mie_phase.angles.empty()
+             ? dvec3(MiePhaseFunction(atm.mie_phase_function_g, nu))
+             : SamplePhaseFunction(atm.mie_phase, nu);
+}
+
 dvec4 GetScatteringTextureUvwzFromRMuMuSNu(const Atm& atm, double r, double mu,
                                            double mu_s, double nu,
                                            bool ray_r_mu_intersects_ground) {
@@ -412,8 +447,8 @@ dvec3 GetScattering(const Atm& atm, const Tex3& single_rayleigh,
                                    ray_r_mu_intersects_ground);
     dvec3 mie = GetScattering(atm, single_mie, r, mu, mu_s, nu,
                               ray_r_mu_intersects_ground);
-    return rayleigh * RayleighPhaseFunction(nu) +
-           mie * MiePhaseFunction(atm.mie_phase_function_g, nu);
+    return rayleigh * RayleighPhase(atm, nu) +
+           mie * MiePhase(atm, nu);
   } else {
     return GetScattering(atm, multiple, r, mu, mu_s, nu,
                          ray_r_mu_intersects_ground);
@@ -561,9 +596,9 @@ dvec3 ComputeScatteringDensity(const Atm& atm, const Tex2& transmittance,
           GetProfileDensity(atm.mie_density, r - atm.bottom_radius);
       rayleigh_mie += incident_radiance *
                       (atm.rayleigh_scattering * rayleigh_density *
-                           RayleighPhaseFunction(nu2) +
+                           RayleighPhase(atm, nu2) +
                        atm.mie_scattering * mie_density *
-                           MiePhaseFunction(atm.mie_phase_function_g, nu2)) *
+                           MiePhase(atm, nu2)) *
                       domega_i;
     }
   }
@@ -827,7 +862,7 @@ PrecomputedTextures Precompute(const AtmosphereParameters& atm,
               dvec3(i + 0.5, j + 0.5, k + 0.5), nu);
           delta_multiple_scattering.At(i, j, k) = H3(delta_ms);
           out.scattering.At(i, j, k) =
-              H3(out.scattering.At(i, j, k) + delta_ms * (1.0 / RayleighPhaseFunction(nu)));
+              H3(out.scattering.At(i, j, k) + delta_ms / RayleighPhase(atm, nu));
         }
       }
     }, SCATTERING_TEXTURE_DEPTH, num_threads);

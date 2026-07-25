@@ -9,6 +9,8 @@
 
 #include <celengine/brunetonatmospherefile.h>
 
+#include "brunetoninput.h"
+
 namespace celestia::tools
 {
 
@@ -28,8 +30,14 @@ bool ValidateBrunetonBakeSettings(const BrunetonBakeSettings&, std::string& erro
 engine::BrunetonAtmosphereParameters MakePhysicalEarthParameters(
     const BrunetonBakeSettings&);
 engine::BrunetonTextureData MakeAnalyticEarthPhaseTexture(std::uint32_t sampleCount);
+engine::BrunetonTextureData MakeTabulatedPhaseTexture(
+    const TabulatedAtmosphereInput&);
 bool BakePhysicalEarthAtmosphere(const BrunetonBakeSettings&,
                                  engine::BrunetonAtmosphereData&,
                                  std::string& error);
+bool BakeTabulatedAtmosphere(const TabulatedAtmosphereInput&,
+                             const BrunetonBakeSettings&,
+                             engine::BrunetonAtmosphereData&,
+                             std::string& error);
 
 } // namespace celestia::tools

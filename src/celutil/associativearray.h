@@ -47,6 +47,7 @@ public:
 
     const Value* getValue(std::string_view) const;
     void addValue(std::string&&, Value&&);
+    bool hasDuplicateKeys() const noexcept { return duplicateKeys; }
 
     template<typename T, std::enable_if_t<std::is_arithmetic_v<T>, int> = 0>
     std::optional<T> getNumber(std::string_view key) const
@@ -148,6 +149,7 @@ private:
     // this in a vector but not a map, so use the map to store vector indices
     std::vector<Value> values;
     AssocType assoc;
+    bool duplicateKeys{ false };
 
     std::optional<double> getNumberImpl(std::string_view) const;
     std::optional<Eigen::Vector3d> getVector3Impl(std::string_view) const;

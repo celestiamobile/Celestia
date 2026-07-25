@@ -24,7 +24,9 @@ if(WIN32)
 endif()
 
 if(ENABLE_TOOLS)
-  list(APPEND UNIT_TEST_SOURCES brunetonbaker_test.cpp)
+  list(APPEND UNIT_TEST_SOURCES
+    brunetonbaker_test.cpp
+    brunetoninput_test.cpp)
 endif()
 
 test_case(unit "${UNIT_TEST_SOURCES}")

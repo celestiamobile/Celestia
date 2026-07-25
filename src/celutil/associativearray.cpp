@@ -33,6 +33,8 @@ AssociativeArray::addValue(std::string&& key, Value&& val)
     std::size_t index = values.size();
     if (assoc.try_emplace(std::move(key), index).second)
         values.emplace_back(std::move(val));
+    else
+        duplicateKeys = true;
 }
 
 std::optional<double>

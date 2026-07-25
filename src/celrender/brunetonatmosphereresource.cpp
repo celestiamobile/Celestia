@@ -90,6 +90,7 @@ BrunetonAtmosphereResource::BrunetonAtmosphereResource(
     BrunetonAtmosphereResource&& other) noexcept :
     m_parameters(other.m_parameters),
     m_transmittance(std::exchange(other.m_transmittance, 0)),
+    m_phase(std::exchange(other.m_phase, 0)),
     m_scattering(std::exchange(other.m_scattering, 0)),
     m_singleMie(std::exchange(other.m_singleMie, 0)),
     m_irradiance(std::exchange(other.m_irradiance, 0)),
@@ -106,6 +107,7 @@ BrunetonAtmosphereResource::operator=(BrunetonAtmosphereResource&& other) noexce
         release();
         m_parameters = other.m_parameters;
         m_transmittance = std::exchange(other.m_transmittance, 0);
+        m_phase = std::exchange(other.m_phase, 0);
         m_scattering = std::exchange(other.m_scattering, 0);
         m_singleMie = std::exchange(other.m_singleMie, 0);
         m_irradiance = std::exchange(other.m_irradiance, 0);
@@ -147,12 +149,14 @@ BrunetonAtmosphereResource::upload(const engine::BrunetonAtmosphereData& data)
 #endif
 
     m_transmittance = createTexture2D(data.transmittance, floatLinearFiltering);
+    m_phase = createTexture2D(data.phase, floatLinearFiltering);
     m_scattering = createTexture3D(data.scattering);
     m_singleMie = createTexture3D(data.singleMie);
     m_irradiance = createTexture2D(data.irradiance, floatLinearFiltering);
 
     const bool complete =
         m_transmittance != 0 &&
+        m_phase != 0 &&
         m_scattering != 0 &&
         m_singleMie != 0 &&
         m_irradiance != 0;
@@ -174,7 +178,8 @@ BrunetonAtmosphereResource::upload(const engine::BrunetonAtmosphereData& data)
                texture.height * texture.depth;
     };
     m_gpuBytes =
-        (texelCount(data.transmittance) + texelCount(data.irradiance)) *
+        (texelCount(data.transmittance) + texelCount(data.phase) +
+         texelCount(data.irradiance)) *
             4u * sizeof(float) +
         (texelCount(data.scattering) + texelCount(data.singleMie)) *
             4u * sizeof(std::uint16_t);
@@ -197,6 +202,8 @@ BrunetonAtmosphereResource::release() noexcept
 {
     if (m_transmittance != 0)
         glDeleteTextures(1, &m_transmittance);
+    if (m_phase != 0)
+        glDeleteTextures(1, &m_phase);
     if (m_scattering != 0)
         glDeleteTextures(1, &m_scattering);
     if (m_singleMie != 0)
@@ -204,6 +211,7 @@ BrunetonAtmosphereResource::release() noexcept
     if (m_irradiance != 0)
         glDeleteTextures(1, &m_irradiance);
     m_transmittance = 0;
+    m_phase = 0;
     m_scattering = 0;
     m_singleMie = 0;
     m_irradiance = 0;

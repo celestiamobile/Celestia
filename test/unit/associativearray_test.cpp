@@ -22,6 +22,16 @@ TEST_SUITE_BEGIN("AssociativeArray");
 
 TEST_CASE("AssociativeArray")
 {
+    SUBCASE("Duplicate keys are reported")
+    {
+        AssociativeArray h;
+        h.addValue("value", Value(1.0));
+        h.addValue("value", Value(2.0));
+        CHECK(h.hasDuplicateKeys());
+        REQUIRE(h.getNumber<double>("value").has_value());
+        CHECK(*h.getNumber<double>("value") == 1.0);
+    }
+
     SUBCASE("Colors")
     {
         SUBCASE("Defined as Vector3")

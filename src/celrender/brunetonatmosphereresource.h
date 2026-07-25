@@ -23,6 +23,7 @@ public:
     bool upload(const engine::BrunetonAtmosphereData&);
 
     GLuint transmittanceTexture() const noexcept { return m_transmittance; }
+    GLuint phaseTexture() const noexcept { return m_phase; }
     GLuint scatteringTexture() const noexcept { return m_scattering; }
     GLuint singleMieTexture() const noexcept { return m_singleMie; }
     GLuint irradianceTexture() const noexcept { return m_irradiance; }
@@ -39,6 +40,7 @@ private:
 
     engine::BrunetonAtmosphereParameters m_parameters;
     GLuint m_transmittance{ 0 };
+    GLuint m_phase{ 0 };
     GLuint m_scattering{ 0 };
     GLuint m_singleMie{ 0 };
     GLuint m_irradiance{ 0 };

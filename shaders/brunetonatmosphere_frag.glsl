@@ -54,6 +54,7 @@ struct AtmosphereParameters
 
 uniform AtmosphereParameters atmosphere;
 uniform sampler2D transmittance_texture;
+uniform sampler2D phase_texture;
 uniform sampler3D scattering_texture;
 uniform sampler3D single_mie_scattering_texture;
 uniform sampler2D irradiance_texture;
@@ -298,6 +299,27 @@ InverseSolidAngle MiePhaseFunction(Number g, Number nu)
         pow(1.0 + g * g - 2.0 * g * nu, 1.5);
 }
 
+vec3 SamplePhaseFunction(Number nu, int row)
+{
+    ivec2 size = textureSize(phase_texture, 0);
+    float coordinate = acos(clamp(nu, -1.0, 1.0)) / PI *
+        float(size.x - 1);
+    float y = (float(row) + 0.5) / float(size.y);
+    if (manual_float_filtering == 0)
+    {
+        float x = (coordinate + 0.5) / float(size.x);
+        return texture(phase_texture, vec2(x, y)).rgb;
+    }
+
+    int left = int(floor(coordinate));
+    int right = min(left + 1, size.x - 1);
+    float amount = coordinate - float(left);
+    return mix(
+        texelFetch(phase_texture, ivec2(left, row), 0).rgb,
+        texelFetch(phase_texture, ivec2(right, row), 0).rgb,
+        amount);
+}
+
 vec4 GetScatteringTextureUvwzFromRMuMuSNu(
     IN(AtmosphereParameters) parameters,
     Length r,
@@ -524,9 +546,8 @@ RadianceSpectrum GetSkyRadiance(
         single_mie_scattering *= shadow_transmittance;
     }
 
-    return scattering * RayleighPhaseFunction(nu) +
-        single_mie_scattering *
-            MiePhaseFunction(parameters.mie_phase_function_g, nu);
+    return scattering * SamplePhaseFunction(nu, 0) +
+        single_mie_scattering * SamplePhaseFunction(nu, 1);
 }
 
 RadianceSpectrum GetSkyRadianceToPoint(
@@ -624,9 +645,8 @@ RadianceSpectrum GetSkyRadianceToPoint(
     }
 
     single_mie_scattering *= smoothstep(0.0, 0.01, mu_s);
-    return scattering * RayleighPhaseFunction(nu) +
-        single_mie_scattering *
-            MiePhaseFunction(parameters.mie_phase_function_g, nu);
+    return scattering * SamplePhaseFunction(nu, 0) +
+        single_mie_scattering * SamplePhaseFunction(nu, 1);
 }
 
 vec3 GetSkyLuminance(

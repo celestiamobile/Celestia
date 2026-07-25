@@ -53,12 +53,80 @@ toPrecomputeParameters(const engine::BrunetonAtmosphereParameters& source)
         result.absorption_density.layers[i] = toPrecomputeLayer(source.absorptionDensity[i]);
     }
     result.rayleigh_scattering = toPrecomputeVector(source.rayleighScattering);
+    result.rayleigh_extinction = result.rayleigh_scattering;
     result.mie_scattering = toPrecomputeVector(source.mieScattering);
     result.mie_extinction = toPrecomputeVector(source.mieExtinction);
     result.mie_phase_function_g = source.miePhaseFunctionG;
     result.absorption_extinction = toPrecomputeVector(source.absorptionExtinction);
     result.ground_albedo = toPrecomputeVector(source.groundAlbedo);
     result.mu_s_min = source.muSMin;
+    return result;
+}
+
+bruneton::dvec3
+toRgbSpectrum(const TabulatedSpectrum& spectrum)
+{
+    constexpr double MetersPerKilometer = 1000.0;
+    return {
+        spectrum.sample(680.0) * MetersPerKilometer,
+        spectrum.sample(550.0) * MetersPerKilometer,
+        spectrum.sample(440.0) * MetersPerKilometer,
+    };
+}
+
+void
+setTabulatedDensity(const TabulatedDensity& source,
+                    bruneton::DensityProfile& destination)
+{
+    constexpr double MetersPerKilometer = 1000.0;
+    destination.altitudes.reserve(source.altitudesM.size());
+    for (double altitude : source.altitudesM)
+        destination.altitudes.push_back(altitude / MetersPerKilometer);
+    destination.densities = source.relativeDensity;
+}
+
+void
+setTabulatedPhase(const TabulatedPhase& source,
+                  bruneton::PhaseFunction& destination)
+{
+    destination.angles = source.anglesRad;
+    destination.values.reserve(source.anglesRad.size());
+    for (double angle : source.anglesRad)
+    {
+        destination.values.emplace_back(
+            source.sample(680.0, angle),
+            source.sample(550.0, angle),
+            source.sample(440.0, angle));
+    }
+}
+
+bruneton::AtmosphereParameters
+makeTabulatedPrecomputeParameters(
+    const engine::BrunetonAtmosphereParameters& runtime,
+    const TabulatedAtmosphereInput& input)
+{
+    auto result = toPrecomputeParameters(runtime);
+    setTabulatedDensity(input.molecules.density, result.rayleigh_density);
+    setTabulatedDensity(input.aerosols.density, result.mie_density);
+    result.rayleigh_scattering = toRgbSpectrum(input.molecules.scattering);
+    result.rayleigh_extinction =
+        result.rayleigh_scattering + toRgbSpectrum(input.molecules.absorption);
+    result.mie_scattering = toRgbSpectrum(input.aerosols.scattering);
+    result.mie_extinction =
+        result.mie_scattering + toRgbSpectrum(input.aerosols.absorption);
+    setTabulatedPhase(input.molecules.phase, result.rayleigh_phase);
+    setTabulatedPhase(input.aerosols.phase, result.mie_phase);
+    if (input.absorber)
+    {
+        setTabulatedDensity(input.absorber->density, result.absorption_density);
+        result.absorption_extinction =
+            toRgbSpectrum(input.absorber->absorption);
+    }
+    else
+    {
+        result.absorption_density = {};
+        result.absorption_extinction = {};
+    }
     return result;
 }
 
@@ -129,9 +197,9 @@ ValidateBrunetonBakeSettings(const BrunetonBakeSettings& settings, std::string& 
         error = "thread count must be between 0 and 64";
         return false;
     }
-    if (settings.phaseSampleCount < 2 || settings.phaseSampleCount > 65536)
+    if (settings.phaseSampleCount < 64 || settings.phaseSampleCount > 65536)
     {
-        error = "phase sample count must be between 2 and 65536";
+        error = "phase sample count must be between 64 and 65536";
         return false;
     }
     return true;
@@ -217,6 +285,65 @@ MakeAnalyticEarthPhaseTexture(std::uint32_t sampleCount)
     return result;
 }
 
+engine::BrunetonTextureData
+MakeTabulatedPhaseTexture(const TabulatedAtmosphereInput& input)
+{
+    const auto sampleCount =
+        static_cast<std::uint32_t>(input.molecules.phase.anglesRad.size());
+    engine::BrunetonTextureData result;
+    result.width = sampleCount;
+    result.height = 2;
+    result.depth = 1;
+    result.texels.resize(static_cast<std::size_t>(sampleCount) * 2 * 4);
+    const TabulatedPhase* phases[] = {
+        &input.molecules.phase,
+        &input.aerosols.phase,
+    };
+    for (std::uint32_t row = 0; row < 2; ++row)
+    {
+        for (std::uint32_t i = 0; i < sampleCount; ++i)
+        {
+            const double theta = input.molecules.phase.anglesRad[i];
+            const std::size_t offset =
+                (static_cast<std::size_t>(row) * sampleCount + i) * 4;
+            result.texels[offset] =
+                static_cast<float>(phases[row]->sample(680.0, theta));
+            result.texels[offset + 1] =
+                static_cast<float>(phases[row]->sample(550.0, theta));
+            result.texels[offset + 2] =
+                static_cast<float>(phases[row]->sample(440.0, theta));
+            result.texels[offset + 3] = 1.0f;
+        }
+
+    }
+    return result;
+}
+
+bool
+validateScatteringRange(const bruneton::PrecomputedTextures& textures,
+                        std::string& error)
+{
+    constexpr double MaxBinary16 = 65504.0;
+    const auto valid = [=](const bruneton::dvec3& value)
+    {
+        return std::isfinite(value.x) && std::isfinite(value.y) &&
+               std::isfinite(value.z) &&
+               value.x >= 0.0 && value.y >= 0.0 && value.z >= 0.0 &&
+               value.x <= MaxBinary16 && value.y <= MaxBinary16 &&
+               value.z <= MaxBinary16;
+    };
+    if (!std::all_of(textures.scattering.data.begin(),
+                     textures.scattering.data.end(), valid) ||
+        !std::all_of(textures.single_mie.data.begin(),
+                     textures.single_mie.data.end(), valid))
+    {
+        error = "tabulated phase produces scattering outside the finite "
+                "binary16 range";
+        return false;
+    }
+    return true;
+}
+
 bool
 BakePhysicalEarthAtmosphere(const BrunetonBakeSettings& settings,
                             engine::BrunetonAtmosphereData& data,
@@ -236,6 +363,79 @@ BakePhysicalEarthAtmosphere(const BrunetonBakeSettings& settings,
     const auto textures =
         bruneton::Precompute(toPrecomputeParameters(result.parameters), precomputeSettings);
 
+    result.transmittance = packTexture(textures.transmittance);
+    result.scattering = packTexture(textures.scattering);
+    result.singleMie = packTexture(textures.single_mie);
+    result.irradiance = packTexture(textures.irradiance);
+    data = std::move(result);
+    return true;
+}
+
+bool
+BakeTabulatedAtmosphere(const TabulatedAtmosphereInput& input,
+                        const BrunetonBakeSettings& settings,
+                        engine::BrunetonAtmosphereData& data,
+                        std::string& error)
+{
+    if (!ValidateBrunetonBakeSettings(settings, error) ||
+        !ValidateTabulatedAtmosphereInput(input, error))
+    {
+        return false;
+    }
+    BrunetonBakeSettings radii = settings;
+    radii.bottomRadiusKm = input.bottomRadiusM / 1000.0;
+    radii.topRadiusKm = input.topRadiusM / 1000.0;
+    if (!ValidateBrunetonBakeSettings(radii, error))
+        return false;
+    engine::BrunetonAtmosphereData result;
+    result.parameters = MakePhysicalEarthParameters(radii);
+    result.parameters.rayleighScattering = {
+        static_cast<float>(input.molecules.scattering.sample(680.0) * 1000.0),
+        static_cast<float>(input.molecules.scattering.sample(550.0) * 1000.0),
+        static_cast<float>(input.molecules.scattering.sample(440.0) * 1000.0),
+    };
+    result.parameters.mieScattering = {
+        static_cast<float>(input.aerosols.scattering.sample(680.0) * 1000.0),
+        static_cast<float>(input.aerosols.scattering.sample(550.0) * 1000.0),
+        static_cast<float>(input.aerosols.scattering.sample(440.0) * 1000.0),
+    };
+    result.parameters.mieExtinction = {
+        static_cast<float>(
+            (input.aerosols.scattering.sample(680.0) +
+             input.aerosols.absorption.sample(680.0)) * 1000.0),
+        static_cast<float>(
+            (input.aerosols.scattering.sample(550.0) +
+             input.aerosols.absorption.sample(550.0)) * 1000.0),
+        static_cast<float>(
+            (input.aerosols.scattering.sample(440.0) +
+             input.aerosols.absorption.sample(440.0)) * 1000.0),
+    };
+    if (input.absorber)
+    {
+        result.parameters.absorptionExtinction = {
+            static_cast<float>(
+                input.absorber->absorption.sample(680.0) * 1000.0),
+            static_cast<float>(
+                input.absorber->absorption.sample(550.0) * 1000.0),
+            static_cast<float>(
+                input.absorber->absorption.sample(440.0) * 1000.0),
+        };
+    }
+    else
+    {
+        result.parameters.absorptionExtinction = {};
+    }
+    result.phase = MakeTabulatedPhaseTexture(input);
+
+    bruneton::PrecomputeSettings precomputeSettings;
+    precomputeSettings.scattering_orders = settings.scatteringOrders;
+    precomputeSettings.thread_count = settings.threadCount;
+    precomputeSettings.emulate_half_precision = settings.emulateHalfPrecision;
+    const auto textures = bruneton::Precompute(
+        makeTabulatedPrecomputeParameters(result.parameters, input),
+        precomputeSettings);
+    if (!validateScatteringRange(textures, error))
+        return false;
     result.transmittance = packTexture(textures.transmittance);
     result.scattering = packTexture(textures.scattering);
     result.singleMie = packTexture(textures.single_mie);
