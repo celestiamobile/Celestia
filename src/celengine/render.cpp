@@ -415,6 +415,7 @@ bool Renderer::init(int winWidth, int winHeight,
     m_textureManager = std::make_unique<TextureManager>(texturePaths, resolution, *m_resourceSystem);
     detailOptions = _detailOptions;
     atmosphereSegmentCount = detailOptions.atmosphereSegmentCount;
+    cloudSegmentCount = detailOptions.cloudSegmentCount;
     atmosphereExtinctionThreshold = detailOptions.atmosphereExtinctionThreshold;
     atmosphereExtinctionFactor = -std::log(atmosphereExtinctionThreshold);
 
@@ -1328,7 +1329,7 @@ void Renderer::renderItem(const RenderListEntry& rle,
     case RenderListEntry::RenderableStar:
         renderStar(*rle.star,
                    rle.position,
-                   rle.distance,
+                   static_cast<float>(rle.distance),
                    rle.appMag,
                    observer,
                    nearPlaneDistance, farPlaneDistance,
@@ -1349,7 +1350,7 @@ void Renderer::renderItem(const RenderListEntry& rle,
     case RenderListEntry::RenderableRingSystem:
         renderRingSystem(*rle.body,
                          rle.position,
-                         rle.distance,
+                         static_cast<float>(rle.distance),
                          observer,
                          nearPlaneDistance,
                          m);
@@ -1367,7 +1368,7 @@ void Renderer::renderItem(const RenderListEntry& rle,
     case RenderListEntry::RenderableReferenceMark:
         renderReferenceMark(*rle.refMark,
                             rle.position,
-                            rle.distance,
+                            static_cast<float>(rle.distance),
                             observer.getTime(),
                             nearPlaneDistance,
                             m);
@@ -2314,7 +2315,7 @@ setupObjectLighting(const vector<LightSource>& suns,
 
 
 void Renderer::renderObject(const Vector3f& pos,
-                            float distance,
+                            double distance,
                             const Observer& observer,
                             float nearPlaneDistance,
                             float farPlaneDistance,
@@ -2325,7 +2326,7 @@ void Renderer::renderObject(const Vector3f& pos,
     RenderInfo ri;
     double now = observer.getTime();
 
-    float altitude = distance - obj.radius;
+    float altitude = static_cast<float>(distance - obj.radius);
     float discSizeInPixels = obj.radius / (max(nearPlaneDistance, altitude) * pixelSize);
 
     ri.sunDir_eye = Vector3f::UnitY();
@@ -2420,7 +2421,11 @@ void Renderer::renderObject(const Vector3f& pos,
     ri.eyeDir_obj = -(planetRotation * pos).normalized();
     ri.eyePos_obj = -(planetRotation * (pos.cwiseQuotient(scaleFactors)));
 
-    bool insidePlanet = obj.geometry == engine::GeometryHandle::Invalid && (planetRotation * pos).cwiseQuotient(scaleFactors).squaredNorm() < 1.0f;
+    bool insidePlanet =
+        obj.geometry == engine::GeometryHandle::Invalid &&
+        (scaleFactors.x() == scaleFactors.y() && scaleFactors.x() == scaleFactors.z()
+             ? distance < static_cast<double>(scaleFactors.x())
+             : (planetRotation * pos).cwiseQuotient(scaleFactors).squaredNorm() < 1.0f);
 
     ri.orientation = getCameraOrientationf() * obj.orientation.conjugate();
 
@@ -2576,8 +2581,8 @@ void Renderer::renderObject(const Vector3f& pos,
         float thicknessInPixels = 0.0f;
         if (distance - radius > 0.0f)
         {
-            thicknessInPixels = atmosphere->height /
-                ((distance - radius) * pixelSize);
+            thicknessInPixels = static_cast<float>(atmosphere->height /
+                ((distance - radius) * pixelSize));
             fade = std::clamp(thicknessInPixels - 2.0f, 0.0f, 1.0f);
         }
         else
@@ -2824,7 +2829,7 @@ bool Renderer::testEclipse(const Body& receiver,
 
 void Renderer::renderPlanet(Body& body,
                             const Vector3f& pos,
-                            float distance,
+                            double distance,
                             float appMag,
                             const std::optional<Quaternionf>& orientation,
                             const Observer& observer,
@@ -2833,7 +2838,7 @@ void Renderer::renderPlanet(Body& body,
                             const Matrices &m)
 {
     double now = observer.getTime();
-    float altitude = distance - body.getRadius();
+    float altitude = static_cast<float>(distance - body.getRadius());
     float discSizeInPixels = body.getRadius() /
         (max(nearPlaneDistance, altitude) * pixelSize);
 
@@ -3052,7 +3057,7 @@ void Renderer::renderPlanet(Body& body,
         const auto surfaceColor = body.getSurface().color.linearize(gl::sRGBRendering);
         if (float maxCoeff = surfaceColor.toVector3().maxCoeff(); maxCoeff > 0.0f) // ignore [ 0 0 0 ]; used by old addons to make objects not get rendered as point
         {
-            renderObjectAsPoint(PointObjectInfo{pos, distance, body.getRadius()},
+            renderObjectAsPoint(PointObjectInfo{pos, static_cast<float>(distance), body.getRadius()},
                                 appMag,
                                 discSizeInPixels,
                                 surfaceColor * (1.0f / maxCoeff), // normalize point color; 'darkness' is handled by size of point determined by GeomAlbedo.
@@ -3450,7 +3455,7 @@ void Renderer::addRenderListEntries(RenderListEntry& rle,
         // When the observer is inside the rings (distance <= innerRadius) the
         // rings are drawn inline by renderObject. Only add a separate
         // transparent render-list entry for the outside case.
-        float ringDiscSize = (rings->outerRadius / rle.distance) / pixelSize;
+        float ringDiscSize = static_cast<float>((rings->outerRadius / rle.distance) / pixelSize);
         if (ringDiscSize > 1 && rle.distance > rings->innerRadius)
         {
             rle.renderableType = RenderListEntry::RenderableRingSystem;
@@ -3465,7 +3470,7 @@ void Renderer::addRenderListEntries(RenderListEntry& rle,
     if (body.getClassification() == BodyClassification::Comet && util::is_set(renderFlags, RenderFlags::ShowCometTails))
     {
         float radius = cometDustTailLength(rle.sun.norm(), body.getRadius());
-        float discSize = (radius / rle.distance) / pixelSize;
+        float discSize = static_cast<float>((radius / rle.distance) / pixelSize);
         if (discSize > 1)
         {
             rle.renderableType = RenderListEntry::RenderableCometTail;
@@ -3612,7 +3617,7 @@ void Renderer::buildRenderLists(const Vector3d& astrocentricObserverPos,
                 RenderListEntry rle;
 
                 rle.position = pos_v.cast<float>();
-                rle.distance = (float) dist_v;
+                rle.distance = dist_v;
                 rle.centerZ = pos_v.cast<float>().dot(viewMatZ);
                 rle.appMag   = appMag;
                 rle.discSizeInPixels = body->getRadius() / ((float) dist_v * pixelSize);
@@ -4830,6 +4835,12 @@ unsigned int
 Renderer::getAtmosphereSegmentCount() const noexcept
 {
     return atmosphereSegmentCount;
+}
+
+unsigned int
+Renderer::getCloudSegmentCount() const noexcept
+{
+    return cloudSegmentCount;
 }
 
 float
