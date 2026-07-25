@@ -454,7 +454,7 @@ AtmosphereRenderer::renderBruneton(
         m_depthPartitionCount;
 
     IntegerShaderParameter(programId, "combined_scattering_textures") =
-        parameters.combinedScattering ? 1 : 0;
+        0;
     IntegerShaderParameter(programId, "manual_float_filtering") =
         resource.usesManualFloatFiltering() ? 1 : 0;
     IntegerShaderParameter(programId, "transmittance_texture") = 0;
@@ -487,11 +487,7 @@ AtmosphereRenderer::renderBruneton(
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_3D, resource.scatteringTexture());
     glActiveTexture(GL_TEXTURE2);
-    glBindTexture(
-        GL_TEXTURE_3D,
-        parameters.combinedScattering
-            ? resource.scatteringTexture()
-            : resource.singleMieTexture());
+    glBindTexture(GL_TEXTURE_3D, resource.singleMieTexture());
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, m_sceneDepthTexture);
     glActiveTexture(GL_TEXTURE4);

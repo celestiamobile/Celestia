@@ -93,6 +93,7 @@ BrunetonAtmosphereResource::BrunetonAtmosphereResource(
     m_scattering(std::exchange(other.m_scattering, 0)),
     m_singleMie(std::exchange(other.m_singleMie, 0)),
     m_irradiance(std::exchange(other.m_irradiance, 0)),
+    m_gpuBytes(std::exchange(other.m_gpuBytes, 0)),
     m_manualFloatFiltering(std::exchange(other.m_manualFloatFiltering, false))
 {
 }
@@ -108,6 +109,7 @@ BrunetonAtmosphereResource::operator=(BrunetonAtmosphereResource&& other) noexce
         m_scattering = std::exchange(other.m_scattering, 0);
         m_singleMie = std::exchange(other.m_singleMie, 0);
         m_irradiance = std::exchange(other.m_irradiance, 0);
+        m_gpuBytes = std::exchange(other.m_gpuBytes, 0);
         m_manualFloatFiltering =
             std::exchange(other.m_manualFloatFiltering, false);
     }
@@ -146,14 +148,13 @@ BrunetonAtmosphereResource::upload(const engine::BrunetonAtmosphereData& data)
 
     m_transmittance = createTexture2D(data.transmittance, floatLinearFiltering);
     m_scattering = createTexture3D(data.scattering);
-    if (!data.parameters.combinedScattering)
-        m_singleMie = createTexture3D(data.singleMie);
+    m_singleMie = createTexture3D(data.singleMie);
     m_irradiance = createTexture2D(data.irradiance, floatLinearFiltering);
 
     const bool complete =
         m_transmittance != 0 &&
         m_scattering != 0 &&
-        (data.parameters.combinedScattering || m_singleMie != 0) &&
+        m_singleMie != 0 &&
         m_irradiance != 0;
     const GLenum error = drainErrors();
     if (!complete || error != GL_NO_ERROR)
@@ -167,6 +168,16 @@ BrunetonAtmosphereResource::upload(const engine::BrunetonAtmosphereData& data)
     }
 
     m_parameters = data.parameters;
+    const auto texelCount = [](const engine::BrunetonTextureData& texture)
+    {
+        return static_cast<std::size_t>(texture.width) *
+               texture.height * texture.depth;
+    };
+    m_gpuBytes =
+        (texelCount(data.transmittance) + texelCount(data.irradiance)) *
+            4u * sizeof(float) +
+        (texelCount(data.scattering) + texelCount(data.singleMie)) *
+            4u * sizeof(std::uint16_t);
     m_manualFloatFiltering = !floatLinearFiltering;
     restoreBindings();
     return true;
@@ -178,20 +189,7 @@ BrunetonAtmosphereResource::gpuBytes() const noexcept
     if (m_transmittance == 0)
         return 0;
 
-    constexpr std::size_t TransmittanceBytes =
-        engine::BrunetonTransmittanceWidth *
-        engine::BrunetonTransmittanceHeight * 4u * sizeof(float);
-    constexpr std::size_t ScatteringBytes =
-        engine::BrunetonScatteringWidth *
-        engine::BrunetonScatteringHeight *
-        engine::BrunetonScatteringDepth * 4u * sizeof(std::uint16_t);
-    constexpr std::size_t IrradianceBytes =
-        engine::BrunetonIrradianceWidth *
-        engine::BrunetonIrradianceHeight * 4u * sizeof(float);
-    return TransmittanceBytes +
-           ScatteringBytes +
-           (m_singleMie == 0 ? 0 : ScatteringBytes) +
-           IrradianceBytes;
+    return m_gpuBytes;
 }
 
 void
@@ -209,6 +207,7 @@ BrunetonAtmosphereResource::release() noexcept
     m_scattering = 0;
     m_singleMie = 0;
     m_irradiance = 0;
+    m_gpuBytes = 0;
     m_manualFloatFiltering = false;
 }
 

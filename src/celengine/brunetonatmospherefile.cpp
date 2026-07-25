@@ -29,19 +29,20 @@ constexpr std::uint32_t DirectoryEntrySize = 48;
 constexpr std::uint32_t ParameterPayloadSize = 256;
 constexpr std::uint32_t ParameterFloatCount = 59;
 constexpr std::uint32_t ChannelCount = 4;
-constexpr std::uint32_t CombinedScatteringFlag = 1;
-constexpr std::uint32_t PrecomputedLuminanceFlag = 2;
-constexpr std::uint32_t KnownParameterFlags =
-    CombinedScatteringFlag | PrecomputedLuminanceFlag;
+constexpr std::uint32_t PrecomputedLuminanceFlag = 1;
+constexpr std::uint32_t KnownParameterFlags = PrecomputedLuminanceFlag;
+constexpr std::uint32_t SectionCount = 6;
 constexpr std::uint64_t Alignment = 16;
+constexpr std::uint64_t MaxDecodedTextureBytes = 512u * 1024u * 1024u;
 
 enum class SectionKind : std::uint32_t
 {
     Parameters = 1,
-    Transmittance = 2,
-    Scattering = 3,
-    SingleMie = 4,
-    Irradiance = 5,
+    Phase = 2,
+    Transmittance = 3,
+    Scattering = 4,
+    SingleMie = 5,
+    Irradiance = 6,
 };
 
 enum class SectionFormat : std::uint32_t
@@ -340,7 +341,6 @@ decodeParameters(const std::array<float, ParameterFloatCount>& values,
     parameters.muSMin = values[index++];
     parameters.skySpectralRadianceToLuminance = decodeVector(values, index);
     parameters.sunSpectralRadianceToLuminance = decodeVector(values, index);
-    parameters.combinedScattering = (flags & CombinedScatteringFlag) != 0;
     parameters.valueMode = (flags & PrecomputedLuminanceFlag) != 0
                                ? BrunetonLutValueMode::PrecomputedLuminance
                                : BrunetonLutValueMode::Radiance;
@@ -360,17 +360,40 @@ validateParameters(const BrunetonAtmosphereParameters& parameters, std::string& 
 }
 
 bool
+checkedMultiply(std::uint64_t lhs, std::uint64_t rhs, std::uint64_t& result)
+{
+    if (rhs != 0 && lhs > std::numeric_limits<std::uint64_t>::max() / rhs)
+        return false;
+    result = lhs * rhs;
+    return true;
+}
+
+bool
+textureElementCount(std::uint32_t width,
+                    std::uint32_t height,
+                    std::uint32_t depth,
+                    std::uint64_t& count)
+{
+    count = width;
+    return checkedMultiply(count, height, count) &&
+           checkedMultiply(count, depth, count) &&
+           checkedMultiply(count, ChannelCount, count);
+}
+
+bool
 validateTexture(const BrunetonTextureData& texture,
-                std::uint32_t width,
-                std::uint32_t height,
-                std::uint32_t depth,
                 bool halfPrecision,
                 std::string& error)
 {
-    if (texture.width != width || texture.height != height || texture.depth != depth)
-        return fail(error, "texture dimensions do not match the Bruneton layout");
-    const auto texelCount = static_cast<std::uint64_t>(width) * height * depth;
-    if (texture.texels.size() != texelCount * ChannelCount)
+    if (texture.width == 0 || texture.height == 0 || texture.depth == 0)
+        return fail(error, "texture dimensions must be nonzero");
+    std::uint64_t elementCount;
+    if (!textureElementCount(
+            texture.width, texture.height, texture.depth, elementCount) ||
+        elementCount > std::numeric_limits<std::size_t>::max() ||
+        elementCount > MaxDecodedTextureBytes / sizeof(float))
+        return fail(error, "texture dimensions are too large");
+    if (texture.texels.size() != elementCount)
         return fail(error, "texture payload size does not match its dimensions");
     if (!std::all_of(texture.texels.begin(), texture.texels.end(),
                      [halfPrecision](float value)
@@ -386,40 +409,28 @@ bool
 validateData(const BrunetonAtmosphereData& data, std::string& error)
 {
     if (!validateParameters(data.parameters, error) ||
-        !validateTexture(data.transmittance,
-                         BrunetonTransmittanceWidth,
-                         BrunetonTransmittanceHeight,
-                         1,
-                         false,
-                         error) ||
-        !validateTexture(data.scattering,
-                         BrunetonScatteringWidth,
-                         BrunetonScatteringHeight,
-                         BrunetonScatteringDepth,
-                         true,
-                         error) ||
-        !validateTexture(data.irradiance,
-                         BrunetonIrradianceWidth,
-                         BrunetonIrradianceHeight,
-                         1,
-                         false,
-                         error))
+        !validateTexture(data.phase, false, error) ||
+        !validateTexture(data.transmittance, false, error) ||
+        !validateTexture(data.scattering, true, error) ||
+        !validateTexture(data.singleMie, true, error) ||
+        !validateTexture(data.irradiance, false, error))
         return false;
 
-    if (data.parameters.combinedScattering)
-    {
-        if (!data.singleMie.texels.empty())
-            return fail(error, "combined scattering must not contain a single-Mie texture");
-    }
-    else if (!validateTexture(data.singleMie,
-                              BrunetonScatteringWidth,
-                              BrunetonScatteringHeight,
-                              BrunetonScatteringDepth,
-                              true,
-                              error))
-    {
-        return false;
-    }
+    if (data.phase.height != 2 || data.phase.depth != 1 || data.phase.width < 2)
+        return fail(error, "phase texture must contain two angle-sampled rows");
+    if (data.transmittance.depth != 1 || data.irradiance.depth != 1)
+        return fail(error, "2D atmosphere texture has invalid depth");
+    if (data.scattering.width != data.singleMie.width ||
+        data.scattering.height != data.singleMie.height ||
+        data.scattering.depth != data.singleMie.depth)
+        return fail(error, "scattering texture dimensions do not match");
+    const auto packedScatteringWidth =
+        static_cast<std::uint64_t>(data.parameters.scatteringNuSize) *
+        data.parameters.scatteringMuSSize;
+    if (data.parameters.scatteringNuSize < 2 ||
+        data.parameters.scatteringMuSSize < 2 ||
+        data.scattering.width != packedScatteringWidth)
+        return fail(error, "scattering texture packing is invalid");
     return true;
 }
 
@@ -500,41 +511,21 @@ validateSectionDescriptor(const Section& section, std::string& error)
         return true;
     }
 
-    std::uint32_t width;
-    std::uint32_t height;
-    std::uint32_t depth;
-    switch (section.kind)
-    {
-    case SectionKind::Transmittance:
-        width = BrunetonTransmittanceWidth;
-        height = BrunetonTransmittanceHeight;
-        depth = 1;
-        break;
-    case SectionKind::Scattering:
-    case SectionKind::SingleMie:
-        width = BrunetonScatteringWidth;
-        height = BrunetonScatteringHeight;
-        depth = BrunetonScatteringDepth;
-        break;
-    case SectionKind::Irradiance:
-        width = BrunetonIrradianceWidth;
-        height = BrunetonIrradianceHeight;
-        depth = 1;
-        break;
-    case SectionKind::Parameters:
-        return false;
-    }
-
     const SectionFormat expectedFormat =
         section.kind == SectionKind::Scattering || section.kind == SectionKind::SingleMie
             ? SectionFormat::Rgba16F
             : SectionFormat::Rgba32F;
     const std::uint32_t componentBytes =
         expectedFormat == SectionFormat::Rgba16F ? sizeof(std::uint16_t) : sizeof(float);
-    const auto expectedSize = static_cast<std::uint64_t>(width) * height * depth *
-                              ChannelCount * componentBytes;
+    std::uint64_t elementCount;
+    std::uint64_t expectedSize;
+    if (!textureElementCount(
+            section.width, section.height, section.depth, elementCount) ||
+        !checkedMultiply(elementCount, componentBytes, expectedSize) ||
+        elementCount > MaxDecodedTextureBytes / sizeof(float))
+        return fail(error, "atmosphere texture dimensions are too large");
     if (section.format != expectedFormat ||
-        section.width != width || section.height != height || section.depth != depth ||
+        section.width == 0 || section.height == 0 || section.depth == 0 ||
         section.channels != ChannelCount || section.size != expectedSize)
         return fail(error, "invalid atmosphere texture section");
     return true;
@@ -560,9 +551,13 @@ readTexture(std::istream& input,
     texture.width = section.width;
     texture.height = section.height;
     texture.depth = section.depth;
-    const auto texelCount = static_cast<std::size_t>(section.width) *
-                            section.height * section.depth * ChannelCount;
-    texture.texels.resize(texelCount);
+    std::uint64_t elementCount;
+    if (!textureElementCount(
+            section.width, section.height, section.depth, elementCount) ||
+        elementCount > std::numeric_limits<std::size_t>::max() ||
+        elementCount > MaxDecodedTextureBytes / sizeof(float))
+        return fail(error, "atmosphere texture dimensions are too large");
+    texture.texels.resize(static_cast<std::size_t>(elementCount));
     const bool read = section.format == SectionFormat::Rgba16F
                           ? readHalves(input, texture.texels.data(), texture.texels.size())
                           : readFloats(input, texture.texels.data(), texture.texels.size());
@@ -582,12 +577,11 @@ SaveBrunetonAtmosphere(std::ostream& output,
     if (!validateData(data, error))
         return false;
 
-    const std::uint32_t sectionCount = data.parameters.combinedScattering ? 4 : 5;
     std::uint64_t nextOffset = alignUp(HeaderSize +
-                                       static_cast<std::uint64_t>(sectionCount) *
+                                       static_cast<std::uint64_t>(SectionCount) *
                                            DirectoryEntrySize);
     std::vector<Section> sections;
-    sections.reserve(sectionCount);
+    sections.reserve(SectionCount);
     auto addSection = [&](SectionKind kind,
                           SectionFormat format,
                           std::uint32_t width,
@@ -602,18 +596,18 @@ SaveBrunetonAtmosphere(std::ostream& output,
 
     addSection(SectionKind::Parameters, SectionFormat::ParametersF32,
                0, 0, 0, 0, ParameterPayloadSize);
+    addSection(SectionKind::Phase, SectionFormat::Rgba32F,
+               data.phase.width, data.phase.height,
+               data.phase.depth, ChannelCount, textureBytes(data.phase));
     addSection(SectionKind::Transmittance, SectionFormat::Rgba32F,
                data.transmittance.width, data.transmittance.height,
                data.transmittance.depth, ChannelCount, textureBytes(data.transmittance));
     addSection(SectionKind::Scattering, SectionFormat::Rgba16F,
                data.scattering.width, data.scattering.height,
                data.scattering.depth, ChannelCount, textureBytes(data.scattering) / 2);
-    if (!data.parameters.combinedScattering)
-    {
-        addSection(SectionKind::SingleMie, SectionFormat::Rgba16F,
-                   data.singleMie.width, data.singleMie.height,
-                   data.singleMie.depth, ChannelCount, textureBytes(data.singleMie) / 2);
-    }
+    addSection(SectionKind::SingleMie, SectionFormat::Rgba16F,
+               data.singleMie.width, data.singleMie.height,
+               data.singleMie.depth, ChannelCount, textureBytes(data.singleMie) / 2);
     addSection(SectionKind::Irradiance, SectionFormat::Rgba32F,
                data.irradiance.width, data.irradiance.height,
                data.irradiance.depth, ChannelCount, textureBytes(data.irradiance));
@@ -622,7 +616,7 @@ SaveBrunetonAtmosphere(std::ostream& output,
     using celestia::util::writeLE;
     if (!output ||
         !writeLE(output, HeaderSize) ||
-        !writeLE(output, sectionCount) ||
+        !writeLE(output, SectionCount) ||
         !writeLE(output, DirectoryEntrySize) ||
         !writeLE(output, std::uint32_t{ 0 }))
         return fail(error, "could not write atmosphere header");
@@ -645,13 +639,12 @@ SaveBrunetonAtmosphere(std::ostream& output,
 
         if (section.kind == SectionKind::Parameters)
         {
-            std::uint32_t flags =
-                data.parameters.combinedScattering ? CombinedScatteringFlag : 0;
+            std::uint32_t flags = 0;
             if (data.parameters.valueMode == BrunetonLutValueMode::PrecomputedLuminance)
                 flags |= PrecomputedLuminanceFlag;
             if (!writeLE(output, flags) ||
-                !writeLE(output, BrunetonScatteringNuSize) ||
-                !writeLE(output, BrunetonScatteringMuSSize) ||
+                !writeLE(output, data.parameters.scatteringNuSize) ||
+                !writeLE(output, data.parameters.scatteringMuSSize) ||
                 !writeLE(output, ParameterFloatCount) ||
                 !writeFloats(output, parameterValues.data(), parameterValues.size()) ||
                 !writeLE(output, std::uint32_t{ 0 }))
@@ -662,6 +655,7 @@ SaveBrunetonAtmosphere(std::ostream& output,
         const BrunetonTextureData* texture = nullptr;
         switch (section.kind)
         {
+        case SectionKind::Phase: texture = &data.phase; break;
         case SectionKind::Transmittance: texture = &data.transmittance; break;
         case SectionKind::Scattering: texture = &data.scattering; break;
         case SectionKind::SingleMie: texture = &data.singleMie; break;
@@ -712,7 +706,7 @@ LoadBrunetonAtmosphere(std::istream& input,
     if (magic != Magic)
         return fail(error, "invalid atmosphere magic");
     if (directoryOffset != HeaderSize || entrySize != DirectoryEntrySize ||
-        (sectionCount != 4 && sectionCount != 5) || reserved != 0)
+        sectionCount != SectionCount || reserved != 0)
         return fail(error, "invalid atmosphere header");
 
     const auto directoryEnd = static_cast<std::uint64_t>(directoryOffset) +
@@ -721,7 +715,7 @@ LoadBrunetonAtmosphere(std::istream& input,
         return fail(error, "truncated atmosphere section directory");
 
     std::vector<Section> sections(sectionCount);
-    std::array<bool, 6> seen{};
+    std::array<bool, 7> seen{};
     for (Section& section : sections)
     {
         if (!readSection(input, section, error) ||
@@ -737,8 +731,10 @@ LoadBrunetonAtmosphere(std::istream& input,
     }
 
     if (!seen[static_cast<std::size_t>(SectionKind::Parameters)] ||
+        !seen[static_cast<std::size_t>(SectionKind::Phase)] ||
         !seen[static_cast<std::size_t>(SectionKind::Transmittance)] ||
         !seen[static_cast<std::size_t>(SectionKind::Scattering)] ||
+        !seen[static_cast<std::size_t>(SectionKind::SingleMie)] ||
         !seen[static_cast<std::size_t>(SectionKind::Irradiance)])
         return fail(error, "missing required atmosphere section");
 
@@ -768,15 +764,10 @@ LoadBrunetonAtmosphere(std::istream& input,
         !readLE(input, floatCount))
         return fail(error, "truncated atmosphere parameters");
     if ((flags & ~KnownParameterFlags) != 0 ||
-        nuSize != BrunetonScatteringNuSize ||
-        muSSize != BrunetonScatteringMuSSize ||
+        nuSize < 2 ||
+        muSSize < 2 ||
         floatCount != ParameterFloatCount)
         return fail(error, "invalid atmosphere parameter header");
-
-    const bool combined = (flags & CombinedScatteringFlag) != 0;
-    const bool hasSingleMie = seen[static_cast<std::size_t>(SectionKind::SingleMie)];
-    if (combined == hasSingleMie || sectionCount != (combined ? 4u : 5u))
-        return fail(error, "single-Mie section is inconsistent with combined scattering");
 
     std::array<float, ParameterFloatCount> values{};
     std::uint32_t parameterReserved;
@@ -788,7 +779,11 @@ LoadBrunetonAtmosphere(std::istream& input,
 
     BrunetonAtmosphereData loaded;
     loaded.parameters = decodeParameters(values, flags);
+    loaded.parameters.scatteringNuSize = nuSize;
+    loaded.parameters.scatteringMuSSize = muSSize;
     if (!validateParameters(loaded.parameters, error) ||
+        !readTexture(input, *findSection(sections, SectionKind::Phase),
+                     loaded.phase, error) ||
         !readTexture(input, *findSection(sections, SectionKind::Transmittance),
                      loaded.transmittance, error) ||
         !readTexture(input, *findSection(sections, SectionKind::Scattering),
@@ -796,8 +791,7 @@ LoadBrunetonAtmosphere(std::istream& input,
         !readTexture(input, *findSection(sections, SectionKind::Irradiance),
                      loaded.irradiance, error))
         return false;
-    if (!combined &&
-        !readTexture(input, *findSection(sections, SectionKind::SingleMie),
+    if (!readTexture(input, *findSection(sections, SectionKind::SingleMie),
                      loaded.singleMie, error))
         return false;
     if (!validateData(loaded, error))

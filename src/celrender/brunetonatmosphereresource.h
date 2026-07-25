@@ -42,6 +42,7 @@ private:
     GLuint m_scattering{ 0 };
     GLuint m_singleMie{ 0 };
     GLuint m_irradiance{ 0 };
+    std::size_t m_gpuBytes{ 0 };
     bool m_manualFloatFiltering{ false };
 };
 

@@ -60,7 +60,8 @@ struct BrunetonAtmosphereParameters
     float muSMin{ 0.0f };
     std::array<float, 3> skySpectralRadianceToLuminance{};
     std::array<float, 3> sunSpectralRadianceToLuminance{};
-    bool combinedScattering{ true };
+    std::uint32_t scatteringNuSize{ BrunetonScatteringNuSize };
+    std::uint32_t scatteringMuSSize{ BrunetonScatteringMuSSize };
     BrunetonLutValueMode valueMode{ BrunetonLutValueMode::Radiance };
 };
 
@@ -75,8 +76,13 @@ struct BrunetonTextureData
 struct BrunetonAtmosphereData
 {
     BrunetonAtmosphereParameters parameters;
+    // Two rows: molecular phase function, then aerosol phase function.
+    // Columns sample scattering angles uniformly from 0 to pi.
+    BrunetonTextureData phase;
     BrunetonTextureData transmittance;
+    // Reduced molecular single scattering plus accumulated scattering orders 2..N.
     BrunetonTextureData scattering;
+    // Reduced aerosol single scattering, kept separate for its tabulated phase function.
     BrunetonTextureData singleMie;
     BrunetonTextureData irradiance;
 };

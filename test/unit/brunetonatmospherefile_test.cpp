@@ -14,6 +14,8 @@ using celestia::engine::BrunetonIrradianceWidth;
 using celestia::engine::BrunetonLutValueMode;
 using celestia::engine::BrunetonScatteringDepth;
 using celestia::engine::BrunetonScatteringHeight;
+using celestia::engine::BrunetonScatteringMuSSize;
+using celestia::engine::BrunetonScatteringNuSize;
 using celestia::engine::BrunetonScatteringWidth;
 using celestia::engine::BrunetonTextureData;
 using celestia::engine::BrunetonTransmittanceHeight;
@@ -39,7 +41,7 @@ makeTexture(std::uint32_t width,
 }
 
 BrunetonAtmosphereData
-makeData(bool combined = true)
+makeData()
 {
     BrunetonAtmosphereData data;
     auto& p = data.parameters;
@@ -68,20 +70,16 @@ makeData(bool combined = true)
     p.muSMin = -0.207912f;
     p.skySpectralRadianceToLuminance = { 114974.0f, 71305.0f, 65310.0f };
     p.sunSpectralRadianceToLuminance = { 98242.0f, 69954.0f, 66475.0f };
-    p.combinedScattering = combined;
-
+    data.phase = makeTexture(181, 2, 1, 0.125f);
     data.transmittance = makeTexture(
         BrunetonTransmittanceWidth, BrunetonTransmittanceHeight, 1, 0.25f);
     data.scattering = makeTexture(
         BrunetonScatteringWidth, BrunetonScatteringHeight, BrunetonScatteringDepth, 0.5f);
     data.irradiance = makeTexture(
         BrunetonIrradianceWidth, BrunetonIrradianceHeight, 1, 0.75f);
-    if (!combined)
-    {
-        data.singleMie = makeTexture(
-            BrunetonScatteringWidth, BrunetonScatteringHeight,
-            BrunetonScatteringDepth, 1.0f);
-    }
+    data.singleMie = makeTexture(
+        BrunetonScatteringWidth, BrunetonScatteringHeight,
+        BrunetonScatteringDepth, 1.0f);
     return data;
 }
 
@@ -117,15 +115,16 @@ getU32(const std::string& bytes, std::size_t offset)
 
 } // namespace
 
-TEST_CASE("Bruneton atmosphere file round trips combined data")
+TEST_CASE("Bruneton atmosphere file round trips extended data")
 {
     const auto source = makeData();
     const std::string bytes = save(source);
 
     CHECK(bytes.substr(0, 8) == std::string("CELATM\r\n", 8));
-    CHECK(bytes.size() == 8667616);
-    CHECK(getU32(bytes, 24 + 48 + 4) == 2); // transmittance: RGBA32F
-    CHECK(getU32(bytes, 24 + 2 * 48 + 4) == 3); // scattering: RGBA16F
+    CHECK(getU32(bytes, 24 + 48 + 4) == 2); // phase: RGBA32F
+    CHECK(getU32(bytes, 24 + 2 * 48 + 4) == 2); // transmittance: RGBA32F
+    CHECK(getU32(bytes, 24 + 3 * 48 + 4) == 3); // scattering: RGBA16F
+    CHECK(getU32(bytes, 24 + 4 * 48 + 4) == 3); // single Mie: RGBA16F
 
     std::istringstream input(bytes, std::ios::binary);
     BrunetonAtmosphereData loaded;
@@ -135,8 +134,9 @@ TEST_CASE("Bruneton atmosphere file round trips combined data")
     CHECK(loaded.parameters.solarIrradiance[0] == doctest::Approx(1.0f));
     CHECK(loaded.parameters.rayleighDensity[1].expScale == doctest::Approx(-0.125f));
     CHECK(loaded.parameters.absorptionDensity[0].width == doctest::Approx(25.0f));
-    CHECK(loaded.parameters.combinedScattering);
-    CHECK(loaded.singleMie.texels.empty());
+    CHECK(loaded.parameters.scatteringNuSize == BrunetonScatteringNuSize);
+    CHECK(loaded.parameters.scatteringMuSSize == BrunetonScatteringMuSSize);
+    CHECK(loaded.phase.texels.front() == doctest::Approx(0.125f));
     CHECK(loaded.transmittance.texels.front() == doctest::Approx(0.25f));
     CHECK(loaded.scattering.texels.back() == doctest::Approx(0.5f));
     CHECK(loaded.irradiance.texels.front() == doctest::Approx(0.75f));
@@ -155,16 +155,28 @@ TEST_CASE("Bruneton atmosphere file quantizes scattering to binary16")
     CHECK(loaded.scattering.texels.front() == doctest::Approx(0.0999755859375f));
 }
 
-TEST_CASE("Bruneton atmosphere file round trips separate Mie data")
+TEST_CASE("Bruneton atmosphere file supports variable LUT dimensions")
 {
-    const std::string bytes = save(makeData(false));
-    CHECK(bytes.size() == 17056272);
+    auto source = makeData();
+    source.parameters.scatteringNuSize = 16;
+    source.parameters.scatteringMuSSize = 4;
+    source.phase = makeTexture(1024, 2, 1, 0.125f);
+    source.transmittance = makeTexture(1024, 512, 1, 0.25f);
+    source.scattering = makeTexture(64, 96, 16, 0.5f);
+    source.singleMie = makeTexture(64, 96, 16, 1.0f);
+    source.irradiance = makeTexture(128, 32, 1, 0.75f);
+    const std::string bytes = save(source);
 
     std::istringstream input(bytes, std::ios::binary);
     BrunetonAtmosphereData loaded;
     std::string error;
     REQUIRE(LoadBrunetonAtmosphere(input, loaded, error));
-    CHECK_FALSE(loaded.parameters.combinedScattering);
+    CHECK(loaded.parameters.scatteringNuSize == 16);
+    CHECK(loaded.parameters.scatteringMuSSize == 4);
+    CHECK(loaded.phase.width == 1024);
+    CHECK(loaded.transmittance.width == 1024);
+    CHECK(loaded.scattering.height == 96);
+    CHECK(loaded.scattering.depth == 16);
     CHECK(loaded.singleMie.texels.front() == doctest::Approx(1.0f));
 }
 
@@ -174,8 +186,7 @@ TEST_CASE("Bruneton atmosphere file preserves precomputed luminance mode")
     source.parameters.valueMode = BrunetonLutValueMode::PrecomputedLuminance;
     const std::string bytes = save(source);
 
-    // Combined scattering and precomputed luminance are both declared.
-    CHECK(getU32(bytes, 224) == 3);
+    CHECK(getU32(bytes, 320) == 1);
 
     std::istringstream input(bytes, std::ios::binary);
     BrunetonAtmosphereData loaded;
@@ -214,17 +225,63 @@ TEST_CASE("Bruneton atmosphere file rejects truncated payloads")
     CHECK(error == "atmosphere section is outside the file");
 }
 
-TEST_CASE("Bruneton atmosphere file rejects inconsistent combined scattering")
+TEST_CASE("Bruneton atmosphere file rejects invalid scattering packing")
 {
-    std::string bytes = save(makeData());
-    // Parameter payload starts at 224 for a four-entry directory.
-    putU32(bytes, 224, 0);
-
-    std::istringstream input(bytes, std::ios::binary);
-    BrunetonAtmosphereData loaded;
+    auto source = makeData();
+    source.parameters.scatteringNuSize = 7;
     std::string error;
-    CHECK_FALSE(LoadBrunetonAtmosphere(input, loaded, error));
-    CHECK(error == "single-Mie section is inconsistent with combined scattering");
+    std::ostringstream output(std::ios::binary);
+    CHECK_FALSE(SaveBrunetonAtmosphere(output, source, error));
+    CHECK(error == "scattering texture packing is invalid");
+}
+
+TEST_CASE("Bruneton atmosphere file requires tabulated phase functions")
+{
+    auto source = makeData();
+    source.phase.height = 1;
+    source.phase.texels.resize(source.phase.width * 4);
+    std::string error;
+    std::ostringstream output(std::ios::binary);
+    CHECK_FALSE(SaveBrunetonAtmosphere(output, source, error));
+    CHECK(error == "phase texture must contain two angle-sampled rows");
+}
+
+TEST_CASE("Bruneton atmosphere file requires separate aerosol scattering")
+{
+    auto source = makeData();
+    source.singleMie = {};
+    std::string error;
+    std::ostringstream output(std::ios::binary);
+    CHECK_FALSE(SaveBrunetonAtmosphere(output, source, error));
+    CHECK(error == "texture dimensions must be nonzero");
+}
+
+TEST_CASE("Bruneton atmosphere file rejects overflowing texture dimensions")
+{
+    auto source = makeData();
+    source.parameters.scatteringNuSize = 2;
+    source.parameters.scatteringMuSSize = 1u << 30;
+    source.scattering.width = 1u << 31;
+    source.scattering.height = 1u << 31;
+    source.scattering.depth = 4;
+    source.scattering.texels.clear();
+    source.singleMie = source.scattering;
+    std::string error;
+    std::ostringstream output(std::ios::binary);
+    CHECK_FALSE(SaveBrunetonAtmosphere(output, source, error));
+    CHECK(error == "texture dimensions are too large");
+}
+
+TEST_CASE("Bruneton atmosphere file rejects excessive texture allocations")
+{
+    auto source = makeData();
+    source.transmittance.width = 16384;
+    source.transmittance.height = 8192;
+    source.transmittance.texels.clear();
+    std::string error;
+    std::ostringstream output(std::ios::binary);
+    CHECK_FALSE(SaveBrunetonAtmosphere(output, source, error));
+    CHECK(error == "texture dimensions are too large");
 }
 
 TEST_CASE("Bruneton atmosphere file reports missing files")
