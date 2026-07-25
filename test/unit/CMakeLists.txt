@@ -23,4 +23,12 @@ if(WIN32)
   list(APPEND UNIT_TEST_SOURCES winutil_test.cpp)
 endif()
 
+if(ENABLE_TOOLS)
+  list(APPEND UNIT_TEST_SOURCES brunetonbaker_test.cpp)
+endif()
+
 test_case(unit "${UNIT_TEST_SOURCES}")
+
+if(ENABLE_TOOLS)
+  target_link_libraries(unit PRIVATE brunetonprecompute_core)
+endif()
