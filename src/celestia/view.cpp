@@ -247,6 +247,7 @@ View::reset()
     child1 = nullptr;
     child2 = nullptr;
     fbos.clear();
+    brunetonFbo.reset();
 }
 
 
@@ -262,7 +263,10 @@ View::drawBorder(Overlay* overlay, int gWidth, int gHeight, const Color &color, 
 
 
 void
-View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, int gWidth, int gHeight)
+View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects,
+                 int gWidth,
+                 int gHeight,
+                 bool multisampleFirstFbo)
 {
     int count = static_cast<int>(effects.size());
     auto newWidth = static_cast<GLuint>(width * gWidth);
@@ -276,7 +280,9 @@ View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, in
     if (currentSamples < 1)
         currentSamples = 1;
 
-    int samplesToRequest = currentSamples;
+    // A preceding viewport effect has already resolved the scene, so its
+    // destination must not run the following fullscreen shader once per sample.
+    int samplesToRequest = multisampleFirstFbo ? currentSamples : 1;
 
     if (static_cast<int>(fbos.size()) != count)
         fbos.resize(count);
@@ -316,6 +322,43 @@ View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, in
     }
 }
 
+void
+View::updateBrunetonFBO(int gWidth, int gHeight)
+{
+    auto newWidth = static_cast<GLuint>(width * gWidth);
+    auto newHeight = static_cast<GLuint>(height * gHeight);
+
+    GLint currentSamples = 0;
+    glGetIntegerv(GL_SAMPLES, &currentSamples);
+    if (currentSamples < 1)
+        currentSamples = 1;
+
+    if (brunetonFbo
+        && brunetonFbo->width() == newWidth
+        && brunetonFbo->height() == newHeight
+        && brunetonFbo->samples() == currentSamples)
+        return;
+
+    brunetonFbo = std::make_unique<FramebufferObject>(
+        newWidth,
+        newHeight,
+        FramebufferObject::Attachment::Color |
+            FramebufferObject::Attachment::Depth,
+        currentSamples,
+        true);
+    if (!brunetonFbo->isValid())
+    {
+        GetLogger()->error("Error creating Bruneton view FBO.\n");
+        brunetonFbo = nullptr;
+    }
+}
+
+void
+View::releaseBrunetonFBO()
+{
+    brunetonFbo.reset();
+}
+
 
 FramebufferObject*
 View::getFBO(int index) const
@@ -323,6 +366,12 @@ View::getFBO(int index) const
     if (index < 0 || index >= static_cast<int>(fbos.size()))
         return nullptr;
     return fbos[index].get();
+}
+
+FramebufferObject*
+View::getBrunetonFBO() const
+{
+    return brunetonFbo.get();
 }
 
 } // end namespace celestia

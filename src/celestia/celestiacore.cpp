@@ -2064,47 +2064,123 @@ void CelestiaCore::draw(View* view)
     if (view->type != View::ViewWindow) return;
 
     bool viewportEffectUsed = false;
-
-    int nEffects = static_cast<int>(viewportEffects.size());
-    FramebufferObject *fbo = nullptr;
+    bool brunetonActive = false;
+    const int nEffects = static_cast<int>(viewportEffects.size());
     // Capture the screen framebuffer before any binding changes so we can
     // restore it after the effect chain without relying on preprocess to save it.
-    auto screenFbo = nEffects > 0 ? std::make_optional(FramebufferObject::wrapCurrentBinding())
-                                  : std::nullopt;
-    if (nEffects > 0)
-    {
-        // create/update FBOs for viewport effect chain
-        view->updateFBOs(viewportEffects, metrics.width, metrics.height);
-        fbo = view->getFBO(0);
-    }
-    bool process = fbo != nullptr && viewportEffects[0]->preprocess(renderer, fbo);
-    renderer->setBrunetonPostprocessEnabled(process);
-
+    auto screenFbo = brunetonViewportEffect != nullptr || nEffects > 0
+        ? std::make_optional(FramebufferObject::wrapCurrentBinding())
+        : std::nullopt;
     auto x = static_cast<int>(view->x * static_cast<float>(metrics.width));
     auto y = static_cast<int>(view->y * static_cast<float>(metrics.height));
     auto viewWidth = static_cast<int>(view->width * static_cast<float>(metrics.width));
     auto viewHeight = static_cast<int>(view->height * static_cast<float>(metrics.height));
-    // If we need to process, we draw to the FBO which starts at point zero
-    renderer->setRenderRegion(process ? 0 : x, process ? 0 : y, viewWidth, viewHeight, !view->isRootView() && !process);
+    bool process = false;
+    bool genericEffectsActive = false;
+    renderer->setRenderRegion(
+        x, y, viewWidth, viewHeight, !view->isRootView());
+    auto preparation = view->isRootView()
+        ? sim->prepareRender(*renderer)
+        : sim->prepareRender(*renderer, *view->observer);
+    if (!preparation.needsBrunetonPass)
+        view->releaseBrunetonFBO();
 
-    if (view->isRootView())
-        sim->render(*renderer);
+    if (nEffects > 0)
+    {
+        view->updateFBOs(viewportEffects,
+                         metrics.width,
+                         metrics.height,
+                         !preparation.needsBrunetonPass);
+        genericEffectsActive = true;
+        for (int i = 0; i < nEffects; ++i)
+            genericEffectsActive =
+                genericEffectsActive && view->getFBO(i) != nullptr;
+    }
+
+    if (preparation.needsBrunetonPass &&
+        brunetonViewportEffect != nullptr &&
+        (nEffects == 0 || genericEffectsActive))
+    {
+        view->updateBrunetonFBO(metrics.width, metrics.height);
+        FramebufferObject* sceneFbo = view->getBrunetonFBO();
+        brunetonActive =
+            sceneFbo != nullptr &&
+            brunetonViewportEffect->preprocess(renderer, sceneFbo);
+    }
+
+    if (preparation.needsBrunetonPass &&
+        !brunetonActive &&
+        genericEffectsActive)
+    {
+        view->updateFBOs(viewportEffects,
+                         metrics.width,
+                         metrics.height,
+                         true);
+        for (int i = 0; i < nEffects; ++i)
+            genericEffectsActive =
+                genericEffectsActive && view->getFBO(i) != nullptr;
+    }
+
+    if (brunetonActive)
+    {
+        process = true;
+    }
+    else if (genericEffectsActive)
+    {
+        FramebufferObject* sceneFbo = view->getFBO(0);
+        process =
+            sceneFbo != nullptr &&
+            viewportEffects.front()->preprocess(renderer, sceneFbo);
+    }
     else
-        sim->render(*renderer, *view->observer);
+    {
+        process = false;
+    }
+
+    renderer->setRenderRegion(
+        process ? 0 : x,
+        process ? 0 : y,
+        viewWidth,
+        viewHeight,
+        !view->isRootView() && !process);
+    preparation.brunetonPassActive = brunetonActive;
+    renderer->renderPrepared(preparation);
 
     if (process)
     {
         bool ok = true;
-        for (int i = 0; i < nEffects; i++)
+        if (brunetonActive)
         {
+            FramebufferObject* dst =
+                nEffects == 0
+                    ? &screenFbo.value()
+                    : view->getFBO(0);
+            if (nEffects == 0)
+                renderer->setRenderRegion(x, y, viewWidth, viewHeight);
+
+            FramebufferObject* src = view->getBrunetonFBO();
+            if (!brunetonViewportEffect->prerender(renderer, src, dst) ||
+                !brunetonViewportEffect->render(
+                    renderer, src, viewWidth, viewHeight))
+            {
+                GetLogger()->error(
+                    "Unable to render Bruneton viewport effect.\n");
+                ok = false;
+            }
+        }
+
+        for (int i = 0; genericEffectsActive && i < nEffects; i++)
+        {
+            if (!ok)
+                break;
+
             FramebufferObject* dst;
             if (i == nEffects - 1)
             {
                 // The last effect renders to the screen FBO, needs to be reset
                 // to start from (x,y) instead of point zero
                 dst = &screenFbo.value();
-                if (x != 0 || y != 0)
-                    renderer->setRenderRegion(x, y, viewWidth, viewHeight);
+                renderer->setRenderRegion(x, y, viewWidth, viewHeight);
             }
             else
             {
@@ -2632,7 +2708,7 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
     }
     renderer->setProjectionMode(projectionMode);
 
-    viewportEffects.push_back(std::make_unique<BrunetonViewportEffect>());
+    brunetonViewportEffect = std::make_unique<BrunetonViewportEffect>();
 
     if (!config->viewportEffect.empty() && config->viewportEffect != "none")
     {

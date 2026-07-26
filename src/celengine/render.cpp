@@ -52,7 +52,6 @@
 #include <celastro/astro.h>
 #include <celastro/date.h>
 #include <celcompat/numbers.h>
-#include <celengine/fisheyeprojectionmode.h>
 #include <celengine/observer.h>
 #include <celephem/rotation.h>
 #include <celmath/frustum.h>
@@ -1399,11 +1398,14 @@ void Renderer::renderItem(const RenderListEntry& rle,
 }
 
 
-void Renderer::render(const Observer& observer,
-                      const Universe& universe,
-                      float faintestMagNight,
-                      const Selection& sel)
+RenderPreparation
+Renderer::prepareRender(const Observer& observer,
+                        const Universe& universe,
+                        float faintestMagNight,
+                        const Selection& sel)
 {
+    assert(!m_preparedRender.has_value());
+
     // Get the observer's time
     double now = observer.getTime();
     m_renderTime = now;
@@ -1462,6 +1464,7 @@ void Renderer::render(const Observer& observer,
     secondaryIlluminators.clear();
     nearStars.clear();
     m_brunetonAtmospheres.clear();
+    m_needsBrunetonPass = false;
 
     // See if we want to use AutoMag.
     if (util::is_set(renderFlags, RenderFlags::ShowAutoMag))
@@ -1511,6 +1514,36 @@ void Renderer::render(const Observer& observer,
     satPoint = faintestMag - (1.0f - brightnessBias) / brightnessScale;
 
     ambientColor = Color(ambientLightLevel, ambientLightLevel, ambientLightLevel).linearize(gl::sRGBRendering);
+
+    m_preparedRender.emplace(PreparedRender{
+        &observer,
+        &universe,
+        sel,
+        std::move(frustum),
+        std::move(xfrustum),
+        now,
+    });
+    return {
+        .needsBrunetonPass = m_needsBrunetonPass,
+    };
+}
+
+void Renderer::renderPrepared(const RenderPreparation& preparation)
+{
+    assert(m_preparedRender.has_value());
+    PreparedRender prepared = std::move(*m_preparedRender);
+    m_preparedRender.reset();
+
+    const Observer& observer = *prepared.observer;
+    const Universe& universe = *prepared.universe;
+    const Selection& sel = prepared.selection;
+    const math::InfiniteFrustum& frustum = prepared.frustum;
+    const math::InfiniteFrustum& xfrustum = prepared.transformedFrustum;
+    const double now = prepared.now;
+
+    m_brunetonPostprocessEnabled = preparation.brunetonPassActive && preparation.needsBrunetonPass;
+    if (!m_brunetonPostprocessEnabled)
+        m_brunetonAtmospheres.clear();
 
     // glClear(GL_DEPTH_BUFFER_BIT) is masked by glDepthMask. A previous pass
     // (e.g. a post-process quad from a prior view) may have left depthMask=false,
@@ -1579,48 +1612,20 @@ void Renderer::render(const Observer& observer,
 
     removeInvisibleItems(frustum);
 
-    if (m_brunetonPostprocessEnabled &&
-        util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
-        dynamic_cast<const engine::FisheyeProjectionMode*>(
-            projectionMode.get()) == nullptr)
+    std::sort(
+        m_brunetonAtmospheres.begin(),
+        m_brunetonAtmospheres.end(),
+        [](const BrunetonAtmosphereEntry& a,
+           const BrunetonAtmosphereEntry& b)
+        {
+            return a.distance > b.distance;
+        });
+    for (std::size_t i = 0;
+         i < m_brunetonAtmospheres.size();
+         ++i)
     {
-        const BodyFeaturesManager* bodyFeaturesManager =
-            GetBodyFeaturesManager();
-        for (const auto& entry : renderList)
-        {
-            if (entry.renderableType != RenderListEntry::RenderableBody ||
-                entry.discSizeInPixels <= 1.0f)
-            {
-                continue;
-            }
-
-            const Atmosphere* atmosphere =
-                bodyFeaturesManager->getAtmosphere(entry.body);
-            if (atmosphere == nullptr ||
-                atmosphere->brunetonLutFile.empty())
-            {
-                continue;
-            }
-
-            m_brunetonAtmospheres.push_back(
-                { entry.body, entry.position, entry.distance });
-        }
-
-        std::sort(
-            m_brunetonAtmospheres.begin(),
-            m_brunetonAtmospheres.end(),
-            [](const BrunetonAtmosphereEntry& a,
-               const BrunetonAtmosphereEntry& b)
-            {
-                return a.distance > b.distance;
-            });
-        for (std::size_t i = 0;
-             i < m_brunetonAtmospheres.size();
-             ++i)
-        {
-            m_brunetonAtmospheres[i].surfaceBodyId =
-                static_cast<GLint>(i + 1);
-        }
+        m_brunetonAtmospheres[i].surfaceBodyId =
+            static_cast<GLint>(i + 1);
     }
 
     // Sort the annotations
@@ -2566,8 +2571,7 @@ void Renderer::renderObject(const Vector3f& pos,
         !atmosphere->brunetonLutFile.empty() &&
         util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
         !insidePlanet &&
-        dynamic_cast<const engine::FisheyeProjectionMode*>(
-            projectionMode.get()) == nullptr;
+        projectionMode->supportsBrunetonAtmospheres();
     auto* brunetonProgram = useBruneton
         ? getShaderManager().getShader(StaticShader::BrunetonAtmosphere)
         : nullptr;
@@ -3887,6 +3891,23 @@ void Renderer::buildRenderLists(const Vector3d& astrocentricObserverPos,
                 // In both cases, it's the wrong quantity to use (e.g. for objects with orbits
                 // defined relative to the SSB.)
                 rle.sun = -pos_s.cast<float>();
+
+                if (rle.discSizeInPixels > 1.0f &&
+                    util::is_set(
+                        renderFlags,
+                        RenderFlags::ShowAtmospheres) &&
+                    projectionMode->supportsBrunetonAtmospheres())
+                {
+                    const Atmosphere* atmosphere =
+                        GetBodyFeaturesManager()->getAtmosphere(body);
+                    if (atmosphere != nullptr &&
+                        !atmosphere->brunetonLutFile.empty() &&
+                        m_brunetonAtmosphereManager->find(
+                            atmosphere->brunetonLutFile) != nullptr)
+                    {
+                        m_needsBrunetonPass = true;
+                    }
+                }
 
                 addRenderListEntries(rle, *body, isLabeled);
             }
@@ -5553,6 +5574,7 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
         float cloudHeight = 0.0f;
         float ringOuterRadius = 0.0f;
         float ringInnerRadius = 0.0f;
+        const Atmosphere* atmosphere = nullptr;
 
         switch (ri.renderableType)
         {
@@ -5587,7 +5609,8 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
                 convex = false;
 
             cullRadius = radius;
-            if (const Atmosphere* atmosphere = bodyFeaturesManager->getAtmosphere(ri.body); atmosphere != nullptr)
+            atmosphere = bodyFeaturesManager->getAtmosphere(ri.body);
+            if (atmosphere != nullptr)
             {
                 cullRadius += atmosphere->height;
                 cloudHeight = max(atmosphere->cloudHeight,
@@ -5604,6 +5627,18 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
         // Test the object's bounding sphere against the view frustum
         if (frustum.testSphere(center, cullRadius) != math::FrustumAspect::Outside)
         {
+            if (m_brunetonPostprocessEnabled &&
+                ri.renderableType == RenderListEntry::RenderableBody &&
+                ri.discSizeInPixels > 1.0f &&
+                atmosphere != nullptr &&
+                !atmosphere->brunetonLutFile.empty() &&
+                m_brunetonAtmosphereManager->find(
+                    atmosphere->brunetonLutFile) != nullptr)
+            {
+                m_brunetonAtmospheres.push_back(
+                    { ri.body, ri.position, ri.distance });
+            }
+
             if (ri.discSizeInPixels <= 1.0f)
             {
                 // Sub-pixel objects are rendered as points in front of

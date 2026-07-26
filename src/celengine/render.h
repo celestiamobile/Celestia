@@ -106,6 +106,12 @@ enum class RenderMode
     Line = 1
 };
 
+struct RenderPreparation
+{
+    bool needsBrunetonPass{ false };
+    bool brunetonPassActive{ false };
+};
+
 class Renderer
 {
  public:
@@ -166,10 +172,12 @@ class Renderer
 
     void setRenderMode(RenderMode);
     void autoMag(float& faintestMag, float zoom);
-    void render(const Observer&,
-                const Universe&,
-                float faintestVisible,
-                const Selection& sel);
+    RenderPreparation prepareRender(
+        const Observer&,
+        const Universe&,
+        float faintestVisible,
+        const Selection& sel);
+    void renderPrepared(const RenderPreparation&);
 
     bool getInfo(std::map<std::string, std::string>& info) const;
 
@@ -432,10 +440,6 @@ class Renderer
     celestia::render::BrunetonAtmosphereManager* getBrunetonAtmosphereManager() const noexcept
     {
         return m_brunetonAtmosphereManager.get();
-    }
-    void setBrunetonPostprocessEnabled(bool enabled) noexcept
-    {
-        m_brunetonPostprocessEnabled = enabled;
     }
     bool renderBrunetonAtmospheres(
         const FramebufferObject&,
@@ -773,6 +777,18 @@ class Renderer
     int currentIntervalIndex{ 0 };
     double m_renderTime{ 0.0 };
     bool m_brunetonPostprocessEnabled{ false };
+    bool m_needsBrunetonPass{ false };
+
+    struct PreparedRender
+    {
+        const Observer* observer;
+        const Universe* universe;
+        Selection selection;
+        celestia::math::InfiniteFrustum frustum;
+        celestia::math::InfiniteFrustum transformedFrustum;
+        double now;
+    };
+    std::optional<PreparedRender> m_preparedRender;
 
     PipelineState m_pipelineState;
 

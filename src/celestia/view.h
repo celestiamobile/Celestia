@@ -51,8 +51,14 @@ public:
     void reset();
     static View* remove(View*);
     void drawBorder(Overlay*, int gWidth, int gHeight, const Color &color, float linewidth = 1.0f) const;
-    void updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, int gWidth, int gHeight);
+    void updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects,
+                    int gWidth,
+                    int gHeight,
+                    bool multisampleFirstFbo);
+    void updateBrunetonFBO(int gWidth, int gHeight);
+    void releaseBrunetonFBO();
     FramebufferObject *getFBO(int index) const;
+    FramebufferObject *getBrunetonFBO() const;
 
     Type           type;
 
@@ -67,6 +73,7 @@ public:
 
 private:
     std::vector<std::unique_ptr<FramebufferObject>> fbos;
+    std::unique_ptr<FramebufferObject> brunetonFbo;
 };
 
 }
