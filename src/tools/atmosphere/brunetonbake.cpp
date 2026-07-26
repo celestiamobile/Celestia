@@ -598,17 +598,16 @@ makeFileData(const AtmosphereParameters& atmosphere,
         toArray(atmosphere.absorption_extinction);
     parameters.groundAlbedo = toArray(atmosphere.ground_albedo);
     parameters.muSMin = static_cast<float>(atmosphere.mu_s_min);
+    parameters.sunSpectralRadianceToLuminance =
+        radianceToLuminance(solar, 0.0);
     if (valueMode == BrunetonLutValueMode::Radiance)
     {
         parameters.skySpectralRadianceToLuminance =
             radianceToLuminance(solar, -3.0);
-        parameters.sunSpectralRadianceToLuminance =
-            radianceToLuminance(solar, 0.0);
     }
     else
     {
         parameters.skySpectralRadianceToLuminance = { 1.0f, 1.0f, 1.0f };
-        parameters.sunSpectralRadianceToLuminance = { 1.0f, 1.0f, 1.0f };
     }
     parameters.combinedScattering = combinedScattering;
     parameters.valueMode = valueMode;
@@ -982,7 +981,7 @@ parsePositiveDouble(std::string_view text, double& value)
 }
 
 bool
-validateHalfPrecisionRange(const BrunetonAtmosphereData& data)
+validateScatteringRange(const BrunetonAtmosphereData& data)
 {
     constexpr float MaximumHalf = 65504.0f;
     auto maximumAbsolute = [](const BrunetonTextureData& texture)
@@ -1004,9 +1003,15 @@ validateHalfPrecisionRange(const BrunetonAtmosphereData& data)
     std::cout << '\n';
 
     if (!std::isfinite(scatteringMaximum) ||
-        !std::isfinite(singleMieMaximum) ||
-        scatteringMaximum > MaximumHalf ||
-        singleMieMaximum > MaximumHalf)
+        !std::isfinite(singleMieMaximum))
+    {
+        std::cerr << "Scattering contains a non-finite value\n";
+        return false;
+    }
+
+    if (data.parameters.valueMode == BrunetonLutValueMode::Radiance &&
+        (scatteringMaximum > MaximumHalf ||
+         singleMieMaximum > MaximumHalf))
     {
         std::cerr << "Scattering exceeds the runtime RGBA16F range\n";
         return false;
@@ -1217,7 +1222,7 @@ main(int argc, char** argv)
                      textures,
                      valueMode,
                      !luminanceMode);
-    if (!validateHalfPrecisionRange(data))
+    if (!validateScatteringRange(data))
         return 1;
 
     std::ofstream output(outputPath, std::ios::binary);

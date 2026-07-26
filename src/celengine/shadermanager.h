@@ -30,7 +30,6 @@ class LightingState;
 enum class StaticShader
 {
     BrunetonAtmosphere = 0,
-    BrunetonAtmosphereDualSource,
     Comet,
     Crosshair,
     Depth,
@@ -54,8 +53,9 @@ enum class StaticShader
 // Compile-time options that select variants of a static shader via #define injection.
 enum class StaticShaderOptions : std::uint8_t
 {
-    None    = 0,
-    ToneMap = 0x01,
+    None       = 0,
+    ToneMap    = 0x01,
+    DualSource = 0x02,
 };
 
 ENUM_CLASS_BITWISE_OPS(StaticShaderOptions);
@@ -74,6 +74,7 @@ struct std::hash<StaticShaderProperties>
 {
     std::size_t operator()(const StaticShaderProperties&) const;
 };
+
 
 enum class TexUsage : std::uint32_t
 {

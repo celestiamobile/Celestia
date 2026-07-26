@@ -388,9 +388,10 @@ AtmosphereRenderer::renderBruneton(
 
     ShaderManager& shaderManager = m_renderer.getShaderManager();
     auto* program = shaderManager.getShader(
+        StaticShader::BrunetonAtmosphere,
         useDualSource
-            ? StaticShader::BrunetonAtmosphereDualSource
-            : StaticShader::BrunetonAtmosphere);
+            ? StaticShaderOptions::DualSource
+            : StaticShaderOptions::None);
     if (useDualSource && shaderManager.isErrorProgram(program))
     {
         useDualSource = false;
@@ -447,15 +448,12 @@ AtmosphereRenderer::renderBruneton(
         (parameters.bottomRadius *
          bodySemiAxes.cwiseInverse()).cwiseProduct(sunDirection).normalized();
     Vec3ShaderParameter(programId, "sun_direction") = sunDirection;
-    Eigen::Vector3f skyRadianceToLuminance = Eigen::Vector3f::Ones();
-    if (parameters.valueMode == engine::BrunetonLutValueMode::Radiance)
-    {
-        skyRadianceToLuminance =
-            Eigen::Map<const Eigen::Vector3f>(
-                parameters.skySpectralRadianceToLuminance.data());
-    }
     Vec3ShaderParameter(programId, "sky_spectral_radiance_to_luminance") =
-        skyRadianceToLuminance;
+        Eigen::Map<const Eigen::Vector3f>(
+            parameters.skySpectralRadianceToLuminance.data());
+    Vec3ShaderParameter(programId, "sun_spectral_radiance_to_luminance") =
+        Eigen::Map<const Eigen::Vector3f>(
+            parameters.sunSpectralRadianceToLuminance.data());
     FloatShaderParameter(programId, "luminance_scale") = luminanceScale;
     Vec2ShaderParameter(programId, "viewport_size") =
         Eigen::Vector2f(
@@ -472,6 +470,11 @@ AtmosphereRenderer::renderBruneton(
         parameters.combinedScattering ? 1 : 0;
     IntegerShaderParameter(programId, "manual_float_filtering") =
         resource.usesManualFloatFiltering() ? 1 : 0;
+    IntegerShaderParameter(programId, "manual_scattering_filtering") =
+        resource.usesManualFloatFiltering() &&
+                resource.usesFullPrecisionScattering()
+            ? 1
+            : 0;
     IntegerShaderParameter(programId, "transmittance_texture") = 0;
     IntegerShaderParameter(programId, "scattering_texture") = 1;
     IntegerShaderParameter(programId, "single_mie_scattering_texture") = 2;

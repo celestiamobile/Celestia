@@ -63,6 +63,7 @@ uniform sampler2D depth_partition_texture;
 uniform sampler2D cloud_texture;
 uniform int combined_scattering_textures;
 uniform int manual_float_filtering;
+uniform int manual_scattering_filtering;
 uniform int depth_partition_count;
 uniform int render_clouds;
 uniform int cloud_texture_has_alpha;
@@ -71,6 +72,7 @@ uniform vec3 camera;
 uniform vec3 earth_center;
 uniform vec3 sun_direction;
 uniform vec3 sky_spectral_radiance_to_luminance;
+uniform vec3 sun_spectral_radiance_to_luminance;
 uniform float luminance_scale;
 uniform float cloud_radius;
 uniform float cloud_texture_offset;
@@ -175,6 +177,42 @@ vec4 SampleFloatTexture2D(sampler2D sampler, vec2 uv)
 {
     return manual_float_filtering != 0
         ? SampleFloatTexture2DLinear(sampler, uv)
+        : texture(sampler, uv);
+}
+
+vec4 SampleFloatTexture3DLinear(sampler3D sampler, vec3 uv)
+{
+    ivec3 size = textureSize(sampler, 0);
+    vec3 coordinate = clamp(
+        uv * vec3(size) - vec3(0.5),
+        vec3(0.0),
+        vec3(size - 1));
+    ivec3 p0 = ivec3(floor(coordinate));
+    ivec3 p1 = min(p0 + ivec3(1), size - ivec3(1));
+    vec3 weight = fract(coordinate);
+    vec4 z0 = mix(
+        mix(texelFetch(sampler, ivec3(p0.x, p0.y, p0.z), 0),
+            texelFetch(sampler, ivec3(p1.x, p0.y, p0.z), 0),
+            weight.x),
+        mix(texelFetch(sampler, ivec3(p0.x, p1.y, p0.z), 0),
+            texelFetch(sampler, ivec3(p1.x, p1.y, p0.z), 0),
+            weight.x),
+        weight.y);
+    vec4 z1 = mix(
+        mix(texelFetch(sampler, ivec3(p0.x, p0.y, p1.z), 0),
+            texelFetch(sampler, ivec3(p1.x, p0.y, p1.z), 0),
+            weight.x),
+        mix(texelFetch(sampler, ivec3(p0.x, p1.y, p1.z), 0),
+            texelFetch(sampler, ivec3(p1.x, p1.y, p1.z), 0),
+            weight.x),
+        weight.y);
+    return mix(z0, z1, weight.z);
+}
+
+vec4 SampleScatteringTexture(sampler3D sampler, vec3 uv)
+{
+    return manual_scattering_filtering != 0
+        ? SampleFloatTexture3DLinear(sampler, uv)
         : texture(sampler, uv);
 }
 
@@ -397,8 +435,8 @@ IrradianceSpectrum GetCombinedScattering(
         uvwz.z,
         uvwz.w);
 
-    vec4 scattering0 = texture(scattering_sampler, uvw0);
-    vec4 scattering1 = texture(scattering_sampler, uvw1);
+    vec4 scattering0 = SampleScatteringTexture(scattering_sampler, uvw0);
+    vec4 scattering1 = SampleScatteringTexture(scattering_sampler, uvw1);
     vec4 combined_scattering =
         scattering0 * (1.0 - lerp) + scattering1 * lerp;
     IrradianceSpectrum scattering =
@@ -413,8 +451,9 @@ IrradianceSpectrum GetCombinedScattering(
     else
     {
         single_mie_scattering = IrradianceSpectrum(
-            texture(single_mie_sampler, uvw0) * (1.0 - lerp) +
-            texture(single_mie_sampler, uvw1) * lerp);
+            SampleScatteringTexture(single_mie_sampler, uvw0) *
+                (1.0 - lerp) +
+            SampleScatteringTexture(single_mie_sampler, uvw1) * lerp);
     }
 
     return scattering;
@@ -636,8 +675,6 @@ vec3 GetSkyLuminance(
     Direction light_direction,
     out DimensionlessSpectrum transmittance)
 {
-    // Temporary reference-demo comparison path: the demo currently has
-    // "use luminance" disabled, so it tone maps raw spectral radiance.
     return GetSkyRadiance(
                atmosphere,
                transmittance_texture,
@@ -647,7 +684,8 @@ vec3 GetSkyLuminance(
                ray,
                shadow_length,
                light_direction,
-               transmittance);
+               transmittance) *
+        sky_spectral_radiance_to_luminance;
 }
 
 vec3 GetSkyLuminanceToPoint(
@@ -657,7 +695,6 @@ vec3 GetSkyLuminanceToPoint(
     Direction light_direction,
     out DimensionlessSpectrum transmittance)
 {
-    // Temporary reference-demo comparison path: keep raw spectral radiance.
     return GetSkyRadianceToPoint(
                atmosphere,
                transmittance_texture,
@@ -667,7 +704,8 @@ vec3 GetSkyLuminanceToPoint(
                point,
                shadow_length,
                light_direction,
-               transmittance);
+               transmittance) *
+        sky_spectral_radiance_to_luminance;
 }
 
 vec2 RaySphereIntersections(
@@ -822,7 +860,8 @@ vec4 GetCloudColor(
     vec3 cloud_radiance =
         front_scattering +
         cloud_transmittance * cloud_sample.rgb *
-            (sun_irradiance + sky_irradiance) / PI;
+            (sun_irradiance * sun_spectral_radiance_to_luminance +
+             sky_irradiance * sky_spectral_radiance_to_luminance) / PI;
     return vec4(cloud_radiance, alpha);
 }
 

@@ -27,6 +27,10 @@ public:
     GLuint singleMieTexture() const noexcept { return m_singleMie; }
     GLuint irradianceTexture() const noexcept { return m_irradiance; }
     bool usesManualFloatFiltering() const noexcept { return m_manualFloatFiltering; }
+    bool usesFullPrecisionScattering() const noexcept
+    {
+        return m_fullPrecisionScattering;
+    }
     const engine::BrunetonAtmosphereParameters& parameters() const noexcept
     {
         return m_parameters;
@@ -43,6 +47,7 @@ private:
     GLuint m_singleMie{ 0 };
     GLuint m_irradiance{ 0 };
     bool m_manualFloatFiltering{ false };
+    bool m_fullPrecisionScattering{ false };
 };
 
 } // namespace celestia::render

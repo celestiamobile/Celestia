@@ -53,7 +53,9 @@ createTexture2D(const engine::BrunetonTextureData& data, bool linearFiltering)
 }
 
 GLuint
-createTexture3D(const engine::BrunetonTextureData& data)
+createTexture3D(const engine::BrunetonTextureData& data,
+                bool fullPrecision,
+                bool linearFiltering)
 {
     GLuint texture = 0;
     glGenTextures(1, &texture);
@@ -61,14 +63,15 @@ createTexture3D(const engine::BrunetonTextureData& data)
         return 0;
 
     glBindTexture(GL_TEXTURE_3D, texture);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    const GLint filter = linearFiltering ? GL_LINEAR : GL_NEAREST;
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, filter);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, filter);
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     glTexImage3D(GL_TEXTURE_3D,
                  0,
-                 GL_RGBA16F,
+                 fullPrecision ? GL_RGBA32F : GL_RGBA16F,
                  static_cast<GLsizei>(data.width),
                  static_cast<GLsizei>(data.height),
                  static_cast<GLsizei>(data.depth),
@@ -93,7 +96,9 @@ BrunetonAtmosphereResource::BrunetonAtmosphereResource(
     m_scattering(std::exchange(other.m_scattering, 0)),
     m_singleMie(std::exchange(other.m_singleMie, 0)),
     m_irradiance(std::exchange(other.m_irradiance, 0)),
-    m_manualFloatFiltering(std::exchange(other.m_manualFloatFiltering, false))
+    m_manualFloatFiltering(std::exchange(other.m_manualFloatFiltering, false)),
+    m_fullPrecisionScattering(
+        std::exchange(other.m_fullPrecisionScattering, false))
 {
 }
 
@@ -110,6 +115,8 @@ BrunetonAtmosphereResource::operator=(BrunetonAtmosphereResource&& other) noexce
         m_irradiance = std::exchange(other.m_irradiance, 0);
         m_manualFloatFiltering =
             std::exchange(other.m_manualFloatFiltering, false);
+        m_fullPrecisionScattering =
+            std::exchange(other.m_fullPrecisionScattering, false);
     }
     return *this;
 }
@@ -144,10 +151,24 @@ BrunetonAtmosphereResource::upload(const engine::BrunetonAtmosphereData& data)
     constexpr bool floatLinearFiltering = true;
 #endif
 
+    const bool fullPrecisionScattering =
+        data.parameters.valueMode ==
+        engine::BrunetonLutValueMode::PrecomputedLuminance;
+    const bool linearScatteringFiltering =
+        !fullPrecisionScattering || floatLinearFiltering;
+
     m_transmittance = createTexture2D(data.transmittance, floatLinearFiltering);
-    m_scattering = createTexture3D(data.scattering);
+    m_scattering = createTexture3D(
+        data.scattering,
+        fullPrecisionScattering,
+        linearScatteringFiltering);
     if (!data.parameters.combinedScattering)
-        m_singleMie = createTexture3D(data.singleMie);
+    {
+        m_singleMie = createTexture3D(
+            data.singleMie,
+            fullPrecisionScattering,
+            linearScatteringFiltering);
+    }
     m_irradiance = createTexture2D(data.irradiance, floatLinearFiltering);
 
     const bool complete =
@@ -168,6 +189,7 @@ BrunetonAtmosphereResource::upload(const engine::BrunetonAtmosphereData& data)
 
     m_parameters = data.parameters;
     m_manualFloatFiltering = !floatLinearFiltering;
+    m_fullPrecisionScattering = fullPrecisionScattering;
     restoreBindings();
     return true;
 }
@@ -181,16 +203,20 @@ BrunetonAtmosphereResource::gpuBytes() const noexcept
     constexpr std::size_t TransmittanceBytes =
         engine::BrunetonTransmittanceWidth *
         engine::BrunetonTransmittanceHeight * 4u * sizeof(float);
-    constexpr std::size_t ScatteringBytes =
+    constexpr std::size_t ScatteringComponents =
         engine::BrunetonScatteringWidth *
         engine::BrunetonScatteringHeight *
-        engine::BrunetonScatteringDepth * 4u * sizeof(std::uint16_t);
+        engine::BrunetonScatteringDepth * 4u;
+    const std::size_t scatteringBytes =
+        ScatteringComponents *
+        (m_fullPrecisionScattering ? sizeof(float)
+                                   : sizeof(std::uint16_t));
     constexpr std::size_t IrradianceBytes =
         engine::BrunetonIrradianceWidth *
         engine::BrunetonIrradianceHeight * 4u * sizeof(float);
     return TransmittanceBytes +
-           ScatteringBytes +
-           (m_singleMie == 0 ? 0 : ScatteringBytes) +
+           scatteringBytes +
+           (m_singleMie == 0 ? 0 : scatteringBytes) +
            IrradianceBytes;
 }
 
@@ -210,6 +236,7 @@ BrunetonAtmosphereResource::release() noexcept
     m_singleMie = 0;
     m_irradiance = 0;
     m_manualFloatFiltering = false;
+    m_fullPrecisionScattering = false;
 }
 
 } // namespace celestia::render

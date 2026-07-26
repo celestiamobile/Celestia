@@ -176,12 +176,32 @@ TEST_CASE("Bruneton atmosphere file preserves precomputed luminance mode")
 
     // Combined scattering and precomputed luminance are both declared.
     CHECK(getU32(bytes, 224) == 3);
+    CHECK(getU32(bytes, 24 + 2 * 48 + 4) == 2); // scattering: RGBA32F
 
     std::istringstream input(bytes, std::ios::binary);
     BrunetonAtmosphereData loaded;
     std::string error;
     REQUIRE(LoadBrunetonAtmosphere(input, loaded, error));
     CHECK(loaded.parameters.valueMode == BrunetonLutValueMode::PrecomputedLuminance);
+}
+
+TEST_CASE("Bruneton luminance scattering uses full precision")
+{
+    auto source = makeData(false);
+    source.parameters.valueMode = BrunetonLutValueMode::PrecomputedLuminance;
+    source.scattering.texels.front() = 214684.0f;
+    source.singleMie.texels.front() = 131008.0f;
+    const std::string bytes = save(source);
+
+    CHECK(getU32(bytes, 24 + 2 * 48 + 4) == 2); // scattering: RGBA32F
+    CHECK(getU32(bytes, 24 + 3 * 48 + 4) == 2); // single-Mie: RGBA32F
+
+    std::istringstream input(bytes, std::ios::binary);
+    BrunetonAtmosphereData loaded;
+    std::string error;
+    REQUIRE(LoadBrunetonAtmosphere(input, loaded, error));
+    CHECK(loaded.scattering.texels.front() == doctest::Approx(214684.0f));
+    CHECK(loaded.singleMie.texels.front() == doctest::Approx(131008.0f));
 }
 
 TEST_CASE("Bruneton atmosphere file rejects duplicate sections")

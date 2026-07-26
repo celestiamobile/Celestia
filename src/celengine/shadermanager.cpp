@@ -53,7 +53,6 @@ const std::filesystem::path ShaderDirectory{ "shaders" };
 constexpr std::array StaticShaderBaseNames
 {
     "brunetonatmosphere"sv,
-    "brunetonatmosphere"sv,
     "comet"sv,
     "crosshair"sv,
     "depth"sv,
@@ -2748,7 +2747,9 @@ ShaderManager::getShader(StaticShader staticShader, const GeomShaderParams* gsPa
 }
 
 CelestiaGLProgram*
-ShaderManager::getShader(StaticShader staticShader, StaticShaderOptions options, const GeomShaderParams* gsParams)
+ShaderManager::getShader(StaticShader staticShader,
+                         StaticShaderOptions options,
+                         const GeomShaderParams* gsParams)
 {
     StaticShaderProperties props{ staticShader, options };
     auto [it, inserted] = m_staticShaders.try_emplace(props);
@@ -2761,8 +2762,7 @@ ShaderManager::getShader(StaticShader staticShader, StaticShaderOptions options,
 std::shared_ptr<CelestiaGLProgram>
 ShaderManager::loadShader(StaticShaderProperties props, const GeomShaderParams* gsParams)
 {
-    bool dualSource =
-        props.shader == StaticShader::BrunetonAtmosphereDualSource;
+    bool dualSource = util::is_set(props.options, StaticShaderOptions::DualSource);
     auto name = StaticShaderBaseNames[static_cast<std::size_t>(props.shader)];
     auto vs = ReadShaderFile(ShaderDirectory / std::filesystem::u8path(fmt::format("{}_vert.glsl", name)));
     if (vs.empty())
