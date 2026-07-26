@@ -767,6 +767,42 @@ Length GetSceneDistance()
     return ReconstructSceneDistance(depth, distance_scale);
 }
 
+bool IsVisibleSurfaceNearby()
+{
+    ivec2 size = textureSize(surface_id_texture, 0);
+    ivec2 pixel = clamp(
+        ivec2(gl_FragCoord.xy - viewport_origin),
+        ivec2(0),
+        size - ivec2(1));
+    float center_alpha =
+        texelFetch(surface_id_texture, pixel, 0).a;
+    if (center_alpha >= 0.9999)
+        return false;
+    if (abs(-center_alpha - surface_body_id) < 0.25)
+        return true;
+
+    for (int y = -1; y <= 1; ++y)
+    {
+        for (int x = -1; x <= 1; ++x)
+        {
+            if (x == 0 && y == 0)
+                continue;
+            ivec2 sample_pixel = clamp(
+                pixel + ivec2(x, y),
+                ivec2(0),
+                size - ivec2(1));
+            float visible_surface_id =
+                -texelFetch(
+                    surface_id_texture,
+                    sample_pixel,
+                    0).a;
+            if (abs(visible_surface_id - surface_body_id) < 0.25)
+                return true;
+        }
+    }
+    return false;
+}
+
 vec2 GetCloudTextureUv(Position position)
 {
     Direction normal = normalize(position);
@@ -921,20 +957,15 @@ void main()
     vec3 transmittance;
     Position camera_position = camera - earth_center;
     Length scene_distance = GetSceneDistance();
-    vec2 surface_uv =
-        (gl_FragCoord.xy - viewport_origin) / viewport_size;
-    float visible_surface_id =
-        -texture(surface_id_texture, surface_uv).a;
-    // MSAA resolves can blend IDs at silhouettes; validation bounds the
-    // resulting differences to antialiased edge pixels.
-    if (abs(visible_surface_id - surface_body_id) < 0.25)
+    vec2 ground_intersections = RaySphereIntersections(
+        camera_position,
+        view_direction,
+        atmosphere.bottom_radius);
+    if (IsVisibleSurfaceNearby())
     {
-        vec2 ground_intersections = RaySphereIntersections(
-            camera_position,
-            view_direction,
-            atmosphere.bottom_radius);
-        if (ground_intersections.x >= 0.0)
-            scene_distance = ground_intersections.x;
+        scene_distance = ground_intersections.x >= 0.0
+            ? ground_intersections.x
+            : 1.0e30;
     }
     vec2 atmosphere_intersections = RaySphereIntersections(
         camera_position, view_direction, atmosphere.top_radius);
