@@ -30,6 +30,7 @@ class LightingState;
 enum class StaticShader
 {
     BrunetonAtmosphere = 0,
+    BrunetonAtmosphereDualSource,
     Comet,
     Crosshair,
     Depth,

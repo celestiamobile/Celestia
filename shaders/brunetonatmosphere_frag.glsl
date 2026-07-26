@@ -971,4 +971,12 @@ void main()
                 luminance_scale,
             vec3(0.0));
     fragColor = vec4(scaled_luminance, 1.0);
+#ifdef DUAL_SOURCE_BLENDING
+    atmosphereTransmission = vec4(
+        clamp(
+            transmittance * (1.0 - cloud.a),
+            0.0,
+            1.0),
+        1.0);
+#endif
 }

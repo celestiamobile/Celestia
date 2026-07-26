@@ -381,8 +381,21 @@ AtmosphereRenderer::renderBruneton(
     float cloudHeight,
     float cloudTextureOffset)
 {
-    auto* program =
-        m_renderer.getShaderManager().getShader(StaticShader::BrunetonAtmosphere);
+    bool useDualSource = false;
+#ifndef GL_ES
+    useDualSource = ls.nLights > 0 && gl::dualSourceBlending;
+#endif
+
+    ShaderManager& shaderManager = m_renderer.getShaderManager();
+    auto* program = shaderManager.getShader(
+        useDualSource
+            ? StaticShader::BrunetonAtmosphereDualSource
+            : StaticShader::BrunetonAtmosphere);
+    if (useDualSource && shaderManager.isErrorProgram(program))
+    {
+        useDualSource = false;
+        program = shaderManager.getShader(StaticShader::BrunetonAtmosphere);
+    }
     if (program == nullptr)
         return false;
 
@@ -510,6 +523,15 @@ AtmosphereRenderer::renderBruneton(
 
     Renderer::PipelineState state;
     state.blending = true;
+    if (useDualSource)
+    {
+        state.blendFunc = { GL_ONE, GL_SRC1_COLOR };
+        m_renderer.setPipelineState(state);
+        IntegerShaderParameter(programId, "render_mode") = 1;
+        m_brunetonVo.draw();
+        return true;
+    }
+
     state.blendFunc = { GL_ZERO, GL_SRC_COLOR };
     m_renderer.setPipelineState(state);
     IntegerShaderParameter(programId, "render_mode") = 0;
