@@ -17,7 +17,7 @@ namespace celestia::engine
 inline constexpr std::uint32_t BrunetonTransmittanceWidth = 256;
 inline constexpr std::uint32_t BrunetonTransmittanceHeight = 64;
 inline constexpr std::uint32_t BrunetonScatteringRSize = 32;
-inline constexpr std::uint32_t BrunetonScatteringMuSize = 128;
+inline constexpr std::uint32_t BrunetonScatteringMuSize = 256;
 inline constexpr std::uint32_t BrunetonScatteringMuSSize = 32;
 inline constexpr std::uint32_t BrunetonScatteringNuSize = 8;
 inline constexpr std::uint32_t BrunetonScatteringWidth =

@@ -123,7 +123,7 @@ TEST_CASE("Bruneton atmosphere file round trips combined data")
     const std::string bytes = save(source);
 
     CHECK(bytes.substr(0, 8) == std::string("CELATM\r\n", 8));
-    CHECK(bytes.size() == 8667616);
+    CHECK(bytes.size() == 17056224);
     CHECK(getU32(bytes, 24 + 48 + 4) == 2); // transmittance: RGBA32F
     CHECK(getU32(bytes, 24 + 2 * 48 + 4) == 3); // scattering: RGBA16F
 
@@ -158,7 +158,7 @@ TEST_CASE("Bruneton atmosphere file quantizes scattering to binary16")
 TEST_CASE("Bruneton atmosphere file round trips separate Mie data")
 {
     const std::string bytes = save(makeData(false));
-    CHECK(bytes.size() == 17056272);
+    CHECK(bytes.size() == 33833488);
 
     std::istringstream input(bytes, std::ios::binary);
     BrunetonAtmosphereData loaded;
