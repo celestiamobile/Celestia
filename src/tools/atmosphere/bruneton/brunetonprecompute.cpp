@@ -8,6 +8,7 @@
 
 #include "brunetonprecompute.h"
 
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -22,6 +23,31 @@ bool g_emulate_half = false;
 namespace {
 
 constexpr double PI = 3.14159265358979323846;
+
+template<std::size_t ThetaCount, std::size_t PhiCount>
+struct SphericalQuadrature {
+  std::array<double, ThetaCount> cos_theta;
+  std::array<double, ThetaCount> sin_theta;
+  std::array<double, ThetaCount> solid_angle_scale;
+  std::array<double, PhiCount> cos_phi;
+  std::array<double, PhiCount> sin_phi;
+
+  SphericalQuadrature(double theta_range, double phi_range) {
+    const double dtheta = theta_range / double(ThetaCount);
+    const double dphi = phi_range / double(PhiCount);
+    for (std::size_t i = 0; i < ThetaCount; ++i) {
+      const double theta = (double(i) + 0.5) * dtheta;
+      cos_theta[i] = std::cos(theta);
+      sin_theta[i] = std::sin(theta);
+      solid_angle_scale[i] = dtheta * dphi * sin_theta[i];
+    }
+    for (std::size_t i = 0; i < PhiCount; ++i) {
+      const double phi = (double(i) + 0.5) * dphi;
+      cos_phi[i] = std::cos(phi);
+      sin_phi[i] = std::sin(phi);
+    }
+  }
+};
 
 // ---- texture sampling (GL_LINEAR + GL_CLAMP_TO_EDGE, texel-center) ---------
 
@@ -456,22 +482,21 @@ dvec3 ComputeDirectIrradiance(const Atm& atm, const Tex2& tex, double r,
 dvec3 ComputeIndirectIrradiance(const Atm& atm, const Tex3& single_rayleigh,
                                 const Tex3& single_mie, const Tex3& multiple,
                                 double r, double mu_s, int scattering_order) {
-  const int SAMPLE_COUNT = 32;
-  const double dphi = PI / double(SAMPLE_COUNT);
-  const double dtheta = PI / double(SAMPLE_COUNT);
+  constexpr std::size_t THETA_COUNT = 16;
+  constexpr std::size_t PHI_COUNT = 64;
+  static const SphericalQuadrature<THETA_COUNT, PHI_COUNT> quadrature(
+      PI * 0.5, PI * 2.0);
   dvec3 result(0.0);
   dvec3 omega_s(std::sqrt(1.0 - mu_s * mu_s), 0.0, mu_s);
-  for (int j = 0; j < SAMPLE_COUNT / 2; ++j) {
-    double theta = (double(j) + 0.5) * dtheta;
-    for (int i = 0; i < 2 * SAMPLE_COUNT; ++i) {
-      double phi = (double(i) + 0.5) * dphi;
-      dvec3 omega(std::cos(phi) * std::sin(theta),
-                  std::sin(phi) * std::sin(theta), std::cos(theta));
-      double domega = dtheta * dphi * std::sin(theta);
+  for (std::size_t j = 0; j < THETA_COUNT; ++j) {
+    for (std::size_t i = 0; i < PHI_COUNT; ++i) {
+      dvec3 omega(quadrature.cos_phi[i] * quadrature.sin_theta[j],
+                  quadrature.sin_phi[i] * quadrature.sin_theta[j],
+                  quadrature.cos_theta[j]);
       double nu = dot(omega, omega_s);
       result += GetScattering(atm, single_rayleigh, single_mie, multiple, r,
                               omega.z, mu_s, nu, false, scattering_order) *
-                omega.z * domega;
+                omega.z * quadrature.solid_angle_scale[j];
     }
   }
   return result;
@@ -513,15 +538,20 @@ dvec3 ComputeScatteringDensity(const Atm& atm, const Tex2& transmittance,
   double sun_dir_y = std::sqrt(std::max(1.0 - sun_dir_x * sun_dir_x - mu_s * mu_s, 0.0));
   dvec3 omega_s(sun_dir_x, sun_dir_y, mu_s);
 
-  const int SAMPLE_COUNT = 16;
-  const double dphi = PI / double(SAMPLE_COUNT);
-  const double dtheta = PI / double(SAMPLE_COUNT);
+  constexpr std::size_t THETA_COUNT = 16;
+  constexpr std::size_t PHI_COUNT = 32;
+  static const SphericalQuadrature<THETA_COUNT, PHI_COUNT> quadrature(
+      PI, PI * 2.0);
   dvec3 rayleigh_mie(0.0);
+  double altitude = r - atm.bottom_radius;
+  double rayleigh_density =
+      GetProfileDensity(atm.rayleigh_density, altitude);
+  double mie_density =
+      GetProfileDensity(atm.mie_density, altitude);
 
-  for (int l = 0; l < SAMPLE_COUNT; ++l) {
-    double theta = (double(l) + 0.5) * dtheta;
-    double cos_theta = std::cos(theta);
-    double sin_theta = std::sin(theta);
+  for (std::size_t l = 0; l < THETA_COUNT; ++l) {
+    double cos_theta = quadrature.cos_theta[l];
+    double sin_theta = quadrature.sin_theta[l];
     bool ray_r_theta_intersects_ground = RayIntersectsGround(atm, r, cos_theta);
 
     double distance_to_ground = 0.0;
@@ -534,10 +564,10 @@ dvec3 ComputeScatteringDensity(const Atm& atm, const Tex2& transmittance,
       ground_albedo = atm.ground_albedo;
     }
 
-    for (int m = 0; m < 2 * SAMPLE_COUNT; ++m) {
-      double phi = (double(m) + 0.5) * dphi;
-      dvec3 omega_i(std::cos(phi) * sin_theta, std::sin(phi) * sin_theta, cos_theta);
-      double domega_i = dtheta * dphi * std::sin(theta);
+    for (std::size_t m = 0; m < PHI_COUNT; ++m) {
+      dvec3 omega_i(quadrature.cos_phi[m] * sin_theta,
+                    quadrature.sin_phi[m] * sin_theta,
+                    cos_theta);
 
       double nu1 = dot(omega_s, omega_i);
       dvec3 incident_radiance = GetScattering(
@@ -552,16 +582,12 @@ dvec3 ComputeScatteringDensity(const Atm& atm, const Tex2& transmittance,
                            (1.0 / PI) * ground_irradiance;
 
       double nu2 = dot(omega, omega_i);
-      double rayleigh_density =
-          GetProfileDensity(atm.rayleigh_density, r - atm.bottom_radius);
-      double mie_density =
-          GetProfileDensity(atm.mie_density, r - atm.bottom_radius);
       rayleigh_mie += incident_radiance *
                       (atm.rayleigh_scattering * rayleigh_density *
                            RayleighPhaseFunction(nu2) +
                        atm.mie_scattering * mie_density *
                            MiePhaseFunction(atm.mie_phase_function_g, nu2)) *
-                      domega_i;
+                      quadrature.solid_angle_scale[l];
     }
   }
   return rayleigh_mie;
@@ -711,7 +737,9 @@ void RunJobs(Fn fn, int count, int num_threads) {
 // ===========================================================================
 
 PrecomputedTextures Precompute(const AtmosphereParameters& atm,
-                               int num_scattering_orders, int num_threads) {
+                               int num_scattering_orders, int num_threads,
+                               PrecomputedTextures* previous_order,
+                               PrecomputedTextures* anteprevious_order) {
   const bool emulate_half = g_emulate_half;
   auto H3 = [&](const dvec3& v) { return emulate_half ? ToHalf3(v) : v; };
   if (num_threads <= 0) {
@@ -779,6 +807,17 @@ PrecomputedTextures Precompute(const AtmosphereParameters& atm,
   // 4. Orders 2..N.
   for (int scattering_order = 2; scattering_order <= num_scattering_orders;
        ++scattering_order) {
+    if (anteprevious_order != nullptr &&
+        scattering_order == num_scattering_orders - 1) {
+      anteprevious_order->scattering = out.scattering;
+      anteprevious_order->irradiance = out.irradiance;
+    }
+    if (previous_order != nullptr &&
+        scattering_order == num_scattering_orders) {
+      previous_order->scattering = out.scattering;
+      previous_order->irradiance = out.irradiance;
+    }
+
     // 4a. Scattering density.
     RunJobs([&](int k) {
       for (int j = 0; j < SCATTERING_TEXTURE_HEIGHT; ++j) {

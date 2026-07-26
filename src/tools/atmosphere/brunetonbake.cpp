@@ -79,6 +79,8 @@ struct TitanConfig
     double rayleighScaleHeightMeters{ 0.0 };
     double mieScaleHeightMeters{ 0.0 };
     double absorptionScaleHeightMeters{ 0.0 };
+    bool useOzoneAbsorptionProfile{ false };
+    bool emulateHalfPrecision{ true };
     double miePhaseFunctionG{ 0.0 };
     double minimumSunZenithDegrees{ 0.0 };
     std::filesystem::path spectrumFile;
@@ -228,6 +230,32 @@ loadTitanConfig(const std::filesystem::path& path,
         if (key == "spectrum_file")
         {
             config.spectrumFile = value;
+            continue;
+        }
+        if (key == "absorption_profile")
+        {
+            if (value == "exponential")
+                config.useOzoneAbsorptionProfile = false;
+            else if (value == "ozone")
+                config.useOzoneAbsorptionProfile = true;
+            else
+            {
+                error = "invalid absorption profile";
+                return false;
+            }
+            continue;
+        }
+        if (key == "emulate_half_precision")
+        {
+            if (value == "true")
+                config.emulateHalfPrecision = true;
+            else if (value == "false")
+                config.emulateHalfPrecision = false;
+            else
+            {
+                error = "invalid emulate_half_precision value";
+                return false;
+            }
             continue;
         }
         if (!parseFiniteDouble(value, parsed))
@@ -481,8 +509,18 @@ buildTitanAtmosphere(const TitanConfig& config,
         sampleSpectrum(spectrum, spectrum.mieExtinction, wavelengths) *
         LengthUnitInMeters;
     atmosphere.mie_phase_function_g = config.miePhaseFunctionG;
-    atmosphere.absorption_density.layers[1] =
-        exponentialLayer(config.absorptionScaleHeightMeters);
+    if (config.useOzoneAbsorptionProfile)
+    {
+        atmosphere.absorption_density.layers[0] =
+            { 25.0, 0.0, 0.0, 1.0 / 15.0, -2.0 / 3.0 };
+        atmosphere.absorption_density.layers[1] =
+            { 0.0, 0.0, 0.0, -1.0 / 15.0, 8.0 / 3.0 };
+    }
+    else
+    {
+        atmosphere.absorption_density.layers[1] =
+            exponentialLayer(config.absorptionScaleHeightMeters);
+    }
     atmosphere.absorption_extinction =
         sampleSpectrum(spectrum,
                        spectrum.absorptionExtinction,
@@ -635,7 +673,9 @@ PrecomputedTextures
 precomputeLuminance(const Spectrum& solar,
                     const TitanConfig& config,
                     int wavelengthCount,
-                    int scatteringOrders)
+                    int scatteringOrders,
+                    PrecomputedTextures* previousOrder,
+                    PrecomputedTextures* antepreviousOrder)
 {
     const int iterationCount = (wavelengthCount + 2) / 3;
     const double wavelengthStep =
@@ -675,8 +715,18 @@ precomputeLuminance(const Spectrum& solar,
                   << wavelengths[2] << " nm\n";
         const AtmosphereParameters atmosphere =
             buildTitanAtmosphere(config, solar, wavelengths);
+        PrecomputedTextures previousSpectral;
+        PrecomputedTextures antepreviousSpectral;
         const PrecomputedTextures spectral =
-            bruneton::Precompute(atmosphere, scatteringOrders);
+            bruneton::Precompute(atmosphere,
+                                 scatteringOrders,
+                                 0,
+                                 previousOrder == nullptr
+                                     ? nullptr
+                                     : &previousSpectral,
+                                 antepreviousOrder == nullptr
+                                     ? nullptr
+                                     : &antepreviousSpectral);
         accumulateTexture(accumulated.scattering,
                           spectral.scattering,
                           matrix);
@@ -686,6 +736,24 @@ precomputeLuminance(const Spectrum& solar,
         accumulateTexture(accumulated.irradiance,
                           spectral.irradiance,
                           matrix);
+        if (previousOrder != nullptr)
+        {
+            accumulateTexture(previousOrder->scattering,
+                              previousSpectral.scattering,
+                              matrix);
+            accumulateTexture(previousOrder->irradiance,
+                              previousSpectral.irradiance,
+                              matrix);
+        }
+        if (antepreviousOrder != nullptr)
+        {
+            accumulateTexture(antepreviousOrder->scattering,
+                              antepreviousSpectral.scattering,
+                              matrix);
+            accumulateTexture(antepreviousOrder->irradiance,
+                              antepreviousSpectral.irradiance,
+                              matrix);
+        }
     }
 
     const std::array<double, 3> rgbWavelengths{ LambdaR, LambdaG, LambdaB };
@@ -704,27 +772,39 @@ precomputeAtmosphere(const TitanConfig& config,
                      const Spectrum& spectrum,
                      BrunetonLutValueMode valueMode,
                      int wavelengthCount,
-                     int scatteringOrders)
+                     int scatteringOrders,
+                     PrecomputedTextures* previousOrder = nullptr,
+                     PrecomputedTextures* antepreviousOrder = nullptr)
 {
     if (valueMode == BrunetonLutValueMode::PrecomputedLuminance)
     {
         return precomputeLuminance(spectrum,
                                    config,
                                    wavelengthCount,
-                                   scatteringOrders);
+                                   scatteringOrders,
+                                   previousOrder,
+                                   antepreviousOrder);
     }
 
     const std::array<double, 3> rgbWavelengths{ LambdaR, LambdaG, LambdaB };
     const AtmosphereParameters atmosphere =
         buildTitanAtmosphere(config, spectrum, rgbWavelengths);
-    bruneton::g_emulate_half = true;
-    return bruneton::Precompute(atmosphere, scatteringOrders);
+    bruneton::g_emulate_half = config.emulateHalfPrecision;
+    return bruneton::Precompute(atmosphere,
+                                scatteringOrders,
+                                0,
+                                previousOrder,
+                                antepreviousOrder);
 }
 
 struct ConvergenceChange
 {
     double peakRelative;
     double rmsRelative;
+    double peakAbsolute;
+    double rmsAbsolute;
+    double referencePeak;
+    double referenceRms;
 };
 
 template<typename Texture>
@@ -737,6 +817,10 @@ measureChange(const Texture& previous, const Texture& current)
         return {
             std::numeric_limits<double>::infinity(),
             std::numeric_limits<double>::infinity(),
+            std::numeric_limits<double>::infinity(),
+            std::numeric_limits<double>::infinity(),
+            0.0,
+            0.0,
         };
     }
 
@@ -771,23 +855,96 @@ measureChange(const Texture& previous, const Texture& current)
                    ? 0.0
                    : std::numeric_limits<double>::infinity())
             : std::sqrt(differenceSquares / referenceSquares);
-    return { peakRelative, rmsRelative };
+    return {
+        peakRelative,
+        rmsRelative,
+        maximumDifference,
+        std::sqrt(differenceSquares),
+        maximumReference,
+        std::sqrt(referenceSquares),
+    };
+}
+
+struct ConvergenceTail
+{
+    double peakRelative;
+    double rmsRelative;
+    double peakRatio;
+    double rmsRatio;
+};
+
+double
+estimateTail(double previousIncrement,
+             double currentIncrement,
+             double reference,
+             double& ratio)
+{
+    if (currentIncrement == 0.0)
+    {
+        ratio = 0.0;
+        return 0.0;
+    }
+    if (previousIncrement <= 0.0 || reference <= 0.0)
+    {
+        ratio = std::numeric_limits<double>::infinity();
+        return std::numeric_limits<double>::infinity();
+    }
+
+    ratio = currentIncrement / previousIncrement;
+    if (ratio >= 1.0)
+        return std::numeric_limits<double>::infinity();
+
+    return currentIncrement * ratio / (1.0 - ratio) / reference;
+}
+
+template<typename Texture>
+ConvergenceTail
+measureTail(const Texture& anteprevious,
+            const Texture& previous,
+            const Texture& current)
+{
+    const ConvergenceChange previousChange =
+        measureChange(anteprevious, previous);
+    const ConvergenceChange currentChange =
+        measureChange(previous, current);
+    ConvergenceTail tail{};
+    tail.peakRelative =
+        estimateTail(previousChange.peakAbsolute,
+                     currentChange.peakAbsolute,
+                     currentChange.referencePeak,
+                     tail.peakRatio);
+    tail.rmsRelative =
+        estimateTail(previousChange.rmsAbsolute,
+                     currentChange.rmsAbsolute,
+                     currentChange.referenceRms,
+                     tail.rmsRatio);
+    return tail;
 }
 
 bool
-validateConvergence(const PrecomputedTextures& previous,
+validateConvergence(const PrecomputedTextures& anteprevious,
+                    const PrecomputedTextures& previous,
                     const PrecomputedTextures& current,
                     double tolerance)
 {
-    const ConvergenceChange scattering =
-        measureChange(previous.scattering, current.scattering);
-    const ConvergenceChange irradiance =
-        measureChange(previous.irradiance, current.irradiance);
-    std::cout << "Successive-order change: scattering peak="
+    const ConvergenceTail scattering =
+        measureTail(anteprevious.scattering,
+                    previous.scattering,
+                    current.scattering);
+    const ConvergenceTail irradiance =
+        measureTail(anteprevious.irradiance,
+                    previous.irradiance,
+                    current.irradiance);
+    std::cout << "Estimated omitted tail: scattering peak="
               << scattering.peakRelative * 100.0
               << "% rms=" << scattering.rmsRelative * 100.0
-              << "%; irradiance peak=" << irradiance.peakRelative * 100.0
-              << "% rms=" << irradiance.rmsRelative * 100.0 << "%\n";
+              << "% (ratios " << scattering.peakRatio
+              << ", " << scattering.rmsRatio
+              << "); irradiance peak="
+              << irradiance.peakRelative * 100.0
+              << "% rms=" << irradiance.rmsRelative * 100.0
+              << "% (ratios " << irradiance.peakRatio
+              << ", " << irradiance.rmsRatio << ")\n";
 
     if (scattering.peakRelative > tolerance ||
         scattering.rmsRelative > tolerance ||
@@ -1007,9 +1164,9 @@ main(int argc, char** argv)
         printUsage(argv[0]);
         return 2;
     }
-    if (!skipConvergenceCheck && scatteringOrders < 2)
+    if (!skipConvergenceCheck && scatteringOrders < 3)
     {
-        std::cerr << "Convergence checking requires at least two orders\n";
+        std::cerr << "Convergence checking requires at least three orders\n";
         return 2;
     }
 
@@ -1017,7 +1174,7 @@ main(int argc, char** argv)
     std::string error;
     if (!loadTitanConfig(configPath, config, error))
     {
-        std::cerr << "Could not load Titan inputs: " << error << '\n';
+        std::cerr << "Could not load atmosphere inputs: " << error << '\n';
         return 1;
     }
     const Spectrum solar = buildTitanSpectrum(config);
@@ -1026,30 +1183,27 @@ main(int argc, char** argv)
         buildTitanAtmosphere(config, solar, rgbWavelengths);
     const bool luminanceMode =
         valueMode == BrunetonLutValueMode::PrecomputedLuminance;
-    std::cout << "Baking pilot Titan "
+    std::cout << "Baking "
               << (luminanceMode ? "spectral luminance" : "RGB")
               << " atmosphere with " << scatteringOrders
               << " scattering orders\n";
-    std::cout << "Pilot limitation: methane absorption is not included\n";
+    PrecomputedTextures antepreviousTextures;
     PrecomputedTextures previousTextures;
-    if (!skipConvergenceCheck)
-    {
-        std::cout << "Computing order " << scatteringOrders - 1
-                  << " convergence baseline\n";
-        previousTextures = precomputeAtmosphere(config,
-                                                solar,
-                                                valueMode,
-                                                wavelengthCount,
-                                                scatteringOrders - 1);
-    }
     const PrecomputedTextures textures =
         precomputeAtmosphere(config,
                              solar,
                              valueMode,
                              wavelengthCount,
-                             scatteringOrders);
+                             scatteringOrders,
+                             skipConvergenceCheck
+                                 ? nullptr
+                                 : &previousTextures,
+                             skipConvergenceCheck
+                                 ? nullptr
+                                 : &antepreviousTextures);
     if (!skipConvergenceCheck &&
-        !validateConvergence(previousTextures,
+        !validateConvergence(antepreviousTextures,
+                             previousTextures,
                              textures,
                              convergenceTolerance))
         return 1;

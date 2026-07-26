@@ -750,11 +750,13 @@ vec4 SampleCloud(Position origin, Direction ray, Length distance)
     return vec4(sample_value.rgb, density);
 }
 
-vec4 GetCloudColor(
+vec4 GetCloudSample(
     Position origin,
     Direction ray,
-    Length surface_distance)
+    Length surface_distance,
+    out Length cloud_distance)
 {
+    cloud_distance = 0.0;
     Length thickness =
         (cloud_radius - atmosphere.bottom_radius) * 0.5;
     if (render_clouds == 0 || thickness <= 0.0)
@@ -774,10 +776,28 @@ vec4 GetCloudColor(
         return vec4(0.0);
     }
 
-    Length cloud_distance = outer_intersections.x < 0.0
+    cloud_distance = outer_intersections.x < 0.0
         ? outer_intersections.y
         : outer_intersections.x;
     if (cloud_distance >= surface_distance)
+        return vec4(0.0);
+
+    vec4 cloud_sample =
+        SampleCloud(origin, ray, cloud_distance);
+    cloud_sample.a = clamp(cloud_sample.a, 0.0, 1.0);
+    return cloud_sample;
+}
+
+vec4 GetCloudColor(
+    Position origin,
+    Direction ray,
+    Length surface_distance)
+{
+    Length cloud_distance;
+    vec4 cloud_sample = GetCloudSample(
+        origin, ray, surface_distance, cloud_distance);
+    float alpha = cloud_sample.a;
+    if (alpha <= 0.0)
         return vec4(0.0);
 
     Position cloud_point = origin + ray * cloud_distance;
@@ -799,17 +819,61 @@ vec4 GetCloudColor(
         sun_direction,
         sky_irradiance);
 
-    vec4 cloud_sample =
-        SampleCloud(origin, ray, cloud_distance);
-    float alpha = clamp(cloud_sample.a, 0.0, 1.0);
-    if (alpha <= 0.0)
-        return vec4(0.0);
-
     vec3 cloud_radiance =
         front_scattering +
         cloud_transmittance * cloud_sample.rgb *
             (sun_irradiance + sky_irradiance) / PI;
     return vec4(cloud_radiance, alpha);
+}
+
+DimensionlessSpectrum GetSkyTransmittance(
+    Position camera_position,
+    Direction ray,
+    Length distance)
+{
+    Length r = length(camera_position);
+    Length rmu = dot(camera_position, ray);
+    Area discriminant = GetRaySphereDiscriminant(
+        camera_position,
+        ray,
+        atmosphere.top_radius);
+    if (discriminant < 0.0)
+        return vec3(1.0);
+
+    Length atmosphere_entry = -rmu - SafeSqrt(discriminant);
+    if (atmosphere_entry > 0.0)
+    {
+        camera_position += ray * atmosphere_entry;
+        distance = max(distance - atmosphere_entry, 0.0);
+        r = atmosphere.top_radius;
+        rmu += atmosphere_entry;
+    }
+    else if (r > atmosphere.top_radius)
+    {
+        return vec3(1.0);
+    }
+
+    Number mu = rmu / r;
+    bool ray_intersects_ground =
+        RayIntersectsGround(atmosphere, r, mu);
+    if (distance >= 1.0e29)
+    {
+        return ray_intersects_ground
+            ? vec3(0.0)
+            : GetTransmittanceToTopAtmosphereBoundary(
+                  atmosphere,
+                  transmittance_texture,
+                  r,
+                  mu);
+    }
+
+    return GetTransmittance(
+        atmosphere,
+        transmittance_texture,
+        r,
+        mu,
+        distance,
+        ray_intersects_ground);
 }
 
 void main()
@@ -844,6 +908,29 @@ void main()
     if (atmosphere_intersections.y > atmosphere_entry &&
         scene_distance >= atmosphere_entry)
     {
+        if (render_mode == 0)
+        {
+            Length cloud_distance;
+            float cloud_alpha = GetCloudSample(
+                camera_position,
+                view_direction,
+                scene_distance,
+                cloud_distance).a;
+            transmittance = GetSkyTransmittance(
+                camera_position,
+                view_direction,
+                scene_distance < atmosphere_intersections.y
+                    ? scene_distance
+                    : 1.0e30);
+            fragColor = vec4(
+                clamp(
+                    transmittance * (1.0 - cloud_alpha),
+                    0.0,
+                    1.0),
+                1.0);
+            return;
+        }
+
         if (scene_distance < atmosphere_intersections.y)
         {
             Position point =
@@ -872,17 +959,16 @@ void main()
             scene_distance);
     }
 
+    if (render_mode == 0)
+    {
+        fragColor = vec4(1.0);
+        return;
+    }
+
     vec3 scaled_luminance =
         max(
             mix(luminance, cloud.rgb, cloud.a) *
                 luminance_scale,
             vec3(0.0));
-    fragColor = render_mode == 0
-        ? vec4(
-              clamp(
-                  transmittance * (1.0 - cloud.a),
-                  0.0,
-                  1.0),
-              1.0)
-        : vec4(scaled_luminance, 1.0);
+    fragColor = vec4(scaled_luminance, 1.0);
 }

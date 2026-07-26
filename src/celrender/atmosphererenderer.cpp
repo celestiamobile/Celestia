@@ -418,6 +418,8 @@ AtmosphereRenderer::renderBruneton(
 
     Eigen::Vector3f camera = ri.eyePos_obj * parameters.bottomRadius;
     const float cameraRadius = camera.norm();
+    if (cameraRadius == 0.0f)
+        return false;
     const float minimumCameraRadius =
         std::nextafter(parameters.bottomRadius, parameters.topRadius);
     if (cameraRadius > 0.0f && cameraRadius < minimumCameraRadius)

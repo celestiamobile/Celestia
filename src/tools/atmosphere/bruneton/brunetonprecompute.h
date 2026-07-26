@@ -123,7 +123,9 @@ extern bool g_emulate_half;
 // orders 2..num_scattering_orders). Multithreaded across texture rows/slices.
 PrecomputedTextures Precompute(const AtmosphereParameters& atmosphere,
                                int num_scattering_orders = 4,
-                               int num_threads = 0 /* 0 = hardware */);
+                               int num_threads = 0 /* 0 = hardware */,
+                               PrecomputedTextures* previous_order = nullptr,
+                               PrecomputedTextures* anteprevious_order = nullptr);
 
 }  // namespace bruneton
 
