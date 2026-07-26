@@ -136,10 +136,20 @@ bool BrunetonViewportEffect::render(Renderer* renderer,
 
     program->use();
     program->samplerParam("tex") = 0;
+    program->samplerParam("depthTex") = 1;
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, fbo->colorTexture());
-    renderer->setPipelineState(ps);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, fbo->depthTexture());
+    Renderer::PipelineState copyState;
+    copyState.depthMask = true;
+    copyState.depthTest = true;
+    renderer->setPipelineState(copyState);
+    glDepthFunc(GL_ALWAYS);
     vo.draw();
+    glDepthFunc(GL_LEQUAL);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, 0);
 
     std::array<GLint, 4> viewport{};

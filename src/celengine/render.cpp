@@ -902,24 +902,42 @@ void Renderer::endObjectAnnotations()
 {
     objectAnnotationSetOpen = false;
 
-    if (!objectAnnotations.empty())
+    if (objectAnnotations.empty())
+        return;
+
+    if (m_brunetonPostprocessEnabled)
     {
-        Renderer::PipelineState ps;
-        ps.blending = true;
-        ps.blendFunc = {GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA};
-        ps.depthMask = true;
-        ps.depthTest = true;
-        ps.smoothLines = true;
-        setPipelineState(ps);
-
-        renderAnnotations(objectAnnotations.begin(),
-                          objectAnnotations.end(),
-                          -depthPartitions[currentIntervalIndex].nearZ,
-                          -depthPartitions[currentIntervalIndex].farZ,
-                          FontStyle::Normal);
-
+        m_deferredObjectAnnotationBatches.push_back({
+            static_cast<std::size_t>(currentIntervalIndex),
+            std::move(objectAnnotations),
+        });
         objectAnnotations.clear();
+        return;
     }
+
+    renderObjectAnnotations(
+        objectAnnotations,
+        static_cast<std::size_t>(currentIntervalIndex));
+    objectAnnotations.clear();
+}
+
+void Renderer::renderObjectAnnotations(std::vector<Annotation>& annotations,
+                                       std::size_t interval)
+{
+    Renderer::PipelineState ps;
+    ps.blending = true;
+    ps.blendFunc = {GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA};
+    ps.depthMask = !m_brunetonPostprocessEnabled;
+    ps.depthTest = true;
+    ps.smoothLines = true;
+    setPipelineState(ps);
+
+    renderAnnotations(
+        annotations.begin(),
+        annotations.end(),
+        -depthPartitions[interval].nearZ,
+        -depthPartitions[interval].farZ,
+        FontStyle::Normal);
 }
 
 
@@ -1454,6 +1472,7 @@ Renderer::prepareRender(const Observer& observer,
     foregroundAnnotations.clear();
     backgroundAnnotations.clear();
     objectAnnotations.clear();
+    m_deferredObjectAnnotationBatches.clear();
 
     // Put all solar system bodies into the render list.  Stars close and
     // large enough to have discernible surface detail are also placed in
@@ -1641,16 +1660,83 @@ void Renderer::renderPrepared(const RenderPreparation& preparation)
     int nIntervals = buildDepthPartitions();
     renderSolarSystemObjects(observer, nIntervals, now);
 
-    renderForegroundAnnotations(FontStyle::Normal);
-
-    if (showSelectionPointer && !selectionVisible && util::is_set(renderFlags, RenderFlags::ShowMarkers))
+    const bool renderPointer =
+        showSelectionPointer &&
+        !selectionVisible &&
+        util::is_set(renderFlags, RenderFlags::ShowMarkers);
+    if (m_brunetonPostprocessEnabled)
     {
-        renderSelectionPointer(observer, now, xfrustum, sel);
+        assert(!m_deferredOverlays.has_value());
+        m_deferredOverlays = DeferredOverlays{
+            &observer,
+            sel,
+            xfrustum,
+            now,
+            renderPointer,
+        };
+    }
+    else
+    {
+        renderForegroundAnnotations(FontStyle::Normal);
+        if (renderPointer)
+            renderSelectionPointer(observer, now, xfrustum, sel);
     }
 
 #ifndef GL_ES
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
+}
+
+void Renderer::renderDeferredOverlays()
+{
+    if (!m_deferredOverlays.has_value())
+        return;
+
+    DeferredOverlays overlays = std::move(*m_deferredOverlays);
+    m_deferredOverlays.reset();
+
+    renderDeferredDepthAnnotations();
+    renderForegroundAnnotations(FontStyle::Normal);
+    if (overlays.renderSelectionPointer)
+    {
+        renderSelectionPointer(
+            *overlays.observer,
+            overlays.now,
+            overlays.transformedFrustum,
+            overlays.selection);
+    }
+}
+
+void Renderer::renderDeferredDepthAnnotations()
+{
+    auto annotation = depthSortedAnnotations.begin();
+    auto objectBatch = m_deferredObjectAnnotationBatches.begin();
+    const float intervalSize =
+        1.0f / static_cast<float>(std::max<std::size_t>(1, depthPartitions.size()));
+    for (std::size_t interval = 0; interval < depthPartitions.size(); ++interval)
+    {
+        glDepthRange(
+            1.0f - static_cast<float>(interval + 1) * intervalSize,
+            1.0f - static_cast<float>(interval) * intervalSize);
+
+        if (annotation != depthSortedAnnotations.end())
+        {
+            annotation = renderSortedAnnotations(
+                annotation,
+                -depthPartitions[interval].nearZ,
+                -depthPartitions[interval].farZ,
+                FontStyle::Normal);
+        }
+
+        if (objectBatch != m_deferredObjectAnnotationBatches.end() &&
+            objectBatch->interval == interval)
+        {
+            renderObjectAnnotations(objectBatch->annotations, interval);
+            ++objectBatch;
+        }
+    }
+    glDepthRange(0, 1);
+    m_deferredObjectAnnotationBatches.clear();
 }
 
 static Eigen::Vector3f
@@ -6179,10 +6265,13 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
         }
 
         // Render annotations in this interval
-        annotation = renderSortedAnnotations(annotation,
-                                             nearPlaneDistance,
-                                             farPlaneDistance,
-                                             FontStyle::Normal);
+        if (!m_brunetonPostprocessEnabled)
+        {
+            annotation = renderSortedAnnotations(annotation,
+                                                 nearPlaneDistance,
+                                                 farPlaneDistance,
+                                                 FontStyle::Normal);
+        }
         endObjectAnnotations();
     }
 

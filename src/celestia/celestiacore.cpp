@@ -2167,6 +2167,7 @@ void CelestiaCore::draw(View* view)
                     "Unable to render Bruneton viewport effect.\n");
                 ok = false;
             }
+            renderer->renderDeferredOverlays();
         }
 
         for (int i = 0; genericEffectsActive && i < nEffects; i++)

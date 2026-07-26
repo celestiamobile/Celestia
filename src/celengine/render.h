@@ -178,6 +178,7 @@ class Renderer
         float faintestVisible,
         const Selection& sel);
     void renderPrepared(const RenderPreparation&);
+    void renderDeferredOverlays();
 
     bool getInfo(std::map<std::string, std::string>& info) const;
 
@@ -657,6 +658,9 @@ class Renderer
                            FontStyle fs);
     void renderBackgroundAnnotations(FontStyle fs);
     void renderForegroundAnnotations(FontStyle fs);
+    void renderDeferredDepthAnnotations();
+    void renderObjectAnnotations(std::vector<Annotation>& annotations,
+                                 std::size_t interval);
     std::vector<Annotation>::iterator renderSortedAnnotations(std::vector<Annotation>::iterator,
                                                               float nearDist,
                                                               float farDist,
@@ -753,6 +757,12 @@ class Renderer
     std::vector<Annotation> foregroundAnnotations;
     std::vector<Annotation> depthSortedAnnotations;
     std::vector<Annotation> objectAnnotations;
+    struct DeferredObjectAnnotationBatch
+    {
+        std::size_t interval;
+        std::vector<Annotation> annotations;
+    };
+    std::vector<DeferredObjectAnnotationBatch> m_deferredObjectAnnotationBatches;
     std::vector<OrbitPathListEntry> orbitPathList;
     LightingState::EclipseShadowVector eclipseShadows[MaxLights];
     std::vector<const Star*> nearStars;
@@ -789,6 +799,16 @@ class Renderer
         double now;
     };
     std::optional<PreparedRender> m_preparedRender;
+
+    struct DeferredOverlays
+    {
+        const Observer* observer;
+        Selection selection;
+        celestia::math::InfiniteFrustum transformedFrustum;
+        double now;
+        bool renderSelectionPointer;
+    };
+    std::optional<DeferredOverlays> m_deferredOverlays;
 
     PipelineState m_pipelineState;
 
