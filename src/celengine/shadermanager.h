@@ -38,6 +38,7 @@ enum class StaticShader
     Globular,
     LargeStar,
     LinearCopy,
+    LinearDepthCopy,
     PsfStarGlow,
     PsfStarGlowLarge,
     PsfStarPoint,

@@ -179,6 +179,7 @@ class Renderer
         const Selection& sel);
     void renderPrepared(const RenderPreparation&);
     void renderDeferredOverlays();
+    bool hasDeferredDepthAnnotations() const;
 
     bool getInfo(std::map<std::string, std::string>& info) const;
 

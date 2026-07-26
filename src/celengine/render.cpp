@@ -1707,6 +1707,12 @@ void Renderer::renderDeferredOverlays()
     }
 }
 
+bool Renderer::hasDeferredDepthAnnotations() const
+{
+    return !depthSortedAnnotations.empty() ||
+           !m_deferredObjectAnnotationBatches.empty();
+}
+
 void Renderer::renderDeferredDepthAnnotations()
 {
     auto annotation = depthSortedAnnotations.begin();

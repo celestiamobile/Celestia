@@ -127,8 +127,12 @@ bool BrunetonViewportEffect::render(Renderer* renderer,
                                     int width,
                                     int height)
 {
+    const bool copyDepth = renderer->hasDeferredDepthAnnotations();
     auto* program =
-        renderer->getShaderManager().getShader(StaticShader::LinearCopy);
+        renderer->getShaderManager().getShader(
+            copyDepth
+                ? StaticShader::LinearDepthCopy
+                : StaticShader::LinearCopy);
     if (program == nullptr)
         return false;
 
@@ -136,20 +140,28 @@ bool BrunetonViewportEffect::render(Renderer* renderer,
 
     program->use();
     program->samplerParam("tex") = 0;
-    program->samplerParam("depthTex") = 1;
+    if (copyDepth)
+        program->samplerParam("depthTex") = 1;
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, fbo->colorTexture());
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, fbo->depthTexture());
+    if (copyDepth)
+    {
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, fbo->depthTexture());
+    }
     Renderer::PipelineState copyState;
-    copyState.depthMask = true;
-    copyState.depthTest = true;
+    copyState.depthMask = copyDepth;
+    copyState.depthTest = copyDepth;
     renderer->setPipelineState(copyState);
-    glDepthFunc(GL_ALWAYS);
+    if (copyDepth)
+        glDepthFunc(GL_ALWAYS);
     vo.draw();
-    glDepthFunc(GL_LEQUAL);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE0);
+    if (copyDepth)
+    {
+        glDepthFunc(GL_LEQUAL);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture(GL_TEXTURE0);
+    }
     glBindTexture(GL_TEXTURE_2D, 0);
 
     std::array<GLint, 4> viewport{};
