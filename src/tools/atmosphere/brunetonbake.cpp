@@ -699,6 +699,108 @@ precomputeLuminance(const Spectrum& solar,
     return accumulated;
 }
 
+PrecomputedTextures
+precomputeAtmosphere(const TitanConfig& config,
+                     const Spectrum& spectrum,
+                     BrunetonLutValueMode valueMode,
+                     int wavelengthCount,
+                     int scatteringOrders)
+{
+    if (valueMode == BrunetonLutValueMode::PrecomputedLuminance)
+    {
+        return precomputeLuminance(spectrum,
+                                   config,
+                                   wavelengthCount,
+                                   scatteringOrders);
+    }
+
+    const std::array<double, 3> rgbWavelengths{ LambdaR, LambdaG, LambdaB };
+    const AtmosphereParameters atmosphere =
+        buildTitanAtmosphere(config, spectrum, rgbWavelengths);
+    bruneton::g_emulate_half = true;
+    return bruneton::Precompute(atmosphere, scatteringOrders);
+}
+
+struct ConvergenceChange
+{
+    double peakRelative;
+    double rmsRelative;
+};
+
+template<typename Texture>
+ConvergenceChange
+measureChange(const Texture& previous, const Texture& current)
+{
+    if (previous.data.size() != current.data.size() ||
+        current.data.empty())
+    {
+        return {
+            std::numeric_limits<double>::infinity(),
+            std::numeric_limits<double>::infinity(),
+        };
+    }
+
+    double maximumReference = 0.0;
+    double maximumDifference = 0.0;
+    double referenceSquares = 0.0;
+    double differenceSquares = 0.0;
+    auto accumulate = [&](double before, double after)
+    {
+        const double difference = std::abs(after - before);
+        maximumReference = std::max(maximumReference, std::abs(after));
+        maximumDifference = std::max(maximumDifference, difference);
+        referenceSquares += after * after;
+        differenceSquares += difference * difference;
+    };
+
+    for (std::size_t i = 0; i < current.data.size(); ++i)
+    {
+        accumulate(previous.data[i].x, current.data[i].x);
+        accumulate(previous.data[i].y, current.data[i].y);
+        accumulate(previous.data[i].z, current.data[i].z);
+    }
+
+    const double peakRelative =
+        maximumReference == 0.0
+            ? (maximumDifference == 0.0 ? 0.0
+                                        : std::numeric_limits<double>::infinity())
+            : maximumDifference / maximumReference;
+    const double rmsRelative =
+        referenceSquares == 0.0
+            ? (differenceSquares == 0.0
+                   ? 0.0
+                   : std::numeric_limits<double>::infinity())
+            : std::sqrt(differenceSquares / referenceSquares);
+    return { peakRelative, rmsRelative };
+}
+
+bool
+validateConvergence(const PrecomputedTextures& previous,
+                    const PrecomputedTextures& current,
+                    double tolerance)
+{
+    const ConvergenceChange scattering =
+        measureChange(previous.scattering, current.scattering);
+    const ConvergenceChange irradiance =
+        measureChange(previous.irradiance, current.irradiance);
+    std::cout << "Successive-order change: scattering peak="
+              << scattering.peakRelative * 100.0
+              << "% rms=" << scattering.rmsRelative * 100.0
+              << "%; irradiance peak=" << irradiance.peakRelative * 100.0
+              << "% rms=" << irradiance.rmsRelative * 100.0 << "%\n";
+
+    if (scattering.peakRelative > tolerance ||
+        scattering.rmsRelative > tolerance ||
+        irradiance.peakRelative > tolerance ||
+        irradiance.rmsRelative > tolerance)
+    {
+        std::cerr << "Atmosphere has not converged within "
+                  << tolerance * 100.0 << "%\n";
+        return false;
+    }
+    return true;
+}
+
 bool
 parsePositiveInt(std::string_view text, int& value)
 {
@@ -712,6 +814,12 @@ parsePositiveInt(std::string_view text, int& value)
     }
     value = static_cast<int>(parsed);
     return true;
+}
+
+bool
+parsePositiveDouble(std::string_view text, double& value)
+{
+    return parseFiniteDouble(text, value) && value > 0.0;
 }
 
 bool
@@ -752,7 +860,9 @@ printUsage(const char* executable)
 {
     std::cerr << "Usage: " << executable
               << " --config FILE --output FILE --orders COUNT"
-                 " [--mode rgb|luminance] [--wavelengths 15]\n";
+                 " [--mode rgb|luminance] [--wavelengths 15]"
+                 " [--convergence-tolerance FRACTION]"
+                 " [--skip-convergence-check]\n";
 }
 
 bool
@@ -827,6 +937,8 @@ main(int argc, char** argv)
     std::filesystem::path outputPath;
     int scatteringOrders = 0;
     int wavelengthCount = 15;
+    double convergenceTolerance = 0.01;
+    bool skipConvergenceCheck = false;
     std::filesystem::path configPath;
     BrunetonLutValueMode valueMode = BrunetonLutValueMode::Radiance;
     for (int i = 1; i < argc; ++i)
@@ -870,6 +982,19 @@ main(int argc, char** argv)
                 return 2;
             }
         }
+        else if (argument == "--convergence-tolerance" && i + 1 < argc)
+        {
+            if (!parsePositiveDouble(argv[++i], convergenceTolerance) ||
+                convergenceTolerance >= 1.0)
+            {
+                std::cerr << "Invalid convergence tolerance\n";
+                return 2;
+            }
+        }
+        else if (argument == "--skip-convergence-check")
+        {
+            skipConvergenceCheck = true;
+        }
         else
         {
             printUsage(argv[0]);
@@ -880,6 +1005,11 @@ main(int argc, char** argv)
     if (configPath.empty() || outputPath.empty() || scatteringOrders == 0)
     {
         printUsage(argv[0]);
+        return 2;
+    }
+    if (!skipConvergenceCheck && scatteringOrders < 2)
+    {
+        std::cerr << "Convergence checking requires at least two orders\n";
         return 2;
     }
 
@@ -901,22 +1031,30 @@ main(int argc, char** argv)
               << " atmosphere with " << scatteringOrders
               << " scattering orders\n";
     std::cout << "Pilot limitation: methane absorption is not included\n";
-    std::cout << "Pilot limitation: scattering-order convergence must be "
-                 "checked for each parameter revision\n";
-    PrecomputedTextures textures;
-    if (luminanceMode)
+    PrecomputedTextures previousTextures;
+    if (!skipConvergenceCheck)
     {
-        textures =
-            precomputeLuminance(solar,
-                                config,
-                                wavelengthCount,
-                                scatteringOrders);
+        std::cout << "Computing order " << scatteringOrders - 1
+                  << " convergence baseline\n";
+        previousTextures = precomputeAtmosphere(config,
+                                                solar,
+                                                valueMode,
+                                                wavelengthCount,
+                                                scatteringOrders - 1);
     }
-    else
-    {
-        bruneton::g_emulate_half = true;
-        textures = bruneton::Precompute(atmosphere, scatteringOrders);
-    }
+    const PrecomputedTextures textures =
+        precomputeAtmosphere(config,
+                             solar,
+                             valueMode,
+                             wavelengthCount,
+                             scatteringOrders);
+    if (!skipConvergenceCheck &&
+        !validateConvergence(previousTextures,
+                             textures,
+                             convergenceTolerance))
+        return 1;
+    if (skipConvergenceCheck)
+        std::cout << "Warning: convergence check was explicitly skipped\n";
     BrunetonAtmosphereData data =
         makeFileData(atmosphere,
                      solar,
