@@ -117,6 +117,8 @@ loadOpticalSamples(const std::filesystem::path& path,
         const std::size_t comment = line.find('#');
         if (comment != std::string::npos)
             line.erase(comment);
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
         if (line.find_first_not_of(" \t\r\n") == std::string::npos)
             continue;
         if (!headerSeen)
