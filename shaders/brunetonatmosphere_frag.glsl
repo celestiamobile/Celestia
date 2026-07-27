@@ -961,7 +961,8 @@ void main()
         camera_position,
         view_direction,
         atmosphere.bottom_radius);
-    if (IsVisibleSurfaceNearby())
+    bool visible_atmosphere_surface = IsVisibleSurfaceNearby();
+    if (visible_atmosphere_surface)
     {
         scene_distance = ground_intersections.x >= 0.0
             ? ground_intersections.x
@@ -1012,6 +1013,8 @@ void main()
                 0.0,
                 sun_direction,
                 transmittance);
+            if (!visible_atmosphere_surface)
+                luminance = vec3(0.0);
         }
         else
         {
