@@ -345,7 +345,8 @@ View::updateBrunetonFBO(int gWidth, int gHeight)
         FramebufferObject::Attachment::Color |
             FramebufferObject::Attachment::Depth,
         currentSamples,
-        true);
+        true,
+        FramebufferObject::DepthFilter::Nearest);
     if (!brunetonFbo->isValid())
     {
         GetLogger()->error("Error creating Bruneton view FBO.\n");

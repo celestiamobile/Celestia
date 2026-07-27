@@ -23,8 +23,19 @@ class FramebufferObject
         Depth = 0x2,
     };
 
+    enum class DepthFilter
+    {
+        Linear,
+        Nearest,
+    };
+
     FramebufferObject() = delete;
-    FramebufferObject(GLuint width, GLuint height, Attachment attachments, int samples = 1, bool useFloatColor = false);
+    FramebufferObject(GLuint width,
+                      GLuint height,
+                      Attachment attachments,
+                      int samples = 1,
+                      bool useFloatColor = false,
+                      DepthFilter depthFilter = DepthFilter::Linear);
     FramebufferObject(const FramebufferObject&) = delete;
     FramebufferObject(FramebufferObject&&) noexcept;
     FramebufferObject& operator=(const FramebufferObject&) = delete;
@@ -90,6 +101,7 @@ class FramebufferObject
     GLuint m_depthRboId{ 0 };
     int    m_samples;
     bool   m_useFloatColor;
+    DepthFilter m_depthFilter;
     GLenum m_status;
     bool   m_owned;
 };

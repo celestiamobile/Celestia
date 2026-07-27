@@ -38,7 +38,12 @@ invalidateAttachments(GLenum target, GLsizei count, const GLenum *tokens)
 
 } // namespace
 
-FramebufferObject::FramebufferObject(GLuint width, GLuint height, Attachment attachments, int samples, bool useFloatColor) :
+FramebufferObject::FramebufferObject(GLuint width,
+                                     GLuint height,
+                                     Attachment attachments,
+                                     int samples,
+                                     bool useFloatColor,
+                                     DepthFilter depthFilter) :
     m_width(width),
     m_height(height),
     m_colorTexId(0),
@@ -46,6 +51,7 @@ FramebufferObject::FramebufferObject(GLuint width, GLuint height, Attachment att
     m_fboId(0),
     m_samples(samples > 1 ? samples : 1),
     m_useFloatColor(useFloatColor),
+    m_depthFilter(depthFilter),
     m_status(GL_FRAMEBUFFER_UNSUPPORTED),
     m_owned(true)
 {
@@ -63,6 +69,7 @@ FramebufferObject::FramebufferObject(GLuint fboId) :
     m_fboId(fboId),
     m_samples(1),
     m_useFloatColor(false),
+    m_depthFilter(DepthFilter::Linear),
     m_status(GL_FRAMEBUFFER_COMPLETE),
     m_owned(false)
 {
@@ -86,6 +93,7 @@ FramebufferObject::FramebufferObject(FramebufferObject &&other) noexcept:
     m_depthRboId(other.m_depthRboId),
     m_samples(other.m_samples),
     m_useFloatColor(other.m_useFloatColor),
+    m_depthFilter(other.m_depthFilter),
     m_status(other.m_status),
     m_owned(other.m_owned)
 {
@@ -109,6 +117,7 @@ FramebufferObject& FramebufferObject::operator=(FramebufferObject &&other) noexc
     m_depthRboId    = other.m_depthRboId;
     m_samples       = other.m_samples;
     m_useFloatColor = other.m_useFloatColor;
+    m_depthFilter   = other.m_depthFilter;
     m_status        = other.m_status;
     m_owned         = other.m_owned;
 
@@ -189,8 +198,10 @@ FramebufferObject::generateDepthTexture()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 #endif
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    const GLint filter =
+        m_depthFilter == DepthFilter::Linear ? GL_LINEAR : GL_NEAREST;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
 
     // Clamp to edge
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
