@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <string>
 
 #include <celcompat/numbers.h>
 #include <celengine/atmosphere.h>
@@ -416,6 +417,36 @@ AtmosphereRenderer::renderBruneton(
         parameters.bottomRadius;
     FloatShaderParameter(programId, "atmosphere.top_radius") =
         parameters.topRadius;
+    const auto setDensityLayer =
+        [programId](const char* name,
+                    const engine::BrunetonDensityProfileLayer& layer)
+    {
+        std::string uniformName{name};
+        FloatShaderParameter(
+            programId, (uniformName + ".width").c_str()) = layer.width;
+        FloatShaderParameter(
+            programId, (uniformName + ".exp_term").c_str()) = layer.expTerm;
+        FloatShaderParameter(
+            programId, (uniformName + ".exp_scale").c_str()) = layer.expScale;
+        FloatShaderParameter(
+            programId, (uniformName + ".linear_term").c_str()) =
+            layer.linearTerm;
+        FloatShaderParameter(
+            programId, (uniformName + ".constant_term").c_str()) =
+            layer.constantTerm;
+    };
+    setDensityLayer(
+        "atmosphere.rayleigh_density0", parameters.rayleighDensity[0]);
+    setDensityLayer(
+        "atmosphere.rayleigh_density1", parameters.rayleighDensity[1]);
+    setDensityLayer(
+        "atmosphere.mie_density0", parameters.mieDensity[0]);
+    setDensityLayer(
+        "atmosphere.mie_density1", parameters.mieDensity[1]);
+    setDensityLayer(
+        "atmosphere.absorption_density0", parameters.absorptionDensity[0]);
+    setDensityLayer(
+        "atmosphere.absorption_density1", parameters.absorptionDensity[1]);
     Vec3ShaderParameter(programId, "atmosphere.solar_irradiance") =
         Eigen::Map<const Eigen::Vector3f>(
             parameters.solarIrradiance.data());
@@ -425,8 +456,13 @@ AtmosphereRenderer::renderBruneton(
         Eigen::Map<const Eigen::Vector3f>(parameters.rayleighScattering.data());
     Vec3ShaderParameter(programId, "atmosphere.mie_scattering") =
         Eigen::Map<const Eigen::Vector3f>(parameters.mieScattering.data());
+    Vec3ShaderParameter(programId, "atmosphere.mie_extinction") =
+        Eigen::Map<const Eigen::Vector3f>(parameters.mieExtinction.data());
     FloatShaderParameter(programId, "atmosphere.mie_phase_function_g") =
         parameters.miePhaseFunctionG;
+    Vec3ShaderParameter(programId, "atmosphere.absorption_extinction") =
+        Eigen::Map<const Eigen::Vector3f>(
+            parameters.absorptionExtinction.data());
     FloatShaderParameter(programId, "atmosphere.mu_s_min") =
         parameters.muSMin;
 
@@ -468,6 +504,11 @@ AtmosphereRenderer::renderBruneton(
 
     IntegerShaderParameter(programId, "combined_scattering_textures") =
         parameters.combinedScattering ? 1 : 0;
+    IntegerShaderParameter(programId, "precomputed_luminance") =
+        parameters.valueMode ==
+            engine::BrunetonLutValueMode::PrecomputedLuminance
+        ? 1
+        : 0;
     IntegerShaderParameter(programId, "manual_float_filtering") =
         resource.usesManualFloatFiltering() ? 1 : 0;
     IntegerShaderParameter(programId, "manual_scattering_filtering") =

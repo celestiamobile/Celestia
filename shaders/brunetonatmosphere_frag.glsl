@@ -15,6 +15,7 @@ precision highp sampler3D;
 #define Length float
 #define Area float
 #define Number float
+#define InverseLength float
 #define InverseSolidAngle float
 #define IrradianceSpectrum vec3
 #define RadianceSpectrum vec3
@@ -40,15 +41,32 @@ const int SCATTERING_TEXTURE_NU_SIZE = 8;
 const int IRRADIANCE_TEXTURE_WIDTH = 64;
 const int IRRADIANCE_TEXTURE_HEIGHT = 16;
 
+struct DensityProfileLayer
+{
+    Length width;
+    Number exp_term;
+    InverseLength exp_scale;
+    InverseLength linear_term;
+    Number constant_term;
+};
+
 struct AtmosphereParameters
 {
     vec3 solar_irradiance;
     float sun_angular_radius;
     Length bottom_radius;
     Length top_radius;
+    DensityProfileLayer rayleigh_density0;
+    DensityProfileLayer rayleigh_density1;
     vec3 rayleigh_scattering;
+    DensityProfileLayer mie_density0;
+    DensityProfileLayer mie_density1;
     vec3 mie_scattering;
+    vec3 mie_extinction;
     Number mie_phase_function_g;
+    DensityProfileLayer absorption_density0;
+    DensityProfileLayer absorption_density1;
+    vec3 absorption_extinction;
     Number mu_s_min;
 };
 
@@ -62,6 +80,7 @@ uniform sampler2D surface_id_texture;
 uniform sampler2D depth_partition_texture;
 uniform sampler2D cloud_texture;
 uniform int combined_scattering_textures;
+uniform int precomputed_luminance;
 uniform int manual_float_filtering;
 uniform int manual_scattering_filtering;
 uniform int depth_partition_count;
@@ -951,6 +970,124 @@ DimensionlessSpectrum GetSkyTransmittance(
         ray_intersects_ground);
 }
 
+Number GetLayerDensity(
+    IN(DensityProfileLayer) layer,
+    Length altitude)
+{
+    return clamp(
+        layer.exp_term * exp(layer.exp_scale * altitude) +
+            layer.linear_term * altitude +
+            layer.constant_term,
+        0.0,
+        1.0);
+}
+
+Number GetProfileDensity(
+    IN(DensityProfileLayer) layer0,
+    IN(DensityProfileLayer) layer1,
+    Length altitude)
+{
+    return altitude < layer0.width
+        ? GetLayerDensity(layer0, altitude)
+        : GetLayerDensity(layer1, altitude);
+}
+
+vec3 GetFiniteSegmentLuminance(
+    Position origin,
+    Direction ray,
+    Length distance,
+    out DimensionlessSpectrum transmittance)
+{
+    vec2 atmosphere_intersections = RaySphereIntersections(
+        origin, ray, atmosphere.top_radius);
+    Length start_distance = max(atmosphere_intersections.x, 0.0);
+    Length end_distance = min(atmosphere_intersections.y, distance);
+    if (end_distance <= start_distance)
+    {
+        transmittance = vec3(1.0);
+        return vec3(0.0);
+    }
+
+    const int sample_count = 8;
+    Length step_size =
+        (end_distance - start_distance) / Number(sample_count);
+    vec3 optical_depth = vec3(0.0);
+    vec3 radiance = vec3(0.0);
+    Number nu = dot(ray, sun_direction);
+    vec3 direct_luminance_conversion =
+        precomputed_luminance != 0
+            ? sun_spectral_radiance_to_luminance
+            : sky_spectral_radiance_to_luminance;
+    for (int i = 0; i < sample_count; ++i)
+    {
+        Length sample_distance =
+            start_distance + (Number(i) + 0.5) * step_size;
+        Position sample_position =
+            origin + ray * sample_distance;
+        Length r = length(sample_position);
+        Length altitude = max(r - atmosphere.bottom_radius, 0.0);
+        Number rayleigh_density = GetProfileDensity(
+            atmosphere.rayleigh_density0,
+            atmosphere.rayleigh_density1,
+            altitude);
+        Number mie_density = GetProfileDensity(
+            atmosphere.mie_density0,
+            atmosphere.mie_density1,
+            altitude);
+        Number absorption_density = GetProfileDensity(
+            atmosphere.absorption_density0,
+            atmosphere.absorption_density1,
+            altitude);
+        vec3 extinction = (
+            atmosphere.rayleigh_scattering * rayleigh_density +
+            atmosphere.mie_extinction * mie_density +
+            atmosphere.absorption_extinction * absorption_density);
+        vec3 view_transmittance =
+            exp(-(optical_depth + 0.5 * step_size * extinction));
+        Number mu_s = dot(sample_position, sun_direction) / r;
+        vec3 direct_source =
+            atmosphere.solar_irradiance *
+            GetTransmittanceToSun(
+                atmosphere,
+                transmittance_texture,
+                r,
+                mu_s) *
+            (
+                atmosphere.rayleigh_scattering *
+                    rayleigh_density *
+                    RayleighPhaseFunction(nu) +
+                atmosphere.mie_scattering *
+                    mie_density *
+                    MiePhaseFunction(
+                        atmosphere.mie_phase_function_g,
+                        nu)
+            );
+        vec3 diffuse_source =
+            GetIrradiance(
+                atmosphere,
+                irradiance_texture,
+                r,
+                mu_s) / PI *
+            (
+                atmosphere.rayleigh_scattering *
+                    rayleigh_density +
+                atmosphere.mie_scattering *
+                    mie_density
+            );
+        radiance +=
+            view_transmittance *
+            (
+                direct_source * direct_luminance_conversion +
+                diffuse_source *
+                    sky_spectral_radiance_to_luminance
+            ) *
+            step_size;
+        optical_depth += step_size * extinction;
+    }
+    transmittance = exp(-optical_depth);
+    return radiance;
+}
+
 void main()
 {
     vec3 view_direction = normalize(view_ray);
@@ -1014,7 +1151,13 @@ void main()
                 sun_direction,
                 transmittance);
             if (!visible_atmosphere_surface)
-                luminance = vec3(0.0);
+            {
+                luminance = GetFiniteSegmentLuminance(
+                    camera_position,
+                    view_direction,
+                    scene_distance,
+                    transmittance);
+            }
         }
         else
         {
