@@ -10,6 +10,7 @@
 #include "configfile.h"
 
 #include <config.h>
+#include <cmath>
 #include <fstream>
 #include <type_traits>
 
@@ -18,6 +19,7 @@
 #include <celutil/fsutils.h>
 #include <celutil/logger.h>
 #include <celutil/parser.h>
+#include <celutil/stringutils.h>
 #include <celutil/tokenizer.h>
 
 using namespace std::string_view_literals;
@@ -54,6 +56,20 @@ applyString(std::string& target, const AssociativeArray& hash, std::string_view 
     auto str = hash.getString(key);
     if (str != nullptr)
         target = *str;
+}
+
+void
+applyToneMappingMode(ToneMappingMode& target, const AssociativeArray& hash, std::string_view key)
+{
+    auto str = hash.getString(key);
+    if (str == nullptr)
+        return;
+    if (compareIgnoringCase(*str, "Off") == 0)
+        target = ToneMappingMode::None;
+    else if (compareIgnoringCase(*str, "Manual") == 0)
+        target = ToneMappingMode::Manual;
+    else
+        GetLogger()->error("Unknown {} value '{}'.\n", key, *str);
 }
 
 void
@@ -196,12 +212,26 @@ applyRenderDetails(CelestiaConfig::RenderDetails& renderDetails, const Associati
     applyNumber(renderDetails.shadowTextureSize, hash, "ShadowTextureSize"sv);
     applyNumber(renderDetails.eclipseTextureSize, hash, "EclipseTextureSize"sv);
     applyNumber(renderDetails.orbitPathSamplePoints, hash, "OrbitPathSamplePoints"sv);
+    applyNumber(renderDetails.atmosphere.segmentCount, hash, "AtmosphereSegmentCount"sv);
+    renderDetails.atmosphere.segmentCount = std::clamp(renderDetails.atmosphere.segmentCount, 1u, 16u);
+    applyNumber(renderDetails.atmosphere.cloudSegmentCount, hash, "CloudSegmentCount"sv);
+    renderDetails.atmosphere.cloudSegmentCount = std::clamp(renderDetails.atmosphere.cloudSegmentCount, 1u, 16u);
+    applyNumber(renderDetails.atmosphere.extinctionThreshold, hash, "AtmosphereExtinctionThreshold"sv);
+    if (renderDetails.atmosphere.extinctionThreshold <= 0.0f ||
+        renderDetails.atmosphere.extinctionThreshold >= 1.0f)
+    {
+        GetLogger()->error("AtmosphereExtinctionThreshold must be between 0 and 1.\n");
+        renderDetails.atmosphere.extinctionThreshold = 0.000125f;
+    }
     applyNumber(renderDetails.aaSamples, hash, "AntialiasingSamples"sv);
     applyNumber(renderDetails.SolarSystemMaxDistance, hash, "SolarSystemMaxDistance"sv);
     renderDetails.SolarSystemMaxDistance = std::clamp(renderDetails.SolarSystemMaxDistance, 1.0f, 10.0f);
     applyNumber(renderDetails.ShadowMapSize, hash, "ShadowMapSize"sv);
     applyStringArray(renderDetails.ignoreGLExtensions, hash, "IgnoreGLExtensions"sv);
-    applyBoolean(renderDetails.sRGBRendering, hash, "SRGBRendering"sv);
+    applyBoolean(renderDetails.output.sRGB, hash, "SRGBRendering"sv);
+    applyNumber(renderDetails.output.toneMappingExposure, hash, "ToneMappingExposure"sv);
+    renderDetails.output.toneMappingExposure = std::clamp(renderDetails.output.toneMappingExposure, 1.0e-3f, 1.0e6f);
+    applyToneMappingMode(renderDetails.output.toneMapping, hash, "ToneMappingMode"sv);
     applyNumber(renderDetails.stars.pointRadius, hash, "StarPointRadius"sv);
     renderDetails.stars.pointRadius = std::clamp(renderDetails.stars.pointRadius, 1.0f, 10.0f);
     applyNumber(renderDetails.stars.optimization, hash, "StarOptimization"sv);

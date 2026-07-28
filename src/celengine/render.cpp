@@ -84,6 +84,7 @@
 #include <algorithm>
 #include <cstring>
 #include <cassert>
+#include <cmath>
 #include <sstream>
 #include <iomanip>
 #include <numeric>
@@ -413,6 +414,10 @@ bool Renderer::init(int winWidth, int winHeight,
     m_geometryManager = std::make_unique<RenderGeometryManager>(geometryManager, *m_resourceSystem);
     m_textureManager = std::make_unique<TextureManager>(texturePaths, resolution, *m_resourceSystem);
     detailOptions = _detailOptions;
+    atmosphereSegmentCount = detailOptions.atmosphereSegmentCount;
+    cloudSegmentCount = detailOptions.cloudSegmentCount;
+    atmosphereExtinctionThreshold = detailOptions.atmosphereExtinctionThreshold;
+    atmosphereExtinctionFactor = -std::log(atmosphereExtinctionThreshold);
 
     m_atmosphereRenderer->initGL();
     if (!m_cometRenderer->initGL())
@@ -1324,7 +1329,7 @@ void Renderer::renderItem(const RenderListEntry& rle,
     case RenderListEntry::RenderableStar:
         renderStar(*rle.star,
                    rle.position,
-                   rle.distance,
+                   static_cast<float>(rle.distance),
                    rle.appMag,
                    observer,
                    nearPlaneDistance, farPlaneDistance,
@@ -1344,7 +1349,7 @@ void Renderer::renderItem(const RenderListEntry& rle,
     case RenderListEntry::RenderableRingSystem:
         renderRingSystem(*rle.body,
                          rle.position,
-                         rle.distance,
+                         static_cast<float>(rle.distance),
                          observer,
                          nearPlaneDistance,
                          m);
@@ -1362,7 +1367,7 @@ void Renderer::renderItem(const RenderListEntry& rle,
     case RenderListEntry::RenderableReferenceMark:
         renderReferenceMark(*rle.refMark,
                             rle.position,
-                            rle.distance,
+                            static_cast<float>(rle.distance),
                             observer.getTime(),
                             nearPlaneDistance,
                             m);
@@ -1771,9 +1776,6 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
     ps.depthTest = true;
     setPipelineState(ps);
 
-    const Vector3f &spritePos = position;
-    Vector3f frontPos = calculateQuadCenter(getCameraOrientationf(), spritePos, radius);
-
     float exposureFactor = std::max(starExposure, 1.0e-6f);
     float r              = std::max(starPointRadius, 1.0e-3f);
     float peakRadScale   = exposureFactor * 3.0f
@@ -1797,23 +1799,40 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
     Color linearStarColor = psfGreenNormalization(color, 0.1f, greenScale);
     float peakRadCol = peakRad * greenScale;
 
+    Eigen::Vector3f frontPos = calculateQuadCenter(getCameraOrientationf(), position, radius);
+
     // Suppress the cone-cap sprite once the body is resolved as a
     // mesh; the linked glow below handles the bloom around the disc.
     if (discSizeInPixels <= 1.0f)
         psfPointBuffer->addStar(frontPos, linearStarColor, peakRadCol);
-
-    // Peak radiance whose bloom radius (per the shader's PSF formula)
-    // equals the body's angular disc.
-    float a    = starOptimization / r;
-    float invB = celestia::numbers::pi_v<float> / r - a;
-    float angR = discSizeInPixels / pointScale;
-    float linkedGlowPeak = std::pow(angR * (a + invB), 2.5f);
 
     // Gate on the irradiance-based peak so the linked term only
     // enhances an already-firing glow, never starts one (keeps
     // reflective bodies with large angular radius from blooming).
     if (peakRadCol > 1.0f && starOptimization > 0.0f)
     {
+        // Peak radiance whose bloom radius (per the shader's PSF formula)
+        // equals the body's angular disc.
+        float a    = starOptimization / r;
+        float invB = celestia::numbers::pi_v<float> / r - a;
+        // Exact projected limb radius; discSizeInPixels undershoots up close.
+        float limbDiscPixels = discSizeInPixels;
+        float fadeLimbDiscPixels = limbDiscPixels;
+        if (distance > radius)
+        {
+            float limbAngularRadius = radius / std::sqrt(distance * distance - radius * radius);
+            limbDiscPixels = limbAngularRadius / pixelSize;
+
+            // The distance-fade derivation assumes that a growing projected limb
+            // means the observer moved closer. Camera zoom also grows the limb, so
+            // evaluate the fade at the projection's unit zoom instead.
+            fadeLimbDiscPixels = limbAngularRadius / projectionMode->getPixelSize(1.0f);
+        }
+        float angR = limbDiscPixels / pointScale;
+        float linkedGlowPeak = std::pow(angR * (a + invB), 2.5f);
+        float fadeAngR = fadeLimbDiscPixels / pointScale;
+        float fadeLinkedGlowPeak = std::pow(fadeAngR * (a + invB), 2.5f);
+
         float glowPeak = peakRadCol;
         if (starMaxIrradiance > 0.0f)
         {
@@ -1833,11 +1852,12 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
         float glowPeakToUse = std::max(glowPeak, linkedGlowPeak);
 
         // Fade alpha 1 → 0 between d_match and the body surface so the
-        // sprite vanishes smoothly as the disc takes over.
-        float alpha = computePsfGlowAlpha(distance, radius, linkedGlowPeak, glowPeak);
+        // sprite vanishes smoothly as the disc takes over.  This is a
+        // continuous distance-derived value, so pass it as a float to keep
+        // the transition smooth.
+        float alpha = computePsfGlowAlpha(distance, radius, fadeLinkedGlowPeak, glowPeak);
         if (alpha <= 0.0f)
             return;
-        Color glowColor(linearStarColor, alpha);
 
         // Fast oversize check: avoid computing pow unless we actually
         // need sizePhys.  sizePhys > maxPointSize is equivalent to
@@ -1850,11 +1870,11 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
         {
             // Oversize glow (typical for Sol at ~1 AU): hand it to the
             // batched billboard renderer.
-            m_psfGlowLargeRenderer->addStar(glowPos, glowColor, glowPeakToUse);
+            m_psfGlowLargeRenderer->addStar(glowPos, linearStarColor, glowPeakToUse, angR, alpha);
         }
         else
         {
-            psfGlowBuffer->addStar(glowPos, glowColor, glowPeakToUse);
+            psfGlowBuffer->addStar(glowPos, linearStarColor, glowPeakToUse, angR, alpha);
         }
     }
 }
@@ -2273,7 +2293,7 @@ setupObjectLighting(const vector<LightSource>& suns,
 
 
 void Renderer::renderObject(const Vector3f& pos,
-                            float distance,
+                            double distance,
                             const Observer& observer,
                             float nearPlaneDistance,
                             float farPlaneDistance,
@@ -2284,7 +2304,7 @@ void Renderer::renderObject(const Vector3f& pos,
     RenderInfo ri;
     double now = observer.getTime();
 
-    float altitude = distance - obj.radius;
+    float altitude = static_cast<float>(distance - obj.radius);
     float discSizeInPixels = obj.radius / (max(nearPlaneDistance, altitude) * pixelSize);
 
     ri.sunDir_eye = Vector3f::UnitY();
@@ -2379,6 +2399,12 @@ void Renderer::renderObject(const Vector3f& pos,
     ri.eyeDir_obj = -(planetRotation * pos).normalized();
     ri.eyePos_obj = -(planetRotation * (pos.cwiseQuotient(scaleFactors)));
 
+    bool insidePlanet =
+        obj.geometry == engine::GeometryHandle::Invalid &&
+        (scaleFactors.x() == scaleFactors.y() && scaleFactors.x() == scaleFactors.z()
+             ? distance < static_cast<double>(scaleFactors.x())
+             : (planetRotation * pos).cwiseQuotient(scaleFactors).squaredNorm() < 1.0f);
+
     ri.orientation = getCameraOrientationf() * obj.orientation.conjugate();
 
     ri.pixWidth = discSizeInPixels;
@@ -2425,7 +2451,7 @@ void Renderer::renderObject(const Vector3f& pos,
         if (obj.atmosphere != nullptr)
         {
             float atmosphereHeight = max(obj.atmosphere->cloudHeight,
-                                         obj.atmosphere->mieScaleHeight * -LogAtmosphereExtinctionThreshold);
+                                         getAtmosphereShellHeight(obj.atmosphere->mieScaleHeight));
             if (atmosphereHeight > 0.0f)
             {
                 // If there's an atmosphere, we need to move the far plane
@@ -2473,6 +2499,7 @@ void Renderer::renderObject(const Vector3f& pos,
                                  scaleFactors,
                                  renderFlags,
                                  obj.orientation,
+                                 insidePlanet,
                                  viewFrustum,
                                  planetMVP,
                                  this,
@@ -2532,8 +2559,8 @@ void Renderer::renderObject(const Vector3f& pos,
         float thicknessInPixels = 0.0f;
         if (distance - radius > 0.0f)
         {
-            thicknessInPixels = atmosphere->height /
-                ((distance - radius) * pixelSize);
+            thicknessInPixels = static_cast<float>(atmosphere->height /
+                ((distance - radius) * pixelSize));
             fade = std::clamp(thicknessInPixels - 2.0f, 0.0f, 1.0f);
         }
         else
@@ -2541,20 +2568,19 @@ void Renderer::renderObject(const Vector3f& pos,
             fade = 1.0f;
         }
 
-        if (fade > 0 && util::is_set(renderFlags, RenderFlags::ShowAtmospheres) && atmosphere->height > 0.0f)
+        if (fade > 0 && util::is_set(renderFlags, RenderFlags::ShowAtmospheres) && atmosphere->height > 0.0f &&
+            !insidePlanet)
         {
             // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
             // TODO: convert old style atmopshere parameters
             if (atmosphere->mieScaleHeight > 0.0f)
             {
-                float atmScale = 1.0f + atmosphere->height / radius;
-
                 m_atmosphereRenderer->render(
                     ri,
                     *atmosphere,
                     ls,
                     obj.orientation,
-                    radius * atmScale,
+                    radius,
                     viewFrustum,
                     planetMVP);
             }
@@ -2576,7 +2602,7 @@ void Renderer::renderObject(const Vector3f& pos,
         }
 
         // If there's a cloud layer, we'll render it now.
-        if (cloudTex != nullptr)
+        if (cloudTex != nullptr && !insidePlanet)
         {
             float cloudScale = 1.0f + atmosphere->cloudHeight / radius;
             Matrix4f cmv = math::scale(planetMV, cloudScale);
@@ -2781,7 +2807,7 @@ bool Renderer::testEclipse(const Body& receiver,
 
 void Renderer::renderPlanet(Body& body,
                             const Vector3f& pos,
-                            float distance,
+                            double distance,
                             float appMag,
                             const Observer& observer,
                             float nearPlaneDistance,
@@ -2789,7 +2815,7 @@ void Renderer::renderPlanet(Body& body,
                             const Matrices &m)
 {
     double now = observer.getTime();
-    float altitude = distance - body.getRadius();
+    float altitude = static_cast<float>(distance - body.getRadius());
     float discSizeInPixels = body.getRadius() /
         (max(nearPlaneDistance, altitude) * pixelSize);
 
@@ -3005,7 +3031,7 @@ void Renderer::renderPlanet(Body& body,
         const auto surfaceColor = body.getSurface().color.linearize(gl::sRGBRendering);
         if (float maxCoeff = surfaceColor.toVector3().maxCoeff(); maxCoeff > 0.0f) // ignore [ 0 0 0 ]; used by old addons to make objects not get rendered as point
         {
-            renderObjectAsPoint(PointObjectInfo{pos, distance, body.getRadius()},
+            renderObjectAsPoint(PointObjectInfo{pos, static_cast<float>(distance), body.getRadius()},
                                 appMag,
                                 discSizeInPixels,
                                 surfaceColor * (1.0f / maxCoeff), // normalize point color; 'darkness' is handled by size of point determined by GeomAlbedo.
@@ -3403,7 +3429,7 @@ void Renderer::addRenderListEntries(RenderListEntry& rle,
         // When the observer is inside the rings (distance <= innerRadius) the
         // rings are drawn inline by renderObject. Only add a separate
         // transparent render-list entry for the outside case.
-        float ringDiscSize = (rings->outerRadius / rle.distance) / pixelSize;
+        float ringDiscSize = static_cast<float>((rings->outerRadius / rle.distance) / pixelSize);
         if (ringDiscSize > 1 && rle.distance > rings->innerRadius)
         {
             rle.renderableType = RenderListEntry::RenderableRingSystem;
@@ -3418,7 +3444,7 @@ void Renderer::addRenderListEntries(RenderListEntry& rle,
     if (body.getClassification() == BodyClassification::Comet && util::is_set(renderFlags, RenderFlags::ShowCometTails))
     {
         float radius = cometDustTailLength(rle.sun.norm(), body.getRadius());
-        float discSize = (radius / rle.distance) / pixelSize;
+        float discSize = static_cast<float>((radius / rle.distance) / pixelSize);
         if (discSize > 1)
         {
             rle.renderableType = RenderListEntry::RenderableCometTail;
@@ -3565,7 +3591,7 @@ void Renderer::buildRenderLists(const Vector3d& astrocentricObserverPos,
                 RenderListEntry rle;
 
                 rle.position = pos_v.cast<float>();
-                rle.distance = (float) dist_v;
+                rle.distance = dist_v;
                 rle.centerZ = pos_v.cast<float>().dot(viewMatZ);
                 rle.appMag   = appMag;
                 rle.discSizeInPixels = body->getRadius() / ((float) dist_v * pixelSize);
@@ -4641,6 +4667,32 @@ float Renderer::getStarExposure() const
 }
 
 
+void Renderer::setToneMappingExposure(float e)
+{
+    toneMappingExposure = std::clamp(e, 1.0e-3f, 1.0e6f);
+    markSettingsChanged();
+}
+
+
+float Renderer::getToneMappingExposure() const
+{
+    return toneMappingExposure;
+}
+
+
+void Renderer::setToneMappingMode(ToneMappingMode mode)
+{
+    toneMappingMode = mode;
+    markSettingsChanged();
+}
+
+
+ToneMappingMode Renderer::getToneMappingMode() const
+{
+    return toneMappingMode;
+}
+
+
 void Renderer::loadTextures(Body* body)
 {
     const Surface& surface = body->getSurface();
@@ -4669,8 +4721,13 @@ void Renderer::loadTextures(Body* body)
     if (util::is_set(renderFlags, RenderFlags::ShowCloudMaps))
     {
         const Atmosphere* atmosphere = bodyFeaturesManager->getAtmosphere(body);
-        if (atmosphere != nullptr && atmosphere->cloudTexture != util::TextureHandle::Invalid)
-            m_textureManager->find(atmosphere->cloudTexture);
+        if (atmosphere != nullptr)
+        {
+            if (atmosphere->cloudTexture != util::TextureHandle::Invalid)
+                m_textureManager->find(atmosphere->cloudTexture);
+            if (atmosphere->cloudNormalMap != util::TextureHandle::Invalid)
+                m_textureManager->find(atmosphere->cloudNormalMap);
+        }
     }
 
     if (auto rings = bodyFeaturesManager->getRings(body);
@@ -4753,6 +4810,29 @@ void Renderer::setSolarSystemMaxDistance(float t)
     SolarSystemMaxDistance = std::clamp(t, 1.0f, 10.0f);
 }
 
+unsigned int
+Renderer::getAtmosphereSegmentCount() const noexcept
+{
+    return atmosphereSegmentCount;
+}
+
+unsigned int
+Renderer::getCloudSegmentCount() const noexcept
+{
+    return cloudSegmentCount;
+}
+
+float
+Renderer::getAtmosphereExtinctionThreshold() const noexcept
+{
+    return atmosphereExtinctionThreshold;
+}
+
+float
+Renderer::getAtmosphereShellHeight(float scaleHeight) const noexcept
+{
+    return scaleHeight * atmosphereExtinctionFactor;
+}
 
 void Renderer::getViewport(int* x, int* y, int* w, int* h) const
 {
@@ -5222,7 +5302,7 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
             {
                 cullRadius += atmosphere->height;
                 cloudHeight = max(atmosphere->cloudHeight,
-                                  atmosphere->mieScaleHeight * -LogAtmosphereExtinctionThreshold);
+                                  getAtmosphereShellHeight(atmosphere->mieScaleHeight));
             }
             break;
 

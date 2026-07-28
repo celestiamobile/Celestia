@@ -36,7 +36,6 @@ enum class StaticShader
     Galaxy150,
     Globular,
     LargeStar,
-    Passthrough,
     PsfStarGlow,
     PsfStarGlowLarge,
     PsfStarPoint,
@@ -47,6 +46,30 @@ enum class StaticShader
     Tidal,
     WarpMesh,
     _Count,
+};
+
+// Compile-time options that select variants of a static shader via #define injection.
+enum class StaticShaderOptions : std::uint8_t
+{
+    None    = 0,
+    ToneMap = 0x01,
+};
+
+ENUM_CLASS_BITWISE_OPS(StaticShaderOptions);
+
+struct StaticShaderProperties
+{
+    StaticShader        shader;
+    StaticShaderOptions options;
+};
+
+bool
+operator==(const StaticShaderProperties& lhs, const StaticShaderProperties& rhs);
+
+template<>
+struct std::hash<StaticShaderProperties>
+{
+    std::size_t operator()(const StaticShaderProperties&) const;
 };
 
 enum class TexUsage : std::uint32_t
@@ -98,6 +121,9 @@ enum class LightingEffects : std::uint16_t
     VolumetricScattering      = 0x0001,
     VolumetricAbsorption      = 0x0002,
     VolumetricEmission        = 0x0004,
+    CloudLighting             = 0x0008,
+    AtmosphereTransmission    = 0x0010,
+    AtmosphereDualSource      = 0x0020,
 };
 
 enum class FisheyeOverrideMode : int
@@ -226,7 +252,10 @@ public:
                                     const Eigen::Quaternionf& orientation);
     void setAtmosphereParameters(const Atmosphere& atmosphere,
                                  float atmPlanetRadius,
-                                 float objRadius);
+                                 float objRadius,
+                                 float skySphereRadius,
+                                 unsigned int segmentCount,
+                                 float extinctionThreshold);
     void setMVPMatrices(const Eigen::Matrix4f& p, const Eigen::Matrix4f& m = Eigen::Matrix4f::Identity());
 
     enum
@@ -244,6 +273,8 @@ public:
         NextVCoordAttributeIndex    = 10,
         ScaleFactorAttributeIndex   = 11,
         LineSideAttributeIndex      = 12,
+        AlphaAttributeIndex         = 13,
+        LimbRadiusAttributeIndex    = 14,
     };
 
     CelestiaGLProgramLight lights[MaxShaderLights];
@@ -269,6 +300,7 @@ public:
     // Height of cloud layer above planet, in units of object radius
     FloatShaderParameter cloudHeight;
     FloatShaderParameter shadowTextureOffset;
+    FloatShaderParameter cloudHorizon;
 
     std::array<CelestiaGLProgramTextureTransform, 4> texCoordTransforms;
 
@@ -288,11 +320,8 @@ public:
     Vec3ShaderParameter rayleighCoeff;
     FloatShaderParameter rayleighScaleHeight;
 
-    // Precomputed sum and inverse sum of Rayleigh and Mie scattering coefficients
-    Vec3ShaderParameter scatterCoeffSum;
-    Vec3ShaderParameter invScatterCoeffSum;
     // Precomputed sum of absorption and scattering coefficients--identical to
-    // scatterCoeffSum when there is no absorption.
+    // the scattering coefficient sum when there is no absorption.
     Vec3ShaderParameter extinctionCoeff;
 
     // Radius of sphere for atmosphere--should be significantly larger than
@@ -301,6 +330,8 @@ public:
     //    y = radius^2
     //    z = 1/radius
     Vec3ShaderParameter atmosphereRadius;
+    IntegerShaderParameter atmosphereSegmentCount;
+    FloatShaderParameter atmosphereExtinctionThreshold;
 
     // Scale factor for point sprites
     FloatShaderParameter pointScale;
@@ -359,15 +390,16 @@ public:
 
     CelestiaGLProgram* getShader(const ShaderProperties&);
     CelestiaGLProgram* getShader(StaticShader, const GeomShaderParams* = nullptr);
+    CelestiaGLProgram* getShader(StaticShader, StaticShaderOptions, const GeomShaderParams* = nullptr);
 
     void setFisheyeEnabled(bool enabled);
 
 private:
-    std::shared_ptr<CelestiaGLProgram> loadShader(StaticShader, const GeomShaderParams*);
+    std::shared_ptr<CelestiaGLProgram> loadShader(StaticShaderProperties, const GeomShaderParams*);
     std::shared_ptr<CelestiaGLProgram> getErrorProgram();
 
     std::unordered_map<ShaderProperties, std::shared_ptr<CelestiaGLProgram>> m_dynamicShaders;
-    std::array<std::shared_ptr<CelestiaGLProgram>, static_cast<std::size_t>(StaticShader::_Count)> m_staticShaders;
+    std::unordered_map<StaticShaderProperties, std::shared_ptr<CelestiaGLProgram>> m_staticShaders;
 
     std::shared_ptr<CelestiaGLProgram> m_errorProgram;
     bool m_fisheyeEnabled { false };

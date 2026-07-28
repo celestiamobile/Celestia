@@ -134,6 +134,7 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
                           const Eigen::Vector3f& semiAxes,
                           RenderFlags renderFlags,
                           const Eigen::Quaternionf& planetOrientation,
+                          bool insidePlanet,
                           const math::Frustum& frustum,
                           const Matrices &m,
                           Renderer* renderer,
@@ -146,6 +147,30 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
     ShaderProperties shadprop;
     shadprop.texUsage = TexUsage::TextureCoordTransform;
     shadprop.nLights = std::min(ls.nLights, MaxShaderLights);
+
+    // Inside the planet, draw the surface as an opaque black shell; low detail avoids patch-culling holes.
+    if (insidePlanet)
+    {
+        shadprop.nLights = 0;
+        CelestiaGLProgram* prog = renderer->getShaderManager().getShader(shadprop);
+        if (prog == nullptr)
+            return;
+
+        prog->use();
+        prog->setMVPMatrices(*m.projection, *m.modelview);
+        prog->ambientColor = Eigen::Vector3f::Zero();
+        prog->opacity = 1.0f;
+
+        Renderer::PipelineState ps;
+        ps.depthMask = true;
+        ps.depthTest = true;
+        renderer->setPipelineState(ps);
+
+        glDisable(GL_CULL_FACE);
+        lodSphere->render(LODSphereMesh::Normals, frustum, 1.0f, nullptr, 0, prog);
+        glEnable(GL_CULL_FACE);
+        return;
+    }
 
     // Set up the textures used by this object
     if (ri.baseTex != nullptr)
@@ -338,7 +363,12 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
 
         if (shadprop.hasScattering())
         {
-            prog->setAtmosphereParameters(*atmosphere, radius, radius);
+            float extinctionThreshold = renderer->getAtmosphereExtinctionThreshold();
+            float atmosphereRadius = radius +
+                                     renderer->getAtmosphereShellHeight(atmosphere->mieScaleHeight);
+            prog->setAtmosphereParameters(*atmosphere, radius, radius, atmosphereRadius,
+                                          renderer->getAtmosphereSegmentCount(),
+                                          extinctionThreshold);
         }
     }
 
@@ -549,7 +579,8 @@ void renderClouds_GLSL(const RenderInfo& ri,
 
     ShaderProperties shadprop;
     shadprop.texUsage = TexUsage::TextureCoordTransform;
-    shadprop.nLights = ls.nLights;
+    shadprop.nLights = std::min(ls.nLights, MaxShaderLights);
+    shadprop.effects = LightingEffects::CloudLighting;
 
     // Set up the textures used by this object
     if (cloudTex != nullptr)
@@ -575,7 +606,7 @@ void renderClouds_GLSL(const RenderInfo& ri,
     }
 
     // Set the shadow information.
-    for (unsigned int li = 0; li < ls.nLights; li++)
+    for (unsigned int li = 0; li < shadprop.nLights; li++)
     {
         if (ls.shadows[li] && !ls.shadows[li]->empty())
         {
@@ -601,10 +632,19 @@ void renderClouds_GLSL(const RenderInfo& ri,
     if (atmosphere != nullptr)
     {
         float cloudRadius = radius + atmosphere->cloudHeight;
+        float cloudPlanetRadius = radius / cloudRadius;
+        prog->cloudHorizon = cloudPlanetRadius >= 1.0f
+            ? 0.0f
+            : std::sqrt(1.0f - cloudPlanetRadius * cloudPlanetRadius);
 
         if (shadprop.hasScattering())
         {
-            prog->setAtmosphereParameters(*atmosphere, radius, cloudRadius);
+            float extinctionThreshold = renderer->getAtmosphereExtinctionThreshold();
+            float atmosphereRadius = radius +
+                                     renderer->getAtmosphereShellHeight(atmosphere->mieScaleHeight);
+            prog->setAtmosphereParameters(*atmosphere, radius, cloudRadius, atmosphereRadius,
+                                          renderer->getCloudSegmentCount(),
+                                          extinctionThreshold);
         }
     }
 

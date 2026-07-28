@@ -2634,11 +2634,7 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
     if (!config->viewportEffect.empty() && config->viewportEffect != "none")
     {
         std::unique_ptr<ViewportEffect> effect;
-        if (config->viewportEffect == "passthrough")
-        {
-            effect = std::make_unique<PassthroughViewportEffect>();
-        }
-        else if (config->viewportEffect == "warpmesh")
+        if (config->viewportEffect == "warpmesh")
         {
             if (config->paths.warpMeshFile.empty())
             {
@@ -2773,7 +2769,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
                                 std::optional<bool> sRGBRendering,
                                 [[maybe_unused]] bool useMesaPackInvert)
 {
-    gl::sRGBRendering = sRGBRendering.value_or(config->renderDetails.sRGBRendering);
+    gl::sRGBRendering = sRGBRendering.value_or(config->renderDetails.output.sRGB);
 
     if (gl::sRGBRendering)
     {
@@ -2782,7 +2778,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
         // as the final rendering step, keeping the pipeline consistent across
         // all GL variants without relying on GL_FRAMEBUFFER_SRGB or
         // platform-specific sRGB surface negotiation.
-        viewportEffects.push_back(std::make_unique<PassthroughViewportEffect>(StaticShader::sRGB, true));
+        viewportEffects.push_back(std::make_unique<PassthroughViewportEffect>(true));
     }
 
     renderer->setRenderFlags(RenderFlags::ShowStars |
@@ -2792,6 +2788,9 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
 
     Renderer::DetailOptions detailOptions;
     detailOptions.orbitPathSamplePoints = config->renderDetails.orbitPathSamplePoints;
+    detailOptions.atmosphereSegmentCount = config->renderDetails.atmosphere.segmentCount;
+    detailOptions.cloudSegmentCount = config->renderDetails.atmosphere.cloudSegmentCount;
+    detailOptions.atmosphereExtinctionThreshold = config->renderDetails.atmosphere.extinctionThreshold;
     detailOptions.shadowTextureSize = config->renderDetails.shadowTextureSize;
     detailOptions.eclipseTextureSize = config->renderDetails.eclipseTextureSize;
     detailOptions.orbitWindowEnd = config->renderDetails.orbitWindowEnd;
@@ -2817,6 +2816,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
 
     renderer->colors = renderer->colors.linearize(gl::sRGBRendering);
     m_scriptMaps.initColorMaps(renderer->colors);
+    renderer->setToneMappingMode(config->renderDetails.output.toneMapping);
 
     if (util::is_set(renderer->getRenderFlags(), RenderFlags::ShowAutoMag))
     {

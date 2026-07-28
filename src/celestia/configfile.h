@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <celengine/star.h>
+#include <celengine/renderflags.h>
 #ifdef CELX
 #include <celutil/associativearray.h>
 #endif
@@ -93,7 +94,20 @@ struct CelestiaConfig
         float SolarSystemMaxDistance{ 1.0f };
         unsigned int ShadowMapSize{ 0 };
         std::vector<std::string> ignoreGLExtensions{ };
-        bool sRGBRendering{ false };
+        struct OutputRendering
+        {
+            bool sRGB{ false };
+            float toneMappingExposure{ 1.0f };
+            ToneMappingMode toneMapping{ ToneMappingMode::None };
+        };
+        OutputRendering output{ };
+        struct AtmosphereRendering
+        {
+            unsigned int segmentCount{ 6 };
+            unsigned int cloudSegmentCount{ 2 };
+            float extinctionThreshold{ 0.000125f };
+        };
+        AtmosphereRendering atmosphere{ };
         struct StarRendering
         {
             float pointRadius{ 1.5f };

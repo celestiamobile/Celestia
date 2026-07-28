@@ -57,7 +57,8 @@ public:
     void render();
     void finish() override;
 
-    void addStar(const Eigen::Vector3f &pos, const Color &color, float peakRadiance);
+    void addStar(const Eigen::Vector3f &pos, const Color &color, float peakRadiance,
+                 float limbRadius = 0.0f, float alpha = 1.0f);
 
     void setPointRadius(float r)      { m_pointRadius = r; }
     void setOptimization(float opt)   { m_optimization = opt; }
@@ -71,7 +72,9 @@ private:
     {
         Eigen::Vector3f            position;
         float                      peakRadiance;
-        std::array<unsigned char, 4> color;
+        float                      limbRadius;   // resolved-body limb (px), 0 if none
+        float                      alpha;        // glow fade, full float precision
+        std::array<unsigned char, 4> color;      // rgb only; alpha byte unused
     };
 
     const Renderer                 &m_renderer;

@@ -992,13 +992,6 @@
            </property>
            <layout class="QVBoxLayout" name="verticalLayout_13">
             <item>
-             <widget class="QComboBox" name="renderPathBox">
-              <property name="enabled">
-               <bool>false</bool>
-              </property>
-             </widget>
-            </item>
-            <item>
              <widget class="QCheckBox" name="antialiasLinesCheck">
               <property name="text">
                <string>Antialiased lines</string>
@@ -1016,6 +1009,57 @@
               </item>
               <item>
                <widget class="QComboBox" name="sRGBRenderingCombo"/>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <layout class="QHBoxLayout" name="horizontalLayout_toneMapping">
+              <item>
+               <widget class="QLabel" name="toneMappingLabel">
+                <property name="text">
+                 <string>Tone mapping:</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QComboBox" name="toneMappingCombo">
+                <property name="toolTip">
+                 <string>Softly roll off HDR highlights instead of clipping them to white. Only affects sRGB rendering.</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <layout class="QHBoxLayout" name="horizontalLayout_toneMappingExposure">
+              <item>
+               <widget class="QLabel" name="toneMappingExposureLabel">
+                <property name="text">
+                 <string>Exposure:</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QDoubleSpinBox" name="toneMappingExposureSpinBox">
+                <property name="toolTip">
+                 <string>Exposure of the HDR tone mapper. Only affects sRGB rendering in Manual tone mapping mode.</string>
+                </property>
+                <property name="decimals">
+                 <number>3</number>
+                </property>
+                <property name="minimum">
+                 <double>0.010000000000000</double>
+                </property>
+                <property name="maximum">
+                 <double>100.000000000000000</double>
+                </property>
+                <property name="singleStep">
+                 <double>0.100000000000000</double>
+                </property>
+                <property name="value">
+                 <double>1.000000000000000</double>
+                </property>
+               </widget>
               </item>
              </layout>
             </item>

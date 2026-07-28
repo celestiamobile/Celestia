@@ -13,6 +13,7 @@
 
 #include "qtpreferencesdialog.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 
@@ -218,8 +219,6 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
     ui.featureSizeSlider->setValue(minimumFeatureSize);
     ui.featureSizeSpinBox->setValue(minimumFeatureSize);
 
-    ui.renderPathBox->addItem(_("OpenGL 2.1"), 0);
-
     ui.antialiasLinesCheck->setChecked(util::is_set(renderFlags, ::RenderFlags::ShowSmoothLines));
 
     {
@@ -232,6 +231,20 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
             ui.sRGBRenderingCombo->setCurrentIndex(0);
         else
             ui.sRGBRenderingCombo->setCurrentIndex(settings.value("sRGBRendering").toBool() ? 1 : 2);
+    }
+    {
+        QSignalBlocker blocker(ui.toneMappingCombo);
+        ui.toneMappingCombo->addItem(_("Off"));
+        ui.toneMappingCombo->addItem(_("Manual exposure"));
+        ui.toneMappingCombo->setCurrentIndex(
+            static_cast<int>(renderer->getToneMappingMode()));
+    }
+    ui.toneMappingExposureSpinBox->setValue(renderer->getToneMappingExposure());
+    // Exposure only applies in Manual tone mapping mode.
+    {
+        bool manual = ui.toneMappingCombo->currentIndex() == 1;
+        ui.toneMappingExposureLabel->setVisible(manual);
+        ui.toneMappingExposureSpinBox->setVisible(manual);
     }
 
     switch (renderer->getResolution())
@@ -750,11 +763,6 @@ PreferencesDialog::on_featureSizeSpinBox_valueChanged(int value)
 }
 
 void
-PreferencesDialog::on_renderPathBox_currentIndexChanged(int /*index*/) const
-{
-}
-
-void
 PreferencesDialog::on_antialiasLinesCheck_stateChanged(int state)
 {
     setRenderFlag(appCore, ::RenderFlags::ShowSmoothLines, state);
@@ -768,6 +776,22 @@ PreferencesDialog::on_sRGBRenderingCombo_currentIndexChanged(int index)
         settings.remove("sRGBRendering");
     else
         settings.setValue("sRGBRendering", index == 1);
+}
+
+void
+PreferencesDialog::on_toneMappingCombo_currentIndexChanged(int index) const
+{
+    Renderer* renderer = appCore->getRenderer();
+    renderer->setToneMappingMode(static_cast<ToneMappingMode>(std::clamp(index, 0, 1)));
+    // Exposure only applies in Manual tone mapping mode.
+    ui.toneMappingExposureLabel->setVisible(index == 1);
+    ui.toneMappingExposureSpinBox->setVisible(index == 1);
+}
+
+void
+PreferencesDialog::on_toneMappingExposureSpinBox_valueChanged(double value) const
+{
+    appCore->getRenderer()->setToneMappingExposure(static_cast<float>(value));
 }
 
 // Texture resolution

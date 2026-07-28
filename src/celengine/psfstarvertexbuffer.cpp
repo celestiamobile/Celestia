@@ -154,10 +154,29 @@ PsfStarVertexBuffer::setupVertexArrayObject()
         sizeof(StarVertex),
         offsetof(StarVertex, peakRadiance));
 
+    // continuous distance-derived glow fade; float for a smooth transition
+    m_vo->addVertexBuffer(
+        *m_bo,
+        CelestiaGLProgram::AlphaAttributeIndex,
+        1,
+        gl::VertexObject::DataType::Float,
+        false,
+        sizeof(StarVertex),
+        offsetof(StarVertex, alpha));
+
+    m_vo->addVertexBuffer(
+        *m_bo,
+        CelestiaGLProgram::LimbRadiusAttributeIndex,
+        1,
+        gl::VertexObject::DataType::Float,
+        false,
+        sizeof(StarVertex),
+        offsetof(StarVertex, limbRadius));
+
     m_vo->addVertexBuffer(
         *m_bo,
         CelestiaGLProgram::ColorAttributeIndex,
-        4,
+        3,
         gl::VertexObject::DataType::UnsignedByte,
         true,
         sizeof(StarVertex),
@@ -190,12 +209,16 @@ PsfStarVertexBuffer::disable()
 void
 PsfStarVertexBuffer::addStar(const Eigen::Vector3f &pos,
                              const Color &color,
-                             float peakRadiance)
+                             float peakRadiance,
+                             float limbRadius,
+                             float alpha)
 {
     if (m_nStars < m_capacity)
     {
         m_vertices[m_nStars].position = pos;
         m_vertices[m_nStars].peakRadiance = peakRadiance;
+        m_vertices[m_nStars].limbRadius = limbRadius;
+        m_vertices[m_nStars].alpha = alpha;
         color.get(m_vertices[m_nStars].color.data());
         m_nStars++;
     }

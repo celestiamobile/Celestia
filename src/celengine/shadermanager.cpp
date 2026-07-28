@@ -59,7 +59,6 @@ constexpr std::array StaticShaderBaseNames
     "galaxy150"sv,
     "globular"sv,
     "largestar"sv,
-    "passthrough"sv,
     "psfstarglow"sv,
     "psfstarglowlarge"sv,
     "psfstarpoint"sv,
@@ -78,6 +77,7 @@ constexpr unsigned int ShadowBitsPerLight = 8;
 enum ShaderVariableType
 {
     Shader_Float,
+    Shader_Integer,
     Shader_Vector2,
     Shader_Vector3,
     Shader_Vector4,
@@ -241,6 +241,8 @@ ShaderTypeString(ShaderVariableType type)
     {
     case Shader_Float:
         return "float";
+    case Shader_Integer:
+        return "int";
     case Shader_Vector2:
         return "vec2";
     case Shader_Vector3:
@@ -523,6 +525,17 @@ AddDirectionalLightContrib(unsigned int i, const ShaderProperties& props)
         // unaffected by light direction except when considering shadows.
         source += "NL = 1.0;\n";
     }
+    else if (props.effects == LightingEffects::CloudLighting)
+    {
+        // GPU Gems, Chapter 16.2, "Simple Scattering Approximations":
+        // https://developer.nvidia.com/gpugems/gpugems/part-iii-materials/chapter-16-real-time-approximations-subsurface-scattering
+        std::string sunCos = IndexedParameter("cloudSunCos", i);
+        std::string twilight = IndexedParameter("cloudTwilight", i);
+        source += "float " + sunCos + " = dot(N, " + LightProperty(i, "direction") + ");\n";
+        source += "float " + twilight + " = max(0.0, (" + sunCos
+                  + " + cloudHorizon) / (1.0 + cloudHorizon));\n";
+        source += "NL = " + twilight + ";\n";
+    }
     else
     {
         source += "NL = max(0.0, dot(N, " + LightProperty(i, "direction") + "));\n";
@@ -710,6 +723,32 @@ ScatteringPhaseFunctions(const ShaderProperties& /*unused*/)
 
 
 std::string
+ChapmanOpticalDepth()
+{
+    return R"glsl(float chapmanToSpace(float r, float mu)
+{
+    mu = clamp(mu, -1.0, 1.0);
+    float X = r * mieH;
+    float density = exp(min((atmosphereRadius.z - r) * mieH, 0.0));
+    float grazing = sqrt(1.5707963267948966 * X);
+    if (mu >= 0.0)
+        return (density / mieH) * grazing / ((grazing - 1.0) * mu + 1.0);
+    float sinZenith = sqrt(max(1.0e-8, 1.0 - mu * mu));
+    float tangentDensity = exp(min((atmosphereRadius.z - r * sinZenith) * mieH, 0.0));
+    float upward = (density / mieH) * grazing / ((grazing - 1.0) * (-mu) + 1.0);
+    return max(0.0, (2.0 * tangentDensity / mieH) * sqrt(1.5707963267948966 * X * sinZenith) - upward);
+}
+
+float chapmanFromAtmosphereBoundary(float mu, float grazing)
+{
+    return (atmosphereExtinctionThreshold / mieH) * grazing /
+           ((grazing - 1.0) * clamp(mu, 0.0, 1.0) + 1.0);
+}
+)glsl";
+}
+
+
+std::string
 AtmosphericEffects(const ShaderProperties& props)
 {
     std::string source;
@@ -722,69 +761,87 @@ AtmosphericEffects(const ShaderProperties& props)
     source += "    vec3 atmEnter = eyePosition + min(0.0, (-rq + d)) * eyeDir;\n";
     source += "    vec3 atmLeave = nposition;\n";
 
-    source += "    vec3 atmSamplePoint = (atmEnter + atmLeave) * 0.5;\n";
-    //source += "    vec3 atmSamplePoint = atmEnter * 0.2 + atmLeave * 0.8;\n";
-
-    // Compute the distance through the atmosphere from the sample point to the sun
-    source += "    vec3 atmSamplePointSun = mix(atmEnter, atmLeave, 0.5);\n";
-    source += "    rq = dot(atmSamplePointSun, " + LightProperty(0, "direction") + ");\n";
-    source += "    qq = dot(atmSamplePointSun, atmSamplePointSun) - atmosphereRadius.y;\n";
-    source += "    d = sqrt(max(rq * rq - qq, 0.0));\n";
-    source += "    float distSun = -rq + d;\n";
     source += "    float distAtm = length(atmEnter - atmLeave);\n";
-
-    // Compute the density of the atmosphere at the sample point; it falls off exponentially
-    // with the height above the planet's surface.
-#if 0
-    source += "    float h = max(0.0, length(atmSamplePoint) - atmosphereRadius.z);\n";
-    source += "    float density = exp(-h * mieH);\n";
-#else
-    source += "    float density = 0.0;\n";
-    source += "    atmSamplePoint = mix(atmEnter, atmLeave, 0.667);\n";
-    //source += "    atmSamplePoint = atmEnter * 0.1 + atmLeave * 0.9;\n";
-    source += "    float h = max(0.0, length(atmSamplePoint) - atmosphereRadius.z);\n";
-    source += "    density += exp(-h * mieH);\n";
-    source += "    atmSamplePoint = mix(atmEnter, atmLeave, 0.333);\n";
-    //source += "    atmSamplePoint = atmEnter * 0.9 + atmLeave * 0.1;\n";
-    source += "    h = max(0.0, length(atmSamplePoint) - atmosphereRadius.z);\n";
-    source += "    density += exp(-h * mieH);\n";
-#endif
-
-    bool hasAbsorption = true;
-
-    std::string scatter;
-    if (hasAbsorption)
-    {
-        source += "    vec3 sunColor = " + LightProperty(0, "color") + " * exp(-extinctionCoeff * density * distSun);\n";
-        source += "    vec3 ex = exp(-extinctionCoeff * density * distAtm);\n";
-
-        scatter = "(1.0 - exp(-scatterCoeffSum * density * distAtm))";
-    }
-#if 0
-    else
-    {
-        source += "    vec3 sunColor = exp(-scatterCoeffSum * density * distSun);\n";
-        source += "    vec3 ex = exp(-scatterCoeffSum * density * distAtm);\n";
-
-        // If there's no absorption, the extinction coefficients are just the scattering coefficients,
-        // so there's no need to recompute the scattering.
-        scatter = "(1.0 - ex)";
-    }
-#endif
+    source += "    vec3 viewDirection = -eyeDir;\n";
+    source += "    float inverseSegmentCount = 1.0 / float(atmosphereSegmentCount);\n";
+    source += "    vec3 atmStep = (atmLeave - atmEnter) * inverseSegmentCount;\n";
+    source += "    float stepLength = distAtm * inverseSegmentCount;\n";
+    source += "    vec3 segmentStart = atmEnter;\n";
+    source += "    float odAtm = 0.0;\n";
+    source += "    vec3 scatteredLight = vec3(0.0);\n";
+    source += "    float planetRadiusSq = atmosphereRadius.z * atmosphereRadius.z;\n";
+    source += "    float shadowAngularWidth = min(0.2, sqrt(2.0 / (atmosphereRadius.z * mieH)));\n";
+    source += "    float shadowWidth = (atmosphereRadius.x + atmosphereRadius.z) * 0.5 * shadowAngularWidth;\n";
+    source += "    float atmosphereBoundaryGrazing = sqrt(1.5707963267948966 * atmosphereRadius.x * mieH);\n";
+    source += "    float viewStartRadiusSq = dot(segmentStart, segmentStart);\n";
+    source += "    float viewStartProjection = dot(segmentStart, viewDirection);\n";
+    source += "    float cachedViewColumn = 0.0;\n";
+    source += "    bool cachedViewInward = false;\n";
+    source += "    bool viewColumnValid = false;\n";
+    source += "    float viewStartRadius = sqrt(viewStartRadiusSq);\n";
+    source += "    float viewStartMu = viewStartProjection / viewStartRadius;\n";
+    source += "    vec3 invExtinction = 1.0 / max(extinctionCoeff, vec3(1.0e-18));\n";
+    source += "    for (int i = 0; i < atmosphereSegmentCount; ++i)\n";
+    source += "    {\n";
+    source += "        float viewEndProjection = viewStartProjection + stepLength;\n";
+    source += "        float viewEndRadiusSq = max(1.0e-12, viewStartRadiusSq + stepLength * (2.0 * viewStartProjection + stepLength));\n";
+    source += "        float viewEndRadius = sqrt(viewEndRadiusSq);\n";
+    source += "        float viewEndMu = viewEndProjection / viewEndRadius;\n";
+    source += "        bool viewInward = viewEndRadiusSq < viewStartRadiusSq;\n";
+    source += "        float viewStartColumn;\n";
+    source += "        if (viewColumnValid && viewInward == cachedViewInward)\n";
+    source += "            viewStartColumn = cachedViewColumn;\n";
+    source += "        else\n";
+    source += "            viewStartColumn = chapmanToSpace(viewStartRadius, viewInward ? -viewStartMu : viewStartMu);\n";
+    source += "        float viewEndColumn = chapmanToSpace(viewEndRadius, viewInward ? -viewEndMu : viewEndMu);\n";
+    source += "        float segmentDepth = max(0.0, viewInward ? viewEndColumn - viewStartColumn : viewStartColumn - viewEndColumn);\n";
+    source += "        cachedViewColumn = viewEndColumn;\n";
+    source += "        cachedViewInward = viewInward;\n";
+    source += "        viewColumnValid = true;\n";
+    source += "        vec3 atmSamplePointSun = segmentStart + atmStep * 0.5;\n";
+    source += "        rq = dot(atmSamplePointSun, " + LightProperty(0, "direction") + ");\n";
+    source += "        float sampleRadiusSq = dot(atmSamplePointSun, atmSamplePointSun);\n";
+    source += "        float horizonDistance = sqrt(max(0.0, sampleRadiusSq - planetRadiusSq));\n";
+    source += "        float sunVisibility = smoothstep(-shadowWidth, shadowWidth, rq + horizonDistance);\n";
+    source += "        if (sunVisibility > 0.0)\n";
+    source += "        {\n";
+    source += "            qq = sampleRadiusSq - atmosphereRadius.y;\n";
+    source += "            d = sqrt(max(rq * rq - qq, 0.0));\n";
+    source += "            float sampleRadius = sqrt(sampleRadiusSq);\n";
+    source += "            float sampleMu = rq / sampleRadius;\n";
+    source += "            float boundaryMu = d / atmosphereRadius.x;\n";
+    source += "            float odSun = max(0.0, chapmanToSpace(sampleRadius, sampleMu) - chapmanFromAtmosphereBoundary(boundaryMu, atmosphereBoundaryGrazing));\n";
+    source += "            vec3 segmentTau = extinctionCoeff * segmentDepth;\n";
+    source += "            vec3 segmentIntegral = (vec3(1.0) - exp(-segmentTau)) * invExtinction;\n";
+    source += "            vec3 thinIntegral = segmentDepth * (vec3(1.0) - segmentTau * 0.5 + segmentTau * segmentTau * (1.0 / 6.0));\n";
+    source += "            vec3 thinMask = vec3(1.0) - step(vec3(1.0e-3), segmentTau);\n";
+    source += "            segmentIntegral = mix(segmentIntegral, thinIntegral, thinMask);\n";
+    source += "            vec3 sampleTransmittance = exp(-extinctionCoeff * (odAtm + odSun));\n";
+    source += "            scatteredLight += sampleTransmittance * (segmentIntegral * sunVisibility);\n";
+    source += "        }\n";
+    source += "        odAtm += segmentDepth;\n";
+    source += "        segmentStart += atmStep;\n";
+    source += "        viewStartRadiusSq = viewEndRadiusSq;\n";
+    source += "        viewStartProjection = viewEndProjection;\n";
+    source += "        viewStartRadius = viewEndRadius;\n";
+    source += "        viewStartMu = viewEndMu;\n";
+    source += "    }\n";
+    source += "    vec3 ex = exp(-extinctionCoeff * odAtm);\n";
+    source += "    vec3 integratedLight = " + LightProperty(0, "color") + " * scatteredLight;\n";
 
     // If we're rendering the sky dome, compute the phase functions in the fragment shader
     // rather than the vertex shader in order to avoid artifacts from coarse tessellation.
     if (props.lightModel == LightingModel::AtmosphereModel)
     {
         source += "    scatterEx = ex;\n";
-        source += "    " + ScatteredColor(0) + " = sunColor * " + scatter + ";\n";
+        source += "    " + ScatteredColor(0) + " = integratedLight;\n";
     }
     else
     {
         source += "    float cosTheta = dot(eyeDir, " + LightProperty(0, "direction") + ");\n";
         source += ScatteringPhaseFunctions(props);
         source += "    scatterEx = ex;\n";
-        source += "    scatterColor = (phRayleigh * rayleighCoeff + phMie * mieCoeff) * invScatterCoeffSum * sunColor * " + scatter + ";\n";
+        source += "    scatterColor = (phRayleigh * rayleighCoeff + phMie * mieCoeff) * integratedLight;\n";
     }
 
     // Optional exposure control
@@ -796,70 +853,26 @@ AtmosphericEffects(const ShaderProperties& props)
 }
 
 
-#if 0
-// Integrate the atmosphere by summation--slow, but higher quality
 std::string
-AtmosphericEffects(const ShaderProperties& props, unsigned int nSamples)
+AtmosphericTransmission()
 {
-    std::string source;
-
-    source += "{\n";
-    // Compute the intersection of the view direction and the cloud layer (currently assumed to be a sphere)
-    source += "    float rq = dot(eyePosition, eyeDir);\n";
-    source += "    float qq = dot(eyePosition, eyePosition) - atmosphereRadius.y;\n";
-    source += "    float d = sqrt(max(rq * rq - qq, 0.0));\n";
-    source += "    vec3 atmEnter = eyePosition + min(0.0, (-rq + d)) * eyeDir;\n";
-    source += "    vec3 atmLeave = nposition;\n";
-
-    source += "    vec3 step = (atmLeave - atmEnter) * (1.0 / 10.0);\n";
-    source += "    float stepLength = length(step);\n";
-    source += "    vec3 atmSamplePoint = atmEnter + step * 0.5;\n";
-    source += "    vec3 scatter = vec3(0.0);\n";
-    source += "    vec3 ex = vec3(1.0);\n";
-    source += "    float tau = 0.0;\n";
-    source += "    for (int i = 0; i < 10; ++i) {\n";
-
-    // Compute the distance through the atmosphere from the sample point to the sun
-    source += "        rq = dot(atmSamplePoint, " + LightProperty(0, "direction") + ");\n";
-    source += "        qq = dot(atmSamplePoint, atmSamplePoint) - atmosphereRadius.y;\n";
-    source += "        d = sqrt(max(rq * rq - qq, 0.0));\n";
-    source += "        float distSun = -rq + d;\n";
-
-    // Compute the density of the atmosphere at the sample point; it falls off exponentially
-    // with the height above the planet's surface.
-    source += "        float h = max(0.0, length(atmSamplePoint) - atmosphereRadius.z);\n";
-    source += "        float d = exp(-h * mieH);\n";
-    source += "        tau += d * stepLength;\n";
-    source += "        vec3 sunColor = exp(-extinctionCoeff * d * distSun);\n";
-    source += "        ex = exp(-extinctionCoeff * tau);\n";
-    source += "        scatter += ex * sunColor * d * 0.1;\n";
-    source += "        atmSamplePoint += step;\n";
-    source += "    }\n";
-
-    // If we're rendering the sky dome, compute the phase functions in the fragment shader
-    // rather than the vertex shader in order to avoid artifacts from coarse tessellation.
-    if (props.lightModel == LightingModel::AtmosphereModel)
-    {
-        source += "    scatterEx = ex;\n";
-        source += "    " + ScatteredColor(i) + " = scatter;\n";
-    }
-    else
-    {
-        source += "    float cosTheta = dot(eyeDir, " + LightProperty(0, "direction") + ");\n";
-        source += ScatteringPhaseFunctions(props);
-
-        source += "    scatterEx = ex;\n";
-
-        source += "    scatterColor = (phRayleigh * rayleighCoeff + phMie * mieCoeff) * invScatterCoeffSum * scatter;\n";
-    }
-    // Optional exposure control
-    //source += "    1.0 - (scatterColor * exp(-5.0 * max(scatterIn.x, max(scatterIn.y, scatterIn.z))));\n";
-
-    source += "}\n";
-
-    return source;
+    return R"glsl({
+    float rq = dot(eyePosition, eyeDir);
+    float qq = dot(eyePosition, eyePosition) - atmosphereRadius.y;
+    float d = sqrt(max(rq * rq - qq, 0.0));
+    vec3 atmEnter = eyePosition + min(0.0, -rq + d) * eyeDir;
+    vec3 viewDirection = -eyeDir;
+    float enterRadius = max(length(atmEnter), 1.0e-6);
+    float leaveRadius = max(length(nposition), 1.0e-6);
+    float enterColumn = chapmanToSpace(enterRadius,
+                                       dot(atmEnter, viewDirection) / enterRadius);
+    float leaveColumn = chapmanToSpace(leaveRadius,
+                                       dot(nposition, viewDirection) / leaveRadius);
+    float opticalDepth = max(0.0, enterColumn - leaveColumn);
+    scatterEx = exp(-extinctionCoeff * opticalDepth);
 }
-#endif
+)glsl";
+}
 
 
 std::string
@@ -868,14 +881,15 @@ ScatteringConstantDeclarations(const ShaderProperties& /*props*/)
     std::string source;
 
     source += DeclareUniform("atmosphereRadius", Shader_Vector3);
+    source += DeclareUniform("atmosphereSegmentCount", Shader_Integer);
+    source += DeclareUniform("atmosphereExtinctionThreshold", Shader_Float);
     source += DeclareUniform("mieCoeff", Shader_Float);
     source += DeclareUniform("mieH", Shader_Float);
     source += DeclareUniform("mieK", Shader_Float);
     source += DeclareUniform("rayleighCoeff", Shader_Vector3);
     source += DeclareUniform("rayleighH", Shader_Float);
-    source += DeclareUniform("scatterCoeffSum", Shader_Vector3);
-    source += DeclareUniform("invScatterCoeffSum", Shader_Vector3);
     source += DeclareUniform("extinctionCoeff", Shader_Vector3);
+    source += ChapmanOpticalDepth();
 
     return source;
 }
@@ -1445,6 +1459,9 @@ buildFragmentShader(const ShaderProperties& props)
     if (util::is_set(props.lightModel, LightingModel::LunarLambertModel))
         source += DeclareUniform("lunarLambert", Shader_Float);
 
+    if (props.effects == LightingEffects::CloudLighting)
+        source += DeclareUniform("cloudHorizon", Shader_Float);
+
     if (props.lightModel != LightingModel::ParticleDiffuseModel)
         source += DeclareInput("normal", Shader_Vector3);
 
@@ -1651,6 +1668,8 @@ buildFragmentShader(const ShaderProperties& props)
             {
                 source += "l = max(0.0, dot(" + LightDir_tan(i) + ", n)) * clamp(" + LightDir_tan(i) + ".z * 8.0, 0.0, 1.0);\n";
             }
+            if (props.effects == LightingEffects::CloudLighting)
+                source += "l = max(l, " + IndexedParameter("cloudTwilight", i) + ");\n";
 
             if (util::is_set(props.texUsage, TexUsage::NightTexture))
                 source += "totalLight += l * " + LightProperty(i, "brightness") + ";\n";
@@ -1998,9 +2017,20 @@ buildAtmosphereVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
 GLFragmentShader
 buildAtmosphereFragmentShader(const ShaderProperties& props)
 {
+    bool transmissionOnly =
+        props.effects == LightingEffects::AtmosphereTransmission;
+    bool dualSource =
+        props.effects == LightingEffects::AtmosphereDualSource;
+
     std::string source(VersionHeader);
+#ifdef GL_ES
+    if (dualSource)
+        source += "#extension GL_EXT_blend_func_extended : require\n";
+#endif
     source += CommonHeader;
     source += FragmentHeader;
+    if (dualSource)
+        source += DeclareOutput("atmosphereTransmission", Shader_Vector4);
 
     source += DeclareLights(props);
     source += DeclareUniform("eyePosition", Shader_Vector3);
@@ -2009,8 +2039,11 @@ buildAtmosphereFragmentShader(const ShaderProperties& props)
     source += DeclareInput("position", Shader_Vector3);
     source += DeclareInput("normal", Shader_Vector3);
 
-    for (unsigned i = 0; i < props.nLights; i++)
-        source += DeclareLocal(ScatteredColor(i), Shader_Vector3);
+    if (!transmissionOnly)
+    {
+        for (unsigned i = 0; i < props.nLights; i++)
+            source += DeclareLocal(ScatteredColor(i), Shader_Vector3);
+    }
 
     source += "\nvoid main(void)\n{\n";
 
@@ -2019,26 +2052,29 @@ buildAtmosphereFragmentShader(const ShaderProperties& props)
     source += "vec3 eyeDir = normalize(eyePosition - nposition);\n";
     source += "float NV = dot(N, eyeDir);\n";
 
-    source += DeclareLocal("NL", Shader_Float);
     source += DeclareLocal("scatterEx", Shader_Vector3);
-    source += AtmosphericEffects(props);
-
-    // Sum the contributions from each light source
-    source += "vec3 color = vec3(0.0);\n";
-
-    // Only do scattering calculations for the primary light source
-    // TODO: Eventually handle multiple light sources, and removed the 'min'
-    // from the line below.
-    for (unsigned i = 0; i < std::min(static_cast<unsigned int>(props.nLights), 1u); i++)
+    if (transmissionOnly)
     {
-        source += "    float cosTheta = dot(eyeDir, " + LightProperty(i, "direction") + ");\n";
-        source += ScatteringPhaseFunctions(props);
-
-        // TODO: Consider premultiplying by invScatterCoeffSum
-        source += "    color += (phRayleigh * rayleighCoeff + phMie * mieCoeff) * invScatterCoeffSum * " + ScatteredColor(i) + ";\n";
+        source += AtmosphericTransmission();
+        source += "    fragColor = vec4(scatterEx, 1.0);\n";
     }
+    else
+    {
+        source += DeclareLocal("NL", Shader_Float);
+        source += AtmosphericEffects(props);
 
-    source += "    fragColor = vec4(color, dot(scatterEx, vec3(0.333)));\n";
+        // Sum the contributions from each light source, currently only the primary one.
+        source += "vec3 color = vec3(0.0);\n";
+        for (unsigned i = 0; i < std::min(static_cast<unsigned int>(props.nLights), 1u); i++)
+        {
+            source += "    float cosTheta = dot(eyeDir, " + LightProperty(i, "direction") + ");\n";
+            source += ScatteringPhaseFunctions(props);
+            source += "    color += (phRayleigh * rayleighCoeff + phMie * mieCoeff) * " + ScatteredColor(i) + ";\n";
+        }
+        source += "    fragColor = vec4(color, 0.0);\n";
+        if (dualSource)
+            source += "    atmosphereTransmission = vec4(scatterEx, 1.0);\n";
+    }
     source += "}\n";
 
     DumpFSSource(source);
@@ -2346,6 +2382,11 @@ buildProgram(const ShaderProperties& props, bool fisheyeEnabled)
         {
             builder.attach(std::move(vs));
             builder.attach(std::move(fs));
+            if (props.effects == LightingEffects::AtmosphereDualSource)
+            {
+                builder.bindFragmentOutput(0, 0, "fragColor");
+                builder.bindFragmentOutput(0, 1, "atmosphereTransmission");
+            }
             program = builder.link(status);
         }
     }
@@ -2361,10 +2402,13 @@ buildProgram(const ShaderProperties& props, bool fisheyeEnabled)
 }
 
 std::shared_ptr<CelestiaGLProgram>
-buildProgram(std::string_view vs, std::string_view fs, bool fisheyeEnabled)
+buildProgram(std::string_view vs, std::string_view fs, bool fisheyeEnabled,
+             StaticShaderOptions options = StaticShaderOptions::None)
 {
+    std::string_view toneMapDefine =
+        util::is_set(options, StaticShaderOptions::ToneMap) ? "#define TONE_MAP\n"sv : ""sv;
     std::string vsSrc = fmt::format("{}{}{}{}{}\n", VersionHeader, CommonHeader, VertexHeader, VPFunction(fisheyeEnabled), vs);
-    std::string fsSrc = fmt::format("{}{}{}{}\n", VersionHeader, CommonHeader, FragmentHeader, fs);
+    std::string fsSrc = fmt::format("{}{}{}{}{}\n", VersionHeader, CommonHeader, FragmentHeader, toneMapDefine, fs);
 
     DumpVSSource(vsSrc);
     DumpFSSource(fsSrc);
@@ -2630,6 +2674,20 @@ std::hash<ShaderProperties>::operator()(const ShaderProperties& props) const
     return seed;
 }
 
+bool operator==(const StaticShaderProperties& lhs, const StaticShaderProperties& rhs)
+{
+    return lhs.shader == rhs.shader && lhs.options == rhs.options;
+}
+
+std::size_t
+std::hash<StaticShaderProperties>::operator()(const StaticShaderProperties& props) const
+{
+    std::size_t seed = 0;
+    boost::hash_combine(seed, props.shader);
+    boost::hash_combine(seed, props.options);
+    return seed;
+}
+
 ShaderManager::ShaderManager()
 {
 #if defined(_DEBUG) || defined(DEBUG) || 1
@@ -2662,17 +2720,24 @@ ShaderManager::getShader(const ShaderProperties& props)
 CelestiaGLProgram*
 ShaderManager::getShader(StaticShader staticShader, const GeomShaderParams* gsParams)
 {
-    auto& shader = m_staticShaders[static_cast<std::size_t>(staticShader)];
-    if (!shader)
-        shader = loadShader(staticShader, gsParams);
+    return getShader(staticShader, StaticShaderOptions::None, gsParams);
+}
 
-    return shader.get();
+CelestiaGLProgram*
+ShaderManager::getShader(StaticShader staticShader, StaticShaderOptions options, const GeomShaderParams* gsParams)
+{
+    StaticShaderProperties props{ staticShader, options };
+    auto [it, inserted] = m_staticShaders.try_emplace(props);
+    if (inserted)
+        it->second = loadShader(props, gsParams);
+
+    return it->second.get();
 }
 
 std::shared_ptr<CelestiaGLProgram>
-ShaderManager::loadShader(StaticShader staticShader, const GeomShaderParams* gsParams)
+ShaderManager::loadShader(StaticShaderProperties props, const GeomShaderParams* gsParams)
 {
-    auto name = StaticShaderBaseNames[static_cast<std::size_t>(staticShader)];
+    auto name = StaticShaderBaseNames[static_cast<std::size_t>(props.shader)];
     auto vs = ReadShaderFile(ShaderDirectory / std::filesystem::u8path(fmt::format("{}_vert.glsl", name)));
     if (vs.empty())
         return getErrorProgram();
@@ -2692,7 +2757,7 @@ ShaderManager::loadShader(StaticShader staticShader, const GeomShaderParams* gsP
     }
     else
     {
-        result = buildProgram(vs, fs, m_fisheyeEnabled);
+        result = buildProgram(vs, fs, m_fisheyeEnabled, props.options);
     }
 
     return result ? result : getErrorProgram();
@@ -2869,6 +2934,9 @@ CelestiaGLProgram::initParameters()
         shadowTextureOffset = floatParam("cloudShadowTexOffset");
     }
 
+    if (props.effects == LightingEffects::CloudLighting)
+        cloudHorizon = floatParam("cloudHorizon");
+
     if (util::is_set(props.texUsage, TexUsage::ShadowMapTexture))
     {
         ShadowMatrix0       = mat4Param("ShadowMatrix0");
@@ -2882,8 +2950,8 @@ CelestiaGLProgram::initParameters()
         rayleighCoeff        = vec3Param("rayleighCoeff");
         rayleighScaleHeight  = floatParam("rayleighH");
         atmosphereRadius     = vec3Param("atmosphereRadius");
-        scatterCoeffSum      = vec3Param("scatterCoeffSum");
-        invScatterCoeffSum   = vec3Param("invScatterCoeffSum");
+        atmosphereSegmentCount = intParam("atmosphereSegmentCount");
+        atmosphereExtinctionThreshold = floatParam("atmosphereExtinctionThreshold");
         extinctionCoeff      = vec3Param("extinctionCoeff");
     }
 
@@ -3078,23 +3146,23 @@ CelestiaGLProgram::setEclipseShadowParameters(const LightingState& ls,
 // They are from standard units to the normalized system used by the shaders.
 // atmPlanetRadius - the radius in km of the planet with the atmosphere
 // objRadius - the radius in km of the object we're rendering
+// skySphereRadius - the finite outer radius of the atmosphere in km
 void
 CelestiaGLProgram::setAtmosphereParameters(const Atmosphere& atmosphere,
                                            float atmPlanetRadius,
-                                           float objRadius)
+                                           float objRadius,
+                                           float skySphereRadius,
+                                           unsigned int segmentCount,
+                                           float extinctionThreshold)
 {
-    // Compute the radius of the sky sphere to render; the density of the atmosphere
-    // falls off exponentially with height above the planet's surface, so the actual
-    // radius is infinite. That's a bit impractical, so well just render the portion
-    // out to the point where the density is some fraction of the surface density.
-    float skySphereRadius = atmPlanetRadius + -atmosphere.mieScaleHeight * LogAtmosphereExtinctionThreshold;
-
     float tMieCoeff                  = atmosphere.mieCoeff * objRadius;
     Eigen::Vector3f tRayleighCoeff   = atmosphere.rayleighCoeff * objRadius;
     Eigen::Vector3f tAbsorptionCoeff = atmosphere.absorptionCoeff * objRadius;
 
     float r = skySphereRadius / objRadius;
     atmosphereRadius = Eigen::Vector3f(r, r * r, atmPlanetRadius / objRadius);
+    atmosphereSegmentCount = static_cast<int>(segmentCount);
+    atmosphereExtinctionThreshold = extinctionThreshold;
 
     mieCoeff = tMieCoeff;
     mieScaleHeight = objRadius / atmosphere.mieScaleHeight;
@@ -3109,11 +3177,7 @@ CelestiaGLProgram::setAtmosphereParameters(const Atmosphere& atmosphere,
     rayleighCoeff = tRayleighCoeff;
     rayleighScaleHeight = 0.0f; // TODO
 
-    // Precompute sum and inverse sum of scattering coefficients to save work
-    // in the vertex shader.
     Eigen::Vector3f tScatterCoeffSum = tRayleighCoeff.array() + tMieCoeff;
-    scatterCoeffSum = tScatterCoeffSum;
-    invScatterCoeffSum = tScatterCoeffSum.cwiseInverse();
     extinctionCoeff = tScatterCoeffSum + tAbsorptionCoeff;
 }
 

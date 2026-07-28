@@ -124,6 +124,9 @@ class Renderer
     struct DetailOptions
     {
         unsigned int orbitPathSamplePoints{ 100 };
+        unsigned int atmosphereSegmentCount{ 6 };
+        unsigned int cloudSegmentCount{ 2 };
+        float atmosphereExtinctionThreshold{ 0.000125f };
         unsigned int shadowTextureSize{ 256 };
         unsigned int eclipseTextureSize{ 128 };
         double orbitWindowEnd{ 0.5 };
@@ -216,6 +219,10 @@ class Renderer
     void setStarColorTable(ColorTableType);
     void setSolarSystemMaxDistance(float);
     void setShadowMapSize(unsigned);
+    unsigned int getAtmosphereSegmentCount() const noexcept;
+    unsigned int getCloudSegmentCount() const noexcept;
+    float getAtmosphereExtinctionThreshold() const noexcept;
+    float getAtmosphereShellHeight(float scaleHeight) const noexcept;
 
     bool captureFrame(int, int, int, int, celestia::engine::PixelFormat format, unsigned char*) const;
 
@@ -299,6 +306,10 @@ class Renderer
     float getStarDimClipFactor() const;
     void  setStarExposure(float e);
     float getStarExposure() const;
+    void  setToneMappingExposure(float e);
+    float getToneMappingExposure() const;
+    void  setToneMappingMode(ToneMappingMode mode);
+    ToneMappingMode getToneMappingMode() const;
     void setResolution(celestia::engine::TextureResolution resolution);
     celestia::engine::TextureResolution getResolution() const;
     void enableSelectionPointer();
@@ -486,7 +497,7 @@ class Renderer
     void removeInvisibleItems(const celestia::math::InfiniteFrustum &frustum);
 
     void renderObject(const Eigen::Vector3f& pos,
-                      float distance,
+                      double distance,
                       const Observer& observer,
                       float nearPlaneDistance,
                       float farPlaneDistance,
@@ -496,7 +507,7 @@ class Renderer
 
     void renderPlanet(Body& body,
                       const Eigen::Vector3f& pos,
-                      float distance,
+                      double distance,
                       float appMag,
                       const Observer& observer,
                       float, float,
@@ -687,6 +698,8 @@ class Renderer
     float starMaxIrradiance{ 100.0f };
     float starDimClipFactor{ 10.0f };
     float starExposure{ 10.0f };
+    float toneMappingExposure{ 1.0f };
+    ToneMappingMode toneMappingMode{ ToneMappingMode::None };
 
     Color ambientColor;
     std::string displayedSurface;
@@ -719,6 +732,10 @@ class Renderer
     const Eigen::Matrix4f *m_projectionPtr { &m_projMatrix };
 
     DetailOptions detailOptions;
+    unsigned int atmosphereSegmentCount{ 6 };
+    unsigned int cloudSegmentCount{ 2 };
+    float atmosphereExtinctionThreshold{ 0.000125f };
+    float atmosphereExtinctionFactor{ 0.0f };
 
     std::uint32_t frameCount{ 0 };
 
