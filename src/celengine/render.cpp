@@ -1387,13 +1387,34 @@ void Renderer::renderItem(const RenderListEntry& rle,
         break;
 
     case RenderListEntry::RenderableRingSystem:
+    {
+        const bool splitAroundBruneton =
+            m_brunetonPostprocessEnabled &&
+            std::any_of(
+                m_brunetonAtmospheres.begin(),
+                m_brunetonAtmospheres.end(),
+                [&rle](const BrunetonAtmosphereEntry& entry)
+                {
+                    return entry.body == rle.body;
+                });
+        if (splitAroundBruneton)
+        {
+            m_deferredRingSystems.push_back({
+                static_cast<std::size_t>(currentIntervalIndex),
+                rle,
+            });
+        }
         renderRingSystem(*rle.body,
                          rle.position,
                          static_cast<float>(rle.distance),
                          observer,
                          nearPlaneDistance,
-                         m);
+                         m,
+                         splitAroundBruneton
+                             ? celestia::render::RingRenderHalf::Far
+                             : celestia::render::RingRenderHalf::Both);
         break;
+    }
 
     case RenderListEntry::RenderableCometTail:
         renderCometTail(*rle.body,
@@ -1476,6 +1497,7 @@ Renderer::prepareRender(const Observer& observer,
     backgroundAnnotations.clear();
     objectAnnotations.clear();
     m_deferredObjectAnnotationBatches.clear();
+    m_deferredRingSystems.clear();
 
     // Put all solar system bodies into the render list.  Stars close and
     // large enough to have discernible surface detail are also placed in
@@ -1698,6 +1720,7 @@ void Renderer::renderDeferredOverlays()
     DeferredOverlays overlays = std::move(*m_deferredOverlays);
     m_deferredOverlays.reset();
 
+    renderDeferredRingSystems(*overlays.observer);
     renderDeferredDepthAnnotations();
     renderForegroundAnnotations(FontStyle::Normal);
     if (overlays.renderSelectionPointer)
@@ -1713,7 +1736,46 @@ void Renderer::renderDeferredOverlays()
 bool Renderer::hasDeferredDepthAnnotations() const
 {
     return !depthSortedAnnotations.empty() ||
-           !m_deferredObjectAnnotationBatches.empty();
+           !m_deferredObjectAnnotationBatches.empty() ||
+           !m_deferredRingSystems.empty();
+}
+
+void Renderer::renderDeferredRingSystems(const Observer& observer)
+{
+    const float intervalSize =
+        1.0f / static_cast<float>(std::max<std::size_t>(1, depthPartitions.size()));
+    for (const DeferredRingSystem& deferred : m_deferredRingSystems)
+    {
+        const DepthBufferPartition& partition = depthPartitions[deferred.interval];
+        const float nearPlaneDistance = -partition.nearZ;
+        const float farPlaneDistance = -partition.farZ;
+        glDepthRange(
+            1.0f - static_cast<float>(deferred.interval + 1) * intervalSize,
+            1.0f - static_cast<float>(deferred.interval) * intervalSize);
+
+        Matrix4f projection;
+        buildProjectionMatrix(
+            projection,
+            nearPlaneDistance,
+            farPlaneDistance,
+            observer.getZoom());
+        Matrices matrices = { &projection, &m_modelMatrix };
+        setCurrentProjectionMatrix(projection);
+
+        const RenderListEntry& entry = deferred.entry;
+        renderRingSystem(
+            *entry.body,
+            entry.position,
+            static_cast<float>(entry.distance),
+            observer,
+            nearPlaneDistance,
+            matrices,
+            celestia::render::RingRenderHalf::Near);
+    }
+
+    m_deferredRingSystems.clear();
+    glDepthRange(0, 1);
+    setDefaultProjectionMatrix();
 }
 
 void Renderer::renderDeferredDepthAnnotations()
@@ -3050,6 +3112,74 @@ Renderer::setupEclipseShadows(const Body& receiver,
     }
 }
 
+void
+Renderer::setupRingShadows(RingSystem* rings,
+                           const Quaternionf& ringOrientation,
+                           const Quaternionf& bodyOrientation,
+                           float minimumViewDistance,
+                           LightingState& lightingState)
+{
+    if (rings == nullptr ||
+        !util::is_set(renderFlags, RenderFlags::ShowPlanetRings) ||
+        !util::is_set(renderFlags, RenderFlags::ShowRingShadows))
+    {
+        return;
+    }
+
+    for (unsigned int li = 0; li < lightingState.nLights; ++li)
+    {
+        RingShadow& shadow = lightingState.ringShadows[li];
+        shadow.ringSystem = rings;
+        shadow.casterOrientation = ringOrientation;
+        shadow.origin = Vector3f::Zero();
+        shadow.direction =
+            -lightingState.lights[li].position.normalized().cast<float>();
+        shadow.texLod = 0.0f;
+    }
+
+    lightingState.shadowingRingSystem = rings;
+    lightingState.ringPlaneNormal =
+        (bodyOrientation * ringOrientation.conjugate()) *
+        Vector3f::UnitY();
+    lightingState.ringCenter = Vector3f::Zero();
+
+    const Texture* ringsTexture = m_textureManager->find(rings->texture);
+    if (ringsTexture == nullptr)
+        return;
+
+    const float ringWidth = rings->outerRadius - rings->innerRadius;
+    const float textureWidth =
+        static_cast<float>(ringsTexture->getWidth());
+    float maxLod = std::log2(textureWidth);
+    if (maxLod > 1.0f)
+        maxLod -= 1.0f;
+    for (unsigned int li = 0; li < lightingState.nLights; ++li)
+    {
+        const float projectedRingSize =
+            std::abs(
+                lightingState.lights[li].direction_obj.dot(
+                    lightingState.ringPlaneNormal)) *
+            ringWidth;
+        const float projectedPixels =
+            projectedRingSize /
+            std::max(minimumViewDistance * pixelSize, 1.0e-6f);
+        const float ringFeatureSize =
+            projectedRingSize /
+            std::max(textureWidth * rings->innerRadius, 1.0e-6f);
+        const float areaLightLod =
+            std::log2(std::max(
+                lightingState.lights[li].apparentSize /
+                    std::max(ringFeatureSize, 1.0e-6f),
+                1.0f));
+        const float gpuLod =
+            std::log2(std::max(
+                textureWidth / std::max(projectedPixels, 1.0f),
+                1.0f));
+        lightingState.ringShadows[li].texLod =
+            std::min(std::max(areaLightLod, gpuLod), maxLod);
+    }
+}
+
 
 void Renderer::renderPlanet(Body& body,
                             const Vector3f& pos,
@@ -3123,94 +3253,13 @@ void Renderer::renderPlanet(Body& body,
 
         lights.ambientColor = ambientColor.toVector3();
 
-        // Add ring shadow records for each light
-        if (rp.rings != nullptr &&
-            util::is_set(renderFlags, RenderFlags::ShowPlanetRings) &&
-            util::is_set(renderFlags, RenderFlags::ShowRingShadows))
-        {
-            for (unsigned int li = 0; li < lights.nLights; li++)
-            {
-                lights.ringShadows[li].ringSystem = rp.rings;
-                lights.ringShadows[li].casterOrientation = q.cast<float>();
-                lights.ringShadows[li].origin = Vector3f::Zero();
-                lights.ringShadows[li].direction = -lights.lights[li].position.normalized().cast<float>();
-            }
-        }
-
+        setupRingShadows(
+            rp.rings,
+            q.cast<float>(),
+            rp.orientation,
+            std::max(nearPlaneDistance, altitude),
+            lights);
         setupEclipseShadows(body, lights, now);
-
-        // Sort out the ring shadows; only one ring shadow source is supported right now. This means
-        // that exotic cases with shadows from two ring different ring systems aren't handled.
-        for (unsigned int li = 0; li < lights.nLights; li++)
-        {
-            RingSystem* rings = lights.ringShadows[li].ringSystem;
-            if (!rings)
-                continue;
-
-            // Use the first set of ring shadows found (shadowing the brightest light
-            // source.)
-            if (lights.shadowingRingSystem == nullptr)
-            {
-                lights.shadowingRingSystem = rings;
-                lights.ringPlaneNormal = (rp.orientation * lights.ringShadows[li].casterOrientation.conjugate()) * Vector3f::UnitY();
-                lights.ringCenter = rp.orientation * lights.ringShadows[li].origin;
-            }
-
-            // Light sources have a finite size, which causes some blurring of the texture. Simulate
-            // this effect by using a lower LOD (i.e. a smaller mipmap level, indicated somewhat
-            // confusingly by a _higher_ LOD value.
-            float ringWidth = rings->outerRadius - rings->innerRadius;
-            float projectedRingSize = std::abs(lights.lights[li].direction_obj.dot(lights.ringPlaneNormal)) * ringWidth;
-            float projectedRingSizeInPixels = projectedRingSize / (max(nearPlaneDistance, altitude) * pixelSize);
-            const Texture* ringsTex = m_textureManager->find(rings->texture);
-            if (!ringsTex)
-            {
-                lights.ringShadows[li].texLod = 0.0f;
-                continue;
-            }
-
-            // Calculate the approximate distance from the shadowed object to the rings
-            Hyperplane<float, 3> ringPlane(lights.ringPlaneNormal, lights.ringCenter);
-            float cosLightAngle = lights.lights[li].direction_obj.dot(ringPlane.normal());
-            float approxRingDistance = rings->innerRadius;
-            if (abs(cosLightAngle) < 0.99999f)
-                approxRingDistance = abs(ringPlane.offset() / cosLightAngle);
-            if (lights.ringCenter.norm() < rings->innerRadius)
-                approxRingDistance = max(approxRingDistance, rings->innerRadius - lights.ringCenter.norm());
-
-            // Calculate the LOD based on the size of the smallest
-            // ring feature relative to the apparent size of the light source.
-            float ringTextureWidth = ringsTex->getWidth();
-            float ringFeatureSize = (projectedRingSize / ringTextureWidth) / approxRingDistance;
-            float relativeFeatureSize = lights.lights[li].apparentSize / ringFeatureSize;
-            //float areaLightLod = log(max(relativeFeatureSize, 1.0f)) / log(2.0f);
-            float areaLightLod = log2(max(relativeFeatureSize, 1.0f));
-
-            // Compute the LOD that would be automatically used by the GPU.
-            float texelToPixelRatio = ringTextureWidth / projectedRingSizeInPixels;
-            float gpuLod = log2(texelToPixelRatio);
-
-            //float lod = max(areaLightLod, log(texelToPixelRatio) / log(2.0f));
-            float lod = max(areaLightLod, gpuLod);
-
-            // maxLOD is the index of the smallest mipmap (or close to it for non-power-of-two
-            // textures.) We can't make the lod larger than this.
-            float maxLod = log2((float) ringsTex->getWidth());
-            if (maxLod > 1.0f)
-            {
-                // Avoid using the 1x1 mipmap, as it appears to cause 'bleeding' when
-                // the light source is very close to the ring plane. This is probably
-                // a numerical precision issue from calculating the intersection of
-                // between a ray and plane that are nearly parallel.
-                maxLod -= 1.0f;
-            }
-            lod = min(lod, maxLod);
-
-            // textureLod() is core in GLSL 1.30+ / GLSL ES 3.00, which is now
-            // the floor; the explicit LOD is always honored, so no bias-fallback
-            // adjustment is needed here.
-            lights.ringShadows[li].texLod = lod;
-        }
 
         auto atmosphereEntry = std::find_if(
             m_brunetonAtmospheres.begin(),
@@ -3366,6 +3415,14 @@ bool Renderer::renderBrunetonAtmospheres(const FramebufferObject& source,
             lights);
         assert(lights.nLights <= MaxLights);
         lights.ambientColor = ambientColor.toVector3();
+        setupRingShadows(
+            bodyFeaturesManager->getRings(&body),
+            q.cast<float>(),
+            orientation,
+            std::max(
+                1.0f,
+                static_cast<float>(entry.distance) - radius),
+            lights);
         setupEclipseShadows(body, lights, m_renderTime);
 
         Texture* cloudTexture = nullptr;
@@ -3437,7 +3494,8 @@ void Renderer::renderRingSystem(Body& body,
                                 float distance,
                                 const Observer& observer,
                                 float nearPlaneDistance,
-                                const Matrices &m)
+                                const Matrices &m,
+                                celestia::render::RingRenderHalf renderHalf)
 {
     const BodyFeaturesManager* bodyFeaturesManager = GetBodyFeaturesManager();
 
@@ -3530,7 +3588,8 @@ void Renderer::renderRingSystem(Body& body,
                                 renderShadow,
                                 segmentSizeInPixels,
                                 ringsMVP,
-                                false);
+                                false,
+                                renderHalf);
 }
 
 

@@ -1887,6 +1887,7 @@ buildRingsFragmentShader(const ShaderProperties& props)
     source += FragmentHeader;
 
     source += DeclareUniform("ambientColor", Shader_Vector3);
+    source += DeclareUniform("ringHalf", Shader_Float);
 
     source += DeclareLights(props);
 
@@ -1917,6 +1918,9 @@ buildRingsFragmentShader(const ShaderProperties& props)
 
     source += "\nvoid main(void)\n{\n";
 
+    source += "float ringSide = dot(position, eyePosition);\n";
+    source += "if ((ringHalf > 0.0 && ringSide <= 0.0) || "
+              "(ringHalf < 0.0 && ringSide > 0.0)) discard;\n";
     source += "vec4 diff = vec4(ambientColor, 1.0);\n";
 
     // Get the normalized direction from the eye to the vertex
@@ -2952,6 +2956,7 @@ CelestiaGLProgram::initParameters()
     {
         ringWidth            = floatParam("ringWidth");
         ringRadius           = floatParam("ringRadius");
+        ringHalf             = floatParam("ringHalf");
     }
 
     textureOffset = floatParam("texCoordOffset");

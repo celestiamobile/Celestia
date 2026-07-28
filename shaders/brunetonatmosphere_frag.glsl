@@ -41,6 +41,8 @@ const int SCATTERING_TEXTURE_NU_SIZE = 8;
 const int IRRADIANCE_TEXTURE_WIDTH = 64;
 const int IRRADIANCE_TEXTURE_HEIGHT = 16;
 const int MAX_ECLIPSE_SHADOWS = 3;
+const int MAX_DIRECT_SHADOW_INTERVALS =
+    MAX_ECLIPSE_SHADOWS + 1;
 
 struct DensityProfileLayer
 {
@@ -81,6 +83,7 @@ uniform sampler2D surface_id_texture;
 uniform sampler2D depth_partition_texture;
 uniform sampler2D cloud_texture;
 uniform sampler2D cloud_normal_texture;
+uniform sampler2D ring_shadow_texture;
 uniform int combined_scattering_textures;
 uniform int precomputed_luminance;
 uniform int manual_float_filtering;
@@ -107,6 +110,14 @@ uniform vec4 eclipse_shadow_tex_gen_s[MAX_ECLIPSE_SHADOWS];
 uniform vec4 eclipse_shadow_tex_gen_t[MAX_ECLIPSE_SHADOWS];
 uniform float eclipse_shadow_falloff[MAX_ECLIPSE_SHADOWS];
 uniform float eclipse_shadow_max_depth[MAX_ECLIPSE_SHADOWS];
+uniform int render_ring_shadows;
+uniform vec3 ring_shadow_plane_normal;
+uniform vec3 ring_shadow_sun_direction;
+uniform vec3 ring_shadow_position_scale;
+uniform float ring_shadow_inner_radius;
+uniform float ring_shadow_outer_radius;
+uniform float ring_shadow_inverse_width;
+uniform float ring_shadow_lod;
 
 in vec3 view_ray;
 in vec3 view_ray_view;
@@ -831,8 +842,8 @@ bool IsVisibleSurfaceNearby()
     return false;
 }
 
-Number GetEclipseShadowVisibility(Position position);
-vec3 GetEclipseDirectLuminanceLoss(
+Number GetDirectShadowVisibility(Position position);
+vec3 GetDirectLuminanceLoss(
     Position origin,
     Direction ray,
     Length distance);
@@ -931,6 +942,16 @@ bool GetCloudIntersection(
     {
         return false;
     }
+    if (outer_intersections.x < 0.0)
+    {
+        vec2 ground_intersections = RaySphereIntersections(
+            origin, ray, atmosphere.bottom_radius);
+        if (ground_intersections.x >= 0.0 &&
+            ground_intersections.x < outer_intersections.y)
+        {
+            return false;
+        }
+    }
 
     cloud_distance = outer_intersections.x < 0.0
         ? outer_intersections.y
@@ -970,7 +991,7 @@ vec4 GetCloudColor(
             0.0,
             sun_direction,
             cloud_transmittance) -
-        GetEclipseDirectLuminanceLoss(
+        GetDirectLuminanceLoss(
             origin,
             ray,
             cloud_distance);
@@ -986,7 +1007,7 @@ vec4 GetCloudColor(
         cloud_normal,
         sun_direction,
         sky_irradiance);
-    sun_irradiance *= GetEclipseShadowVisibility(cloud_point);
+    sun_irradiance *= GetDirectShadowVisibility(cloud_point);
 
     vec3 cloud_radiance =
         front_scattering +
@@ -1100,6 +1121,48 @@ Number GetEclipseShadowVisibility(Position position)
     return visibility;
 }
 
+Number GetRingShadowVisibility(Position position)
+{
+    if (render_ring_shadows == 0)
+        return 1.0;
+
+    Number light_plane_dot = dot(
+        ring_shadow_sun_direction,
+        ring_shadow_plane_normal);
+    if (abs(light_plane_dot) <= 1.0e-6)
+        return 1.0;
+
+    Position object_position =
+        position * ring_shadow_position_scale;
+    Length projection_distance =
+        -dot(object_position, ring_shadow_plane_normal) /
+        light_plane_dot;
+    if (projection_distance < 0.0)
+        return 1.0;
+
+    Position ring_position =
+        object_position +
+        ring_shadow_sun_direction * projection_distance;
+    Number texture_u =
+        (length(ring_position) - ring_shadow_inner_radius) *
+        ring_shadow_inverse_width;
+    if (texture_u < 0.0 || texture_u > 1.0)
+        return 1.0;
+
+    return 1.0 -
+        textureLod(
+            ring_shadow_texture,
+            vec2(texture_u, 0.0),
+            ring_shadow_lod).a;
+}
+
+Number GetDirectShadowVisibility(Position position)
+{
+    return
+        GetEclipseShadowVisibility(position) *
+        GetRingShadowVisibility(position);
+}
+
 bool GetEclipseShadowInterval(
     int shadow_index,
     Position origin,
@@ -1156,12 +1219,98 @@ bool GetEclipseShadowInterval(
     return interval_end > interval_start;
 }
 
-vec3 GetEclipseDirectLuminanceLoss(
+bool GetRingShadowInterval(
+    Position origin,
+    Direction ray,
+    Length minimum_distance,
+    Length maximum_distance,
+    out Length interval_start,
+    out Length interval_end)
+{
+    if (render_ring_shadows == 0)
+        return false;
+
+    Number light_plane_dot = dot(
+        ring_shadow_sun_direction,
+        ring_shadow_plane_normal);
+    if (abs(light_plane_dot) <= 1.0e-6)
+        return false;
+
+    Length segment_length =
+        maximum_distance - minimum_distance;
+    Position segment_origin =
+        origin + ray * minimum_distance;
+    Position object_origin =
+        segment_origin * ring_shadow_position_scale;
+    Direction object_ray =
+        ray * ring_shadow_position_scale;
+    Position projected_origin =
+        object_origin -
+        ring_shadow_sun_direction *
+            (dot(object_origin, ring_shadow_plane_normal) /
+             light_plane_dot);
+    Direction projected_ray =
+        object_ray -
+        ring_shadow_sun_direction *
+            (dot(object_ray, ring_shadow_plane_normal) /
+             light_plane_dot);
+
+    Number a = dot(projected_ray, projected_ray);
+    Number c =
+        dot(projected_origin, projected_origin) -
+        ring_shadow_outer_radius *
+            ring_shadow_outer_radius;
+    Number local_start = 0.0;
+    Number local_end = segment_length;
+    if (a <= 1.0e-12)
+    {
+        if (c > 0.0)
+            return false;
+    }
+    else
+    {
+        Number b = dot(projected_origin, projected_ray);
+        Number discriminant = b * b - a * c;
+        if (discriminant <= 0.0)
+            return false;
+
+        Number root = sqrt(discriminant);
+        local_start = max(local_start, (-b - root) / a);
+        local_end = min(local_end, (-b + root) / a);
+    }
+
+    Number side =
+        dot(object_origin, ring_shadow_plane_normal) *
+        light_plane_dot;
+    Number side_rate =
+        dot(object_ray, ring_shadow_plane_normal) *
+        light_plane_dot;
+    if (abs(side_rate) <= 1.0e-12)
+    {
+        if (side > 0.0)
+            return false;
+    }
+    else
+    {
+        Number plane_crossing = -side / side_rate;
+        if (side_rate > 0.0)
+            local_end = min(local_end, plane_crossing);
+        else
+            local_start = max(local_start, plane_crossing);
+    }
+
+    interval_start = minimum_distance + local_start;
+    interval_end = minimum_distance + local_end;
+    return interval_end > interval_start;
+}
+
+vec3 GetDirectLuminanceLoss(
     Position origin,
     Direction ray,
     Length distance)
 {
-    if (eclipse_shadow_count == 0)
+    if (eclipse_shadow_count == 0 &&
+        render_ring_shadows == 0)
         return vec3(0.0);
 
     vec2 atmosphere_intersections = RaySphereIntersections(
@@ -1171,8 +1320,8 @@ vec3 GetEclipseDirectLuminanceLoss(
     if (end_distance <= start_distance)
         return vec3(0.0);
 
-    Length interval_starts[MAX_ECLIPSE_SHADOWS];
-    Length interval_ends[MAX_ECLIPSE_SHADOWS];
+    Length interval_starts[MAX_DIRECT_SHADOW_INTERVALS];
+    Length interval_ends[MAX_DIRECT_SHADOW_INTERVALS];
     int interval_count = 0;
     for (int shadow_index = 0;
          shadow_index < MAX_ECLIPSE_SHADOWS;
@@ -1194,7 +1343,7 @@ vec3 GetEclipseDirectLuminanceLoss(
         {
             int insertion_index = interval_count;
             for (int interval_index = 0;
-                 interval_index < MAX_ECLIPSE_SHADOWS;
+                 interval_index < MAX_DIRECT_SHADOW_INTERVALS;
                  ++interval_index)
             {
                 if (interval_index >= interval_count)
@@ -1208,7 +1357,7 @@ vec3 GetEclipseDirectLuminanceLoss(
                 }
             }
             for (int interval_index =
-                     MAX_ECLIPSE_SHADOWS - 1;
+                     MAX_DIRECT_SHADOW_INTERVALS - 1;
                  interval_index > 0;
                  --interval_index)
             {
@@ -1226,14 +1375,60 @@ vec3 GetEclipseDirectLuminanceLoss(
             ++interval_count;
         }
     }
+
+    Length ring_interval_start;
+    Length ring_interval_end;
+    if (GetRingShadowInterval(
+            origin,
+            ray,
+            start_distance,
+            end_distance,
+            ring_interval_start,
+            ring_interval_end))
+    {
+        int insertion_index = interval_count;
+        for (int interval_index = 0;
+             interval_index < MAX_DIRECT_SHADOW_INTERVALS;
+             ++interval_index)
+        {
+            if (interval_index >= interval_count)
+                break;
+
+            if (ring_interval_start <
+                interval_starts[interval_index])
+            {
+                insertion_index = interval_index;
+                break;
+            }
+        }
+        for (int interval_index =
+                 MAX_DIRECT_SHADOW_INTERVALS - 1;
+             interval_index > 0;
+             --interval_index)
+        {
+            if (interval_index > insertion_index &&
+                interval_index <= interval_count)
+            {
+                interval_starts[interval_index] =
+                    interval_starts[interval_index - 1];
+                interval_ends[interval_index] =
+                    interval_ends[interval_index - 1];
+            }
+        }
+        interval_starts[insertion_index] =
+            ring_interval_start;
+        interval_ends[insertion_index] =
+            ring_interval_end;
+        ++interval_count;
+    }
     if (interval_count == 0)
         return vec3(0.0);
 
-    Length merged_starts[MAX_ECLIPSE_SHADOWS];
-    Length merged_ends[MAX_ECLIPSE_SHADOWS];
+    Length merged_starts[MAX_DIRECT_SHADOW_INTERVALS];
+    Length merged_ends[MAX_DIRECT_SHADOW_INTERVALS];
     int merged_count = 0;
     for (int interval_index = 0;
-         interval_index < MAX_ECLIPSE_SHADOWS;
+         interval_index < MAX_DIRECT_SHADOW_INTERVALS;
          ++interval_index)
     {
         if (interval_index >= interval_count)
@@ -1281,7 +1476,7 @@ vec3 GetEclipseDirectLuminanceLoss(
             ? sun_spectral_radiance_to_luminance
             : sky_spectral_radiance_to_luminance;
     for (int interval_index = 0;
-         interval_index < MAX_ECLIPSE_SHADOWS;
+         interval_index < MAX_DIRECT_SHADOW_INTERVALS;
          ++interval_index)
     {
         if (interval_index >= merged_count)
@@ -1338,7 +1533,7 @@ vec3 GetEclipseDirectLuminanceLoss(
                       0.5 * step_size * extinction));
             Number shadow_depth =
                 1.0 -
-                GetEclipseShadowVisibility(sample_position);
+                GetDirectShadowVisibility(sample_position);
             if (shadow_depth > 0.0)
             {
                 Number mu_s =
@@ -1468,7 +1663,7 @@ vec3 GetFiniteSegmentLuminance(
     transmittance = exp(-optical_depth);
     return max(
         radiance -
-            GetEclipseDirectLuminanceLoss(origin, ray, distance),
+            GetDirectLuminanceLoss(origin, ray, distance),
         vec3(0.0));
 }
 
@@ -1568,7 +1763,7 @@ void main()
         if (visible_atmosphere_surface ||
             scene_distance >= atmosphere_intersections.y)
         {
-            luminance -= GetEclipseDirectLuminanceLoss(
+            luminance -= GetDirectLuminanceLoss(
                 camera_position,
                 view_direction,
                 min(scene_distance, atmosphere_intersections.y));

@@ -17,6 +17,7 @@
 
 #include <celcompat/numbers.h>
 #include <celengine/atmosphere.h>
+#include <celengine/body.h>
 #include <celengine/glsupport.h>
 #include <celengine/lightenv.h>
 #include <celengine/lodspheremesh.h>
@@ -24,6 +25,7 @@
 #include <celengine/renderinfo.h>
 #include <celengine/shadermanager.h>
 #include <celengine/texture.h>
+#include <celengine/texmanager.h>
 #include <celengine/brunetonatmospherefile.h>
 #include <celmath/frustum.h>
 #include <celmath/mathlib.h>
@@ -549,6 +551,47 @@ AtmosphereRenderer::renderBruneton(
                 shadow.maxDepth;
         }
     }
+
+    TextureTile ringShadowTile(0);
+    RingSystem* ringSystem = ls.shadowingRingSystem;
+    Texture* ringShadowTexture = nullptr;
+    const bool hasRingShadow =
+        ls.nLights > 0 &&
+        ls.lights[0].castsShadows &&
+        ringSystem != nullptr &&
+        ringSystem == ls.ringShadows[0].ringSystem &&
+        (ringShadowTexture =
+             m_renderer.getTextureManager()->findShadow(
+                 ringSystem->texture)) != nullptr &&
+        (ringShadowTile =
+             ringShadowTexture->getTile(0, 0, 0)).texID != 0;
+    IntegerShaderParameter(programId, "render_ring_shadows") =
+        hasRingShadow ? 1 : 0;
+    IntegerShaderParameter(programId, "ring_shadow_texture") = 9;
+    Vec3ShaderParameter(programId, "ring_shadow_plane_normal") =
+        hasRingShadow
+            ? ls.ringPlaneNormal
+            : Eigen::Vector3f::UnitY();
+    Vec3ShaderParameter(programId, "ring_shadow_sun_direction") =
+        ls.nLights > 0
+            ? ls.lights[0].direction_obj
+            : Eigen::Vector3f::UnitZ();
+    Vec3ShaderParameter(programId, "ring_shadow_position_scale") =
+        bodySemiAxes / parameters.bottomRadius;
+    FloatShaderParameter(programId, "ring_shadow_inner_radius") =
+        hasRingShadow ? ringSystem->innerRadius : 0.0f;
+    FloatShaderParameter(programId, "ring_shadow_outer_radius") =
+        hasRingShadow ? ringSystem->outerRadius : 0.0f;
+    FloatShaderParameter(programId, "ring_shadow_inverse_width") =
+        hasRingShadow
+            ? 1.0f /
+                std::max(
+                    ringSystem->outerRadius -
+                        ringSystem->innerRadius,
+                    1.0e-6f)
+            : 0.0f;
+    FloatShaderParameter(programId, "ring_shadow_lod") =
+        hasRingShadow ? ls.ringShadows[0].texLod : 0.0f;
     Vec3ShaderParameter(programId, "sky_spectral_radiance_to_luminance") =
         Eigen::Map<const Eigen::Vector3f>(
             parameters.skySpectralRadianceToLuminance.data());
@@ -646,6 +689,12 @@ AtmosphereRenderer::renderBruneton(
         GL_TEXTURE_2D,
         renderCloudNormals
             ? cloudNormalTile.texID
+            : resource.transmittanceTexture());
+    glActiveTexture(GL_TEXTURE9);
+    glBindTexture(
+        GL_TEXTURE_2D,
+        hasRingShadow
+            ? ringShadowTile.texID
             : resource.transmittanceTexture());
     glActiveTexture(GL_TEXTURE0);
 

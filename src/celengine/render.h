@@ -554,7 +554,9 @@ class Renderer
                           float distance,
                           const Observer& observer,
                           float nearPlaneDistance,
-                          const Matrices&);
+                          const Matrices&,
+                          celestia::render::RingRenderHalf);
+    void renderDeferredRingSystems(const Observer&);
 
     void renderStar(const Star& star,
                     const Eigen::Vector3f& pos,
@@ -633,6 +635,11 @@ class Renderer
     void setupEclipseShadows(const Body& receiver,
                              LightingState& lightingState,
                              double now);
+    void setupRingShadows(RingSystem* rings,
+                          const Eigen::Quaternionf& ringOrientation,
+                          const Eigen::Quaternionf& bodyOrientation,
+                          float minimumViewDistance,
+                          LightingState& lightingState);
 
     void labelConstellations(const AsterismList& asterisms,
                              const Observer& observer);
@@ -767,6 +774,12 @@ class Renderer
         std::vector<Annotation> annotations;
     };
     std::vector<DeferredObjectAnnotationBatch> m_deferredObjectAnnotationBatches;
+    struct DeferredRingSystem
+    {
+        std::size_t interval;
+        RenderListEntry entry;
+    };
+    std::vector<DeferredRingSystem> m_deferredRingSystems;
     std::vector<OrbitPathListEntry> orbitPathList;
     LightingState::EclipseShadowVector eclipseShadows[MaxLights];
     std::vector<const Star*> nearStars;
