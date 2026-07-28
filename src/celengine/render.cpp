@@ -138,10 +138,13 @@ canIntegrateBrunetonClouds(const Atmosphere* atmosphere,
            atmosphere->cloudHeight > 0.0f &&
            lights.nLights > 0 &&
            cloudTexture != nullptr &&
-           cloudNormalMap == nullptr &&
            cloudTexture->getLODCount() == 1 &&
            cloudTexture->getUTileCount(0) == 1 &&
-           cloudTexture->getVTileCount(0) == 1;
+           cloudTexture->getVTileCount(0) == 1 &&
+           (cloudNormalMap == nullptr ||
+            (cloudNormalMap->getLODCount() == 1 &&
+             cloudNormalMap->getUTileCount(0) == 1 &&
+             cloudNormalMap->getVTileCount(0) == 1));
 }
 
 // Size at which the orbit cache will be flushed of old orbit paths
@@ -3415,6 +3418,7 @@ bool Renderer::renderBrunetonAtmospheres(const FramebufferObject& source,
             source.colorTexture(),
             entry.surfaceBodyId,
             cloudTexture,
+            cloudNormalMap,
             atmosphere->cloudHeight,
             cloudTextureOffset);
     }

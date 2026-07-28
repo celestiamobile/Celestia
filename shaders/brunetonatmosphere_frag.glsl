@@ -79,12 +79,15 @@ uniform sampler2D scene_depth_texture;
 uniform sampler2D surface_id_texture;
 uniform sampler2D depth_partition_texture;
 uniform sampler2D cloud_texture;
+uniform sampler2D cloud_normal_texture;
 uniform int combined_scattering_textures;
 uniform int precomputed_luminance;
 uniform int manual_float_filtering;
 uniform int manual_scattering_filtering;
 uniform int depth_partition_count;
 uniform int render_clouds;
+uniform int render_cloud_normals;
+uniform int cloud_normal_texture_dxt5;
 uniform int cloud_texture_has_alpha;
 uniform float surface_body_id;
 uniform vec3 camera;
@@ -822,28 +825,76 @@ bool IsVisibleSurfaceNearby()
     return false;
 }
 
-vec2 GetCloudTextureUv(Position position)
+vec2 GetCloudTextureUv(Direction normal)
 {
-    Direction normal = normalize(position);
     return vec2(
         cloud_texture_offset -
             atan(normal.z, normal.x) / (2.0 * PI),
         0.5 - asin(clamp(normal.y, -1.0, 1.0)) / PI);
 }
 
-vec4 SampleCloud(Position origin, Direction ray, Length distance)
+vec4 SampleCloudTexture(
+    sampler2D texture_sampler,
+    vec2 texture_uv)
 {
-    vec4 sample_value = textureLod(
-        cloud_texture,
-        GetCloudTextureUv(origin + ray * distance),
-        0.0);
+    vec2 texture_dx = dFdx(texture_uv);
+    vec2 texture_dy = dFdy(texture_uv);
+    texture_dx.x -= round(texture_dx.x);
+    texture_dy.x -= round(texture_dy.x);
+    return textureGrad(
+        texture_sampler,
+        texture_uv,
+        texture_dx,
+        texture_dy);
+}
+
+vec4 SampleCloud(vec2 texture_uv)
+{
+    vec4 sample_value =
+        SampleCloudTexture(cloud_texture, texture_uv);
     float density = cloud_texture_has_alpha != 0
         ? sample_value.a
         : sample_value.r;
     return vec4(sample_value.rgb, density);
 }
 
-vec4 GetCloudSample(
+Direction GetCloudNormal(
+    Direction geometric_normal,
+    vec2 texture_uv)
+{
+    if (render_cloud_normals == 0)
+        return geometric_normal;
+
+    vec4 encoded =
+        SampleCloudTexture(cloud_normal_texture, texture_uv);
+    vec3 tangent_normal;
+    if (cloud_normal_texture_dxt5 != 0)
+    {
+        tangent_normal.xy = encoded.ag * 2.0 - vec2(1.0);
+        tangent_normal.z = sqrt(max(
+            1.0 - dot(tangent_normal.xy, tangent_normal.xy),
+            0.0));
+    }
+    else
+    {
+        tangent_normal = encoded.xyz * 2.0 - vec3(1.0);
+    }
+
+    Length equatorial_length = length(geometric_normal.xz);
+    Direction tangent = equatorial_length > 1.0e-6
+        ? vec3(
+              geometric_normal.z / equatorial_length,
+              0.0,
+              -geometric_normal.x / equatorial_length)
+        : vec3(1.0, 0.0, 0.0);
+    Direction bitangent = -cross(geometric_normal, tangent);
+    return normalize(
+        tangent * tangent_normal.x +
+        bitangent * tangent_normal.y +
+        geometric_normal * tangent_normal.z);
+}
+
+bool GetCloudIntersection(
     Position origin,
     Direction ray,
     Length surface_distance,
@@ -853,32 +904,29 @@ vec4 GetCloudSample(
     Length thickness =
         (cloud_radius - atmosphere.bottom_radius) * 0.5;
     if (render_clouds == 0 || thickness <= 0.0)
-        return vec4(0.0);
+        return false;
 
     vec2 outer_intersections =
         RaySphereIntersections(origin, ray, cloud_radius);
     if (outer_intersections.y < 0.0 ||
         outer_intersections.x > outer_intersections.y)
     {
-        return vec4(0.0);
+        return false;
     }
 
     if (outer_intersections.x < 0.0 &&
         surface_distance < outer_intersections.y)
     {
-        return vec4(0.0);
+        return false;
     }
 
     cloud_distance = outer_intersections.x < 0.0
         ? outer_intersections.y
         : outer_intersections.x;
     if (cloud_distance >= surface_distance)
-        return vec4(0.0);
+        return false;
 
-    vec4 cloud_sample =
-        SampleCloud(origin, ray, cloud_distance);
-    cloud_sample.a = clamp(cloud_sample.a, 0.0, 1.0);
-    return cloud_sample;
+    return true;
 }
 
 vec4 GetCloudColor(
@@ -887,13 +935,21 @@ vec4 GetCloudColor(
     Length surface_distance)
 {
     Length cloud_distance;
-    vec4 cloud_sample = GetCloudSample(
-        origin, ray, surface_distance, cloud_distance);
+    if (!GetCloudIntersection(
+            origin, ray, surface_distance, cloud_distance))
+    {
+        return vec4(0.0);
+    }
+
+    Position cloud_point = origin + ray * cloud_distance;
+    Direction geometric_normal = normalize(cloud_point);
+    vec2 texture_uv = GetCloudTextureUv(geometric_normal);
+    vec4 cloud_sample = SampleCloud(texture_uv);
+    cloud_sample.a = clamp(cloud_sample.a, 0.0, 1.0);
     float alpha = cloud_sample.a;
     if (alpha <= 0.0)
         return vec4(0.0);
 
-    Position cloud_point = origin + ray * cloud_distance;
     vec3 cloud_transmittance;
     vec3 front_scattering = GetSkyLuminanceToPoint(
         origin,
@@ -903,12 +959,14 @@ vec4 GetCloudColor(
         cloud_transmittance);
 
     vec3 sky_irradiance;
+    Direction cloud_normal =
+        GetCloudNormal(geometric_normal, texture_uv);
     vec3 sun_irradiance = GetSunAndSkyIrradiance(
         atmosphere,
         transmittance_texture,
         irradiance_texture,
         cloud_point,
-        normalize(cloud_point),
+        cloud_normal,
         sun_direction,
         sky_irradiance);
 
@@ -1119,11 +1177,23 @@ void main()
         if (render_mode == 0)
         {
             Length cloud_distance;
-            float cloud_alpha = GetCloudSample(
-                camera_position,
-                view_direction,
-                scene_distance,
-                cloud_distance).a;
+            float cloud_alpha = 0.0;
+            if (GetCloudIntersection(
+                    camera_position,
+                    view_direction,
+                    scene_distance,
+                    cloud_distance))
+            {
+                Position cloud_point =
+                    camera_position +
+                    view_direction * cloud_distance;
+                Direction geometric_normal =
+                    normalize(cloud_point);
+                vec2 texture_uv =
+                    GetCloudTextureUv(geometric_normal);
+                cloud_alpha =
+                    clamp(SampleCloud(texture_uv).a, 0.0, 1.0);
+            }
             transmittance = GetSkyTransmittance(
                 camera_position,
                 view_direction,

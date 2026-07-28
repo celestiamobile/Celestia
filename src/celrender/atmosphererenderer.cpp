@@ -379,6 +379,7 @@ AtmosphereRenderer::renderBruneton(
     GLuint surfaceIdTexture,
     GLint surfaceBodyId,
     Texture* cloudTexture,
+    Texture* cloudNormalMap,
     float cloudHeight,
     float cloudTextureOffset)
 {
@@ -533,6 +534,19 @@ AtmosphereRenderer::renderBruneton(
     IntegerShaderParameter(programId, "render_clouds") =
         renderClouds ? 1 : 0;
     IntegerShaderParameter(programId, "cloud_texture") = 6;
+    TextureTile cloudNormalTile(0);
+    const bool renderCloudNormals =
+        renderClouds &&
+        cloudNormalMap != nullptr &&
+        (cloudNormalTile = cloudNormalMap->getTile(0, 0, 0)).texID != 0;
+    IntegerShaderParameter(programId, "render_cloud_normals") =
+        renderCloudNormals ? 1 : 0;
+    IntegerShaderParameter(programId, "cloud_normal_texture") = 8;
+    IntegerShaderParameter(programId, "cloud_normal_texture_dxt5") =
+        renderCloudNormals &&
+                (cloudNormalMap->getFormatOptions() & Texture::DXT5NormalMap)
+            ? 1
+            : 0;
     IntegerShaderParameter(programId, "cloud_texture_has_alpha") =
         renderClouds && cloudTexture->hasAlpha() ? 1 : 0;
     FloatShaderParameter(programId, "cloud_radius") =
@@ -563,6 +577,12 @@ AtmosphereRenderer::renderBruneton(
         renderClouds ? cloudTile.texID : resource.transmittanceTexture());
     glActiveTexture(GL_TEXTURE7);
     glBindTexture(GL_TEXTURE_2D, surfaceIdTexture);
+    glActiveTexture(GL_TEXTURE8);
+    glBindTexture(
+        GL_TEXTURE_2D,
+        renderCloudNormals
+            ? cloudNormalTile.texID
+            : resource.transmittanceTexture());
     glActiveTexture(GL_TEXTURE0);
 
     Renderer::PipelineState state;

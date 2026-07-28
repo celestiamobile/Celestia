@@ -78,6 +78,7 @@ public:
         GLuint surfaceIdTexture,
         GLint surfaceBodyId,
         Texture* cloudTexture,
+        Texture* cloudNormalMap,
         float cloudHeight,
         float cloudTextureOffset);
 
