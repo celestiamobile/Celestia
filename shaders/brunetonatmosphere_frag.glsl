@@ -40,6 +40,7 @@ const int SCATTERING_TEXTURE_MU_S_SIZE = 32;
 const int SCATTERING_TEXTURE_NU_SIZE = 8;
 const int IRRADIANCE_TEXTURE_WIDTH = 64;
 const int IRRADIANCE_TEXTURE_HEIGHT = 16;
+const int MAX_ECLIPSE_SHADOWS = 3;
 
 struct DensityProfileLayer
 {
@@ -101,6 +102,11 @@ uniform float cloud_texture_offset;
 uniform vec2 viewport_size;
 uniform vec2 viewport_origin;
 uniform int render_mode;
+uniform int eclipse_shadow_count;
+uniform vec4 eclipse_shadow_tex_gen_s[MAX_ECLIPSE_SHADOWS];
+uniform vec4 eclipse_shadow_tex_gen_t[MAX_ECLIPSE_SHADOWS];
+uniform float eclipse_shadow_falloff[MAX_ECLIPSE_SHADOWS];
+uniform float eclipse_shadow_max_depth[MAX_ECLIPSE_SHADOWS];
 
 in vec3 view_ray;
 in vec3 view_ray_view;
@@ -825,6 +831,12 @@ bool IsVisibleSurfaceNearby()
     return false;
 }
 
+Number GetEclipseShadowVisibility(Position position);
+vec3 GetEclipseDirectLuminanceLoss(
+    Position origin,
+    Direction ray,
+    Length distance);
+
 vec2 GetCloudTextureUv(Direction normal)
 {
     return vec2(
@@ -951,12 +963,17 @@ vec4 GetCloudColor(
         return vec4(0.0);
 
     vec3 cloud_transmittance;
-    vec3 front_scattering = GetSkyLuminanceToPoint(
-        origin,
-        cloud_point,
-        0.0,
-        sun_direction,
-        cloud_transmittance);
+    vec3 front_scattering =
+        GetSkyLuminanceToPoint(
+            origin,
+            cloud_point,
+            0.0,
+            sun_direction,
+            cloud_transmittance) -
+        GetEclipseDirectLuminanceLoss(
+            origin,
+            ray,
+            cloud_distance);
 
     vec3 sky_irradiance;
     Direction cloud_normal =
@@ -969,6 +986,7 @@ vec4 GetCloudColor(
         cloud_normal,
         sun_direction,
         sky_irradiance);
+    sun_irradiance *= GetEclipseShadowVisibility(cloud_point);
 
     vec3 cloud_radiance =
         front_scattering +
@@ -1048,6 +1066,311 @@ Number GetProfileDensity(
     return altitude < layer0.width
         ? GetLayerDensity(layer0, altitude)
         : GetLayerDensity(layer1, altitude);
+}
+
+Number GetEclipseShadowDepth(
+    int shadow_index,
+    Position position)
+{
+    vec2 shadow_center = vec2(
+        dot(
+            vec4(position, 1.0),
+            eclipse_shadow_tex_gen_s[shadow_index]),
+        dot(
+            vec4(position, 1.0),
+            eclipse_shadow_tex_gen_t[shadow_index])) -
+        vec2(0.5);
+    return clamp(
+        (2.0 * length(shadow_center) - 1.0) *
+            eclipse_shadow_falloff[shadow_index],
+        0.0,
+        eclipse_shadow_max_depth[shadow_index]);
+}
+
+Number GetEclipseShadowVisibility(Position position)
+{
+    Number visibility = 1.0;
+    for (int i = 0; i < MAX_ECLIPSE_SHADOWS; ++i)
+    {
+        if (i >= eclipse_shadow_count)
+            break;
+
+        visibility *= 1.0 - GetEclipseShadowDepth(i, position);
+    }
+    return visibility;
+}
+
+bool GetEclipseShadowInterval(
+    int shadow_index,
+    Position origin,
+    Direction ray,
+    Length minimum_distance,
+    Length maximum_distance,
+    out Length interval_start,
+    out Length interval_end)
+{
+    Length segment_length =
+        maximum_distance - minimum_distance;
+    Position segment_origin =
+        origin + ray * minimum_distance;
+    vec2 shadow_origin = vec2(
+        dot(
+            vec4(segment_origin, 1.0),
+            eclipse_shadow_tex_gen_s[shadow_index]),
+        dot(
+            vec4(segment_origin, 1.0),
+            eclipse_shadow_tex_gen_t[shadow_index])) -
+        vec2(0.5);
+    vec2 shadow_direction = vec2(
+        dot(
+            vec4(ray, 0.0),
+            eclipse_shadow_tex_gen_s[shadow_index]),
+        dot(
+            vec4(ray, 0.0),
+            eclipse_shadow_tex_gen_t[shadow_index]));
+
+    Number a = dot(shadow_direction, shadow_direction);
+    Number c = dot(shadow_origin, shadow_origin) - 0.25;
+    if (a <= 1.0e-12)
+    {
+        if (c > 0.0)
+            return false;
+
+        interval_start = minimum_distance;
+        interval_end = maximum_distance;
+        return segment_length > 0.0;
+    }
+
+    Number b = dot(shadow_origin, shadow_direction);
+    Number discriminant = b * b - a * c;
+    if (discriminant <= 0.0)
+        return false;
+
+    Number root = sqrt(discriminant);
+    interval_start =
+        minimum_distance +
+        max(0.0, (-b - root) / a);
+    interval_end =
+        minimum_distance +
+        min(segment_length, (-b + root) / a);
+    return interval_end > interval_start;
+}
+
+vec3 GetEclipseDirectLuminanceLoss(
+    Position origin,
+    Direction ray,
+    Length distance)
+{
+    if (eclipse_shadow_count == 0)
+        return vec3(0.0);
+
+    vec2 atmosphere_intersections = RaySphereIntersections(
+        origin, ray, atmosphere.top_radius);
+    Length start_distance = max(atmosphere_intersections.x, 0.0);
+    Length end_distance = min(atmosphere_intersections.y, distance);
+    if (end_distance <= start_distance)
+        return vec3(0.0);
+
+    Length interval_starts[MAX_ECLIPSE_SHADOWS];
+    Length interval_ends[MAX_ECLIPSE_SHADOWS];
+    int interval_count = 0;
+    for (int shadow_index = 0;
+         shadow_index < MAX_ECLIPSE_SHADOWS;
+         ++shadow_index)
+    {
+        if (shadow_index >= eclipse_shadow_count)
+            break;
+
+        Length interval_start;
+        Length interval_end;
+        if (GetEclipseShadowInterval(
+                shadow_index,
+                origin,
+                ray,
+                start_distance,
+                end_distance,
+                interval_start,
+                interval_end))
+        {
+            int insertion_index = interval_count;
+            for (int interval_index = 0;
+                 interval_index < MAX_ECLIPSE_SHADOWS;
+                 ++interval_index)
+            {
+                if (interval_index >= interval_count)
+                    break;
+
+                if (interval_start <
+                    interval_starts[interval_index])
+                {
+                    insertion_index = interval_index;
+                    break;
+                }
+            }
+            for (int interval_index =
+                     MAX_ECLIPSE_SHADOWS - 1;
+                 interval_index > 0;
+                 --interval_index)
+            {
+                if (interval_index > insertion_index &&
+                    interval_index <= interval_count)
+                {
+                    interval_starts[interval_index] =
+                        interval_starts[interval_index - 1];
+                    interval_ends[interval_index] =
+                        interval_ends[interval_index - 1];
+                }
+            }
+            interval_starts[insertion_index] = interval_start;
+            interval_ends[insertion_index] = interval_end;
+            ++interval_count;
+        }
+    }
+    if (interval_count == 0)
+        return vec3(0.0);
+
+    Length merged_starts[MAX_ECLIPSE_SHADOWS];
+    Length merged_ends[MAX_ECLIPSE_SHADOWS];
+    int merged_count = 0;
+    for (int interval_index = 0;
+         interval_index < MAX_ECLIPSE_SHADOWS;
+         ++interval_index)
+    {
+        if (interval_index >= interval_count)
+            break;
+
+        if (merged_count == 0)
+        {
+            merged_starts[0] = interval_starts[interval_index];
+            merged_ends[0] = interval_ends[interval_index];
+            merged_count = 1;
+            continue;
+        }
+
+        int previous_index = merged_count - 1;
+        if (interval_starts[interval_index] <=
+            merged_ends[previous_index])
+        {
+            merged_ends[previous_index] =
+                max(
+                    merged_ends[previous_index],
+                    interval_ends[interval_index]);
+        }
+        else
+        {
+            merged_starts[merged_count] =
+                interval_starts[interval_index];
+            merged_ends[merged_count] =
+                interval_ends[interval_index];
+            ++merged_count;
+        }
+    }
+
+    Position atmosphere_start =
+        origin + ray * start_distance;
+    Length start_r = length(atmosphere_start);
+    Number start_mu = dot(atmosphere_start, ray) / start_r;
+    bool ray_intersects_ground =
+        RayIntersectsGround(atmosphere, start_r, start_mu);
+
+    const int sample_count = 4;
+    vec3 lost_radiance = vec3(0.0);
+    Number nu = dot(ray, sun_direction);
+    vec3 direct_luminance_conversion =
+        precomputed_luminance != 0
+            ? sun_spectral_radiance_to_luminance
+            : sky_spectral_radiance_to_luminance;
+    for (int interval_index = 0;
+         interval_index < MAX_ECLIPSE_SHADOWS;
+         ++interval_index)
+    {
+        if (interval_index >= merged_count)
+            break;
+
+        Length integration_start =
+            merged_starts[interval_index];
+        Length integration_end =
+            merged_ends[interval_index];
+        Length step_size =
+            (integration_end - integration_start) /
+            Number(sample_count);
+        vec3 entry_transmittance = GetTransmittance(
+            atmosphere,
+            transmittance_texture,
+            start_r,
+            start_mu,
+            integration_start - start_distance,
+            ray_intersects_ground);
+        vec3 optical_depth = vec3(0.0);
+        for (int sample_index = 0;
+             sample_index < sample_count;
+             ++sample_index)
+        {
+            Length sample_distance =
+                integration_start +
+                (Number(sample_index) + 0.5) * step_size;
+            Position sample_position =
+                origin + ray * sample_distance;
+            Length r = length(sample_position);
+            Length altitude =
+                max(r - atmosphere.bottom_radius, 0.0);
+            Number rayleigh_density = GetProfileDensity(
+                atmosphere.rayleigh_density0,
+                atmosphere.rayleigh_density1,
+                altitude);
+            Number mie_density = GetProfileDensity(
+                atmosphere.mie_density0,
+                atmosphere.mie_density1,
+                altitude);
+            Number absorption_density = GetProfileDensity(
+                atmosphere.absorption_density0,
+                atmosphere.absorption_density1,
+                altitude);
+            vec3 extinction =
+                atmosphere.rayleigh_scattering *
+                    rayleigh_density +
+                atmosphere.mie_extinction * mie_density +
+                atmosphere.absorption_extinction *
+                    absorption_density;
+            vec3 view_transmittance =
+                entry_transmittance *
+                exp(-(optical_depth +
+                      0.5 * step_size * extinction));
+            Number shadow_depth =
+                1.0 -
+                GetEclipseShadowVisibility(sample_position);
+            if (shadow_depth > 0.0)
+            {
+                Number mu_s =
+                    dot(sample_position, sun_direction) / r;
+                vec3 direct_source =
+                    atmosphere.solar_irradiance *
+                    GetTransmittanceToSun(
+                        atmosphere,
+                        transmittance_texture,
+                        r,
+                        mu_s) *
+                    (
+                        atmosphere.rayleigh_scattering *
+                            rayleigh_density *
+                            RayleighPhaseFunction(nu) +
+                        atmosphere.mie_scattering *
+                            mie_density *
+                            MiePhaseFunction(
+                                atmosphere.mie_phase_function_g,
+                                nu)
+                    );
+                lost_radiance +=
+                    view_transmittance *
+                    direct_source *
+                    direct_luminance_conversion *
+                    shadow_depth *
+                    step_size;
+            }
+            optical_depth += step_size * extinction;
+        }
+    }
+    return lost_radiance;
 }
 
 vec3 GetFiniteSegmentLuminance(
@@ -1143,7 +1466,10 @@ vec3 GetFiniteSegmentLuminance(
         optical_depth += step_size * extinction;
     }
     transmittance = exp(-optical_depth);
-    return radiance;
+    return max(
+        radiance -
+            GetEclipseDirectLuminanceLoss(origin, ray, distance),
+        vec3(0.0));
 }
 
 void main()
@@ -1237,6 +1563,15 @@ void main()
                 0.0,
                 sun_direction,
                 transmittance);
+        }
+
+        if (visible_atmosphere_surface ||
+            scene_distance >= atmosphere_intersections.y)
+        {
+            luminance -= GetEclipseDirectLuminanceLoss(
+                camera_position,
+                view_direction,
+                min(scene_distance, atmosphere_intersections.y));
         }
 
         cloud = GetCloudColor(

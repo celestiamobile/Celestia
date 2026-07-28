@@ -3008,6 +3008,48 @@ bool Renderer::testEclipse(const Body& receiver,
     return isReceiverShadowed;
 }
 
+void
+Renderer::setupEclipseShadows(const Body& receiver,
+                              LightingState& lightingState,
+                              double now)
+{
+    for (unsigned int li = 0; li < lightingState.nLights; ++li)
+    {
+        eclipseShadows[li].clear();
+        lightingState.shadows[li] = &eclipseShadows[li];
+    }
+
+    if (!util::is_set(renderFlags, RenderFlags::ShowEclipseShadows))
+        return;
+
+    const Body* testBody = &receiver;
+    for (;;)
+    {
+        if (const FrameTree* frameTree = testBody->getFrameTree(); frameTree)
+        {
+            for (unsigned int i = 0, nPhases = frameTree->childCount();
+                 i < nPhases;
+                 ++i)
+            {
+                const auto& phase = frameTree->getChild(i);
+                if (phase->startTime() > now || phase->endTime() <= now) //NOSONAR
+                    continue;
+
+                for (unsigned int li = 0; li < lightingState.nLights; ++li) //NOSONAR
+                    testEclipse(receiver, *phase->body(), lightingState, li, now);
+            }
+        }
+
+        testBody =
+            testBody->getTimeline()->findPhase(now).getFrameTree()->getOwner().body();
+        if (testBody == nullptr)
+            break;
+
+        for (unsigned int li = 0; li < lightingState.nLights; ++li)
+            testEclipse(receiver, *testBody, lightingState, li, now);
+    }
+}
+
 
 void Renderer::renderPlanet(Body& body,
                             const Vector3f& pos,
@@ -3081,14 +3123,6 @@ void Renderer::renderPlanet(Body& body,
 
         lights.ambientColor = ambientColor.toVector3();
 
-        // Clear out the list of eclipse shadows
-        for (unsigned int li = 0; li < lights.nLights; li++)
-        {
-            eclipseShadows[li].clear();
-            lights.shadows[li] = &eclipseShadows[li];
-        }
-
-
         // Add ring shadow records for each light
         if (rp.rings != nullptr &&
             util::is_set(renderFlags, RenderFlags::ShowPlanetRings) &&
@@ -3103,38 +3137,7 @@ void Renderer::renderPlanet(Body& body,
             }
         }
 
-        // Calculate eclipse circumstances
-        if (util::is_set(renderFlags, RenderFlags::ShowEclipseShadows))
-        {
-            const Body* testBody = &body;
-            for (;;)
-            {
-                // Check for eclipse shadows from the satellites of the current object
-                // Note this only test direct satellites, binary satellites won't work here.
-                // Hopefully the exoplanet astronomers don't find any binary exomoons in the
-                // near future...
-                if (const FrameTree* frameTree = testBody->getFrameTree(); frameTree)
-                {
-                    for (unsigned int i = 0, nPhases = frameTree->childCount(); i < nPhases; ++i)
-                    {
-                        const auto& phase = frameTree->getChild(i);
-                        if (phase->startTime() > now || phase->endTime() <= now) //NOSONAR
-                            continue;
-
-                        for (unsigned int li = 0; li < lights.nLights; ++li) //NOSONAR
-                            testEclipse(body, *phase->body(), lights, li, now);
-                    }
-                }
-
-                testBody = testBody->getTimeline()->findPhase(now).getFrameTree()->getOwner().body();
-                if (!testBody)
-                    break;
-
-                // Check for eclipses from the parent object
-                for (unsigned int li = 0; li < lights.nLights; ++li)
-                    testEclipse(body, *testBody, lights, li, now);
-            }
-        }
+        setupEclipseShadows(body, lights, now);
 
         // Sort out the ring shadows; only one ring shadow source is supported right now. This means
         // that exotic cases with shadows from two ring different ring systems aren't handled.
@@ -3363,6 +3366,7 @@ bool Renderer::renderBrunetonAtmospheres(const FramebufferObject& source,
             lights);
         assert(lights.nLights <= MaxLights);
         lights.ambientColor = ambientColor.toVector3();
+        setupEclipseShadows(body, lights, m_renderTime);
 
         Texture* cloudTexture = nullptr;
         Texture* cloudNormalMap = nullptr;
@@ -3415,6 +3419,7 @@ bool Renderer::renderBrunetonAtmospheres(const FramebufferObject& source,
             *resource,
             atmosphere->brunetonLuminanceScale,
             scaleFactors,
+            orientation,
             source.colorTexture(),
             entry.surfaceBodyId,
             cloudTexture,

@@ -376,6 +376,7 @@ AtmosphereRenderer::renderBruneton(
     const BrunetonAtmosphereResource& resource,
     float luminanceScale,
     const Eigen::Vector3f& bodySemiAxes,
+    const Eigen::Quaternionf& bodyOrientation,
     GLuint surfaceIdTexture,
     GLint surfaceBodyId,
     Texture* cloudTexture,
@@ -485,6 +486,69 @@ AtmosphereRenderer::renderBruneton(
         (parameters.bottomRadius *
          bodySemiAxes.cwiseInverse()).cwiseProduct(sunDirection).normalized();
     Vec3ShaderParameter(programId, "sun_direction") = sunDirection;
+
+    unsigned int eclipseShadowCount = 0;
+    if (ls.nLights > 0 && ls.shadows[0] != nullptr)
+    {
+        eclipseShadowCount = std::min(
+            MaxShaderEclipseShadows,
+            static_cast<unsigned int>(ls.shadows[0]->size()));
+    }
+    IntegerShaderParameter(programId, "eclipse_shadow_count") =
+        static_cast<int>(eclipseShadowCount);
+    if (eclipseShadowCount > 0)
+    {
+        Eigen::Affine3f rotation(bodyOrientation.conjugate());
+        Eigen::Matrix4f atmosphereToWorld =
+            (rotation *
+             Eigen::Scaling(bodySemiAxes / parameters.bottomRadius)).matrix();
+        Eigen::Matrix4f shadowBias;
+        shadowBias << 0.5f, 0.0f, 0.0f, 0.5f,
+                      0.0f, 0.5f, 0.0f, 0.5f,
+                      0.0f, 0.0f, 0.5f, 0.5f,
+                      0.0f, 0.0f, 0.0f, 1.0f;
+
+        for (unsigned int i = 0; i < eclipseShadowCount; ++i)
+        {
+            const EclipseShadow& shadow = ls.shadows[0]->at(i);
+            const float umbra = shadow.umbraRadius / shadow.penumbraRadius;
+            const float falloff =
+                -shadow.maxDepth /
+                std::max(0.001f, 1.0f - std::fabs(umbra));
+
+            Eigen::Vector3f u = shadow.direction.unitOrthogonal();
+            Eigen::Vector3f v = u.cross(shadow.direction);
+            Eigen::Matrix4f shadowRotation;
+            shadowRotation << u.transpose(),                0.0f,
+                              v.transpose(),                0.0f,
+                              shadow.direction.transpose(), 0.0f,
+                              0.0f, 0.0f, 0.0f,             1.0f;
+            Eigen::Matrix4f worldToShadow =
+                shadowRotation *
+                Eigen::Affine3f(
+                    Eigen::Scaling(1.0f / shadow.penumbraRadius)).matrix() *
+                Eigen::Affine3f(
+                    Eigen::Translation3f(-shadow.origin)).matrix();
+            Eigen::Matrix4f shadowFromAtmosphere =
+                shadowBias * worldToShadow * atmosphereToWorld;
+            const std::string index = "[" + std::to_string(i) + "]";
+            Vec4ShaderParameter(
+                programId,
+                ("eclipse_shadow_tex_gen_s" + index).c_str()) =
+                shadowFromAtmosphere.row(0);
+            Vec4ShaderParameter(
+                programId,
+                ("eclipse_shadow_tex_gen_t" + index).c_str()) =
+                shadowFromAtmosphere.row(1);
+            FloatShaderParameter(
+                programId,
+                ("eclipse_shadow_falloff" + index).c_str()) = falloff;
+            FloatShaderParameter(
+                programId,
+                ("eclipse_shadow_max_depth" + index).c_str()) =
+                shadow.maxDepth;
+        }
+    }
     Vec3ShaderParameter(programId, "sky_spectral_radiance_to_luminance") =
         Eigen::Map<const Eigen::Vector3f>(
             parameters.skySpectralRadianceToLuminance.data());

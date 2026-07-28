@@ -75,6 +75,7 @@ public:
         const BrunetonAtmosphereResource&,
         float luminanceScale,
         const Eigen::Vector3f& bodySemiAxes,
+        const Eigen::Quaternionf& bodyOrientation,
         GLuint surfaceIdTexture,
         GLint surfaceBodyId,
         Texture* cloudTexture,

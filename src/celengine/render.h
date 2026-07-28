@@ -630,6 +630,9 @@ class Renderer
                      LightingState& lightingState,
                      unsigned int lightIndex,
                      double now);
+    void setupEclipseShadows(const Body& receiver,
+                             LightingState& lightingState,
+                             double now);
 
     void labelConstellations(const AsterismList& asterisms,
                              const Observer& observer);
