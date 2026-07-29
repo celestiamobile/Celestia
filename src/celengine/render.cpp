@@ -908,16 +908,6 @@ void Renderer::endObjectAnnotations()
     if (objectAnnotations.empty())
         return;
 
-    if (m_brunetonPostprocessEnabled)
-    {
-        m_deferredObjectAnnotationBatches.push_back({
-            static_cast<std::size_t>(currentIntervalIndex),
-            std::move(objectAnnotations),
-        });
-        objectAnnotations.clear();
-        return;
-    }
-
     renderObjectAnnotations(
         objectAnnotations,
         static_cast<std::size_t>(currentIntervalIndex));
@@ -930,7 +920,7 @@ void Renderer::renderObjectAnnotations(std::vector<Annotation>& annotations,
     Renderer::PipelineState ps;
     ps.blending = true;
     ps.blendFunc = {GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA};
-    ps.depthMask = !m_brunetonPostprocessEnabled;
+    ps.depthMask = true;
     ps.depthTest = true;
     ps.smoothLines = true;
     setPipelineState(ps);
@@ -1388,31 +1378,12 @@ void Renderer::renderItem(const RenderListEntry& rle,
 
     case RenderListEntry::RenderableRingSystem:
     {
-        const bool splitAroundBruneton =
-            m_brunetonPostprocessEnabled &&
-            std::any_of(
-                m_brunetonAtmospheres.begin(),
-                m_brunetonAtmospheres.end(),
-                [&rle](const BrunetonAtmosphereEntry& entry)
-                {
-                    return entry.body == rle.body;
-                });
-        if (splitAroundBruneton)
-        {
-            m_deferredRingSystems.push_back({
-                static_cast<std::size_t>(currentIntervalIndex),
-                rle,
-            });
-        }
         renderRingSystem(*rle.body,
                          rle.position,
                          static_cast<float>(rle.distance),
                          observer,
                          nearPlaneDistance,
-                         m,
-                         splitAroundBruneton
-                             ? celestia::render::RingRenderHalf::Far
-                             : celestia::render::RingRenderHalf::Both);
+                         m);
         break;
     }
 
@@ -1496,8 +1467,6 @@ Renderer::prepareRender(const Observer& observer,
     foregroundAnnotations.clear();
     backgroundAnnotations.clear();
     objectAnnotations.clear();
-    m_deferredObjectAnnotationBatches.clear();
-    m_deferredRingSystems.clear();
 
     // Put all solar system bodies into the render list.  Stars close and
     // large enough to have discernible surface detail are also placed in
@@ -1507,8 +1476,6 @@ Renderer::prepareRender(const Observer& observer,
     lightSourceList.clear();
     secondaryIlluminators.clear();
     nearStars.clear();
-    m_brunetonAtmospheres.clear();
-    m_needsBrunetonPass = false;
 
     // See if we want to use AutoMag.
     if (util::is_set(renderFlags, RenderFlags::ShowAutoMag))
@@ -1567,12 +1534,10 @@ Renderer::prepareRender(const Observer& observer,
         std::move(xfrustum),
         now,
     });
-    return {
-        .needsBrunetonPass = m_needsBrunetonPass,
-    };
+    return {};
 }
 
-void Renderer::renderPrepared(const RenderPreparation& preparation)
+void Renderer::renderPrepared(const RenderPreparation&)
 {
     assert(m_preparedRender.has_value());
     PreparedRender prepared = std::move(*m_preparedRender);
@@ -1584,10 +1549,6 @@ void Renderer::renderPrepared(const RenderPreparation& preparation)
     const math::InfiniteFrustum& frustum = prepared.frustum;
     const math::InfiniteFrustum& xfrustum = prepared.transformedFrustum;
     const double now = prepared.now;
-
-    m_brunetonPostprocessEnabled = preparation.brunetonPassActive && preparation.needsBrunetonPass;
-    if (!m_brunetonPostprocessEnabled)
-        m_brunetonAtmospheres.clear();
 
     // glClear(GL_DEPTH_BUFFER_BIT) is masked by glDepthMask. A previous pass
     // (e.g. a post-process quad from a prior view) may have left depthMask=false,
@@ -1656,22 +1617,6 @@ void Renderer::renderPrepared(const RenderPreparation& preparation)
 
     removeInvisibleItems(frustum);
 
-    std::sort(
-        m_brunetonAtmospheres.begin(),
-        m_brunetonAtmospheres.end(),
-        [](const BrunetonAtmosphereEntry& a,
-           const BrunetonAtmosphereEntry& b)
-        {
-            return a.distance > b.distance;
-        });
-    for (std::size_t i = 0;
-         i < m_brunetonAtmospheres.size();
-         ++i)
-    {
-        m_brunetonAtmospheres[i].surfaceBodyId =
-            static_cast<GLint>(i + 1);
-    }
-
     // Sort the annotations
     sort(depthSortedAnnotations.begin(), depthSortedAnnotations.end());
 
@@ -1689,125 +1634,13 @@ void Renderer::renderPrepared(const RenderPreparation& preparation)
         showSelectionPointer &&
         !selectionVisible &&
         util::is_set(renderFlags, RenderFlags::ShowMarkers);
-    if (m_brunetonPostprocessEnabled)
-    {
-        assert(!m_deferredOverlays.has_value());
-        m_deferredOverlays = DeferredOverlays{
-            &observer,
-            sel,
-            xfrustum,
-            now,
-            renderPointer,
-        };
-    }
-    else
-    {
-        renderForegroundAnnotations(FontStyle::Normal);
-        if (renderPointer)
-            renderSelectionPointer(observer, now, xfrustum, sel);
-    }
+    renderForegroundAnnotations(FontStyle::Normal);
+    if (renderPointer)
+        renderSelectionPointer(observer, now, xfrustum, sel);
 
 #ifndef GL_ES
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
-}
-
-void Renderer::renderDeferredOverlays()
-{
-    if (!m_deferredOverlays.has_value())
-        return;
-
-    DeferredOverlays overlays = std::move(*m_deferredOverlays);
-    m_deferredOverlays.reset();
-
-    renderDeferredRingSystems(*overlays.observer);
-    renderDeferredDepthAnnotations();
-    renderForegroundAnnotations(FontStyle::Normal);
-    if (overlays.renderSelectionPointer)
-    {
-        renderSelectionPointer(
-            *overlays.observer,
-            overlays.now,
-            overlays.transformedFrustum,
-            overlays.selection);
-    }
-}
-
-bool Renderer::hasDeferredDepthAnnotations() const
-{
-    return !depthSortedAnnotations.empty() ||
-           !m_deferredObjectAnnotationBatches.empty() ||
-           !m_deferredRingSystems.empty();
-}
-
-void Renderer::renderDeferredRingSystems(const Observer& observer)
-{
-    const float intervalSize =
-        1.0f / static_cast<float>(std::max<std::size_t>(1, depthPartitions.size()));
-    for (const DeferredRingSystem& deferred : m_deferredRingSystems)
-    {
-        const DepthBufferPartition& partition = depthPartitions[deferred.interval];
-        const float nearPlaneDistance = -partition.nearZ;
-        const float farPlaneDistance = -partition.farZ;
-        glDepthRange(
-            1.0f - static_cast<float>(deferred.interval + 1) * intervalSize,
-            1.0f - static_cast<float>(deferred.interval) * intervalSize);
-
-        Matrix4f projection;
-        buildProjectionMatrix(
-            projection,
-            nearPlaneDistance,
-            farPlaneDistance,
-            observer.getZoom());
-        Matrices matrices = { &projection, &m_modelMatrix };
-        setCurrentProjectionMatrix(projection);
-
-        const RenderListEntry& entry = deferred.entry;
-        renderRingSystem(
-            *entry.body,
-            entry.position,
-            static_cast<float>(entry.distance),
-            observer,
-            nearPlaneDistance,
-            matrices,
-            celestia::render::RingRenderHalf::Near);
-    }
-
-    m_deferredRingSystems.clear();
-    glDepthRange(0, 1);
-    setDefaultProjectionMatrix();
-}
-
-void Renderer::renderDeferredDepthAnnotations()
-{
-    auto annotation = depthSortedAnnotations.begin();
-    auto objectBatch = m_deferredObjectAnnotationBatches.begin();
-    const float intervalSize =
-        1.0f / static_cast<float>(std::max<std::size_t>(1, depthPartitions.size()));
-    for (std::size_t interval = 0; interval < depthPartitions.size(); ++interval)
-    {
-        glDepthRange(
-            1.0f - static_cast<float>(interval + 1) * intervalSize,
-            1.0f - static_cast<float>(interval) * intervalSize);
-
-        if (annotation != depthSortedAnnotations.end())
-        {
-            annotation = renderSortedAnnotations(
-                annotation,
-                -depthPartitions[interval].nearZ,
-                -depthPartitions[interval].farZ,
-                FontStyle::Normal);
-        }
-
-        if (objectBatch != m_deferredObjectAnnotationBatches.end() &&
-            objectBatch->interval == interval)
-        {
-            renderObjectAnnotations(objectBatch->annotations, interval);
-            ++objectBatch;
-        }
-    }
-    glDepthRange(0, 1);
-    m_deferredObjectAnnotationBatches.clear();
 }
 
 static Eigen::Vector3f
@@ -2118,8 +1951,6 @@ static void renderSphereUnlit(const RenderInfo& ri,
 
     ShaderProperties shadprop;
     shadprop.texUsage = TexUsage::TextureCoordTransform;
-    if (ri.surfaceBodyId > 0.0f)
-        shadprop.texUsage |= TexUsage::SurfaceId;
 
     // Set up the textures used by this object
     if (ri.baseTex != nullptr)
@@ -2151,8 +1982,6 @@ static void renderSphereUnlit(const RenderInfo& ri,
     prog->textureOffset = 0.0f;
     prog->ambientColor = ri.color.toVector3();
     prog->opacity = 1.0f;
-    if (util::is_set(shadprop.texUsage, TexUsage::SurfaceId))
-        prog->surfaceBodyId = ri.surfaceBodyId;
     if (ri.isStar)
         prog->eyePosition = ri.eyePos_obj;
 
@@ -2534,7 +2363,6 @@ void Renderer::renderObject(const Vector3f& pos,
                             const Matrices &m)
 {
     RenderInfo ri;
-    ri.surfaceBodyId = obj.surfaceBodyId;
     double now = observer.getTime();
 
     float altitude = static_cast<float>(distance - obj.radius);
@@ -2723,7 +2551,6 @@ void Renderer::renderObject(const Vector3f& pos,
     }
 
     const bool useBruneton =
-        m_brunetonPostprocessEnabled &&
         atmosphere != nullptr &&
         !atmosphere->brunetonLutFile.empty() &&
         util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
@@ -2829,7 +2656,24 @@ void Renderer::renderObject(const Vector3f& pos,
             fade = 1.0f;
         }
 
-        if (brunetonResource == nullptr && fade > 0 &&
+        if (brunetonResource != nullptr && useBruneton)
+        {
+            m_atmosphereRenderer->renderBruneton(
+                ri,
+                ls,
+                m,
+                planetMV,
+                nearPlaneDistance,
+                *brunetonResource,
+                atmosphere->brunetonLuminanceScale,
+                scaleFactors,
+                obj.orientation,
+                cloudTex,
+                cloudNormalMap,
+                atmosphere->cloudHeight,
+                cloudTexOffset);
+        }
+        else if (brunetonResource == nullptr && fade > 0 &&
             util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
             atmosphere->height > 0.0f &&
             !insidePlanet)
@@ -3261,19 +3105,6 @@ void Renderer::renderPlanet(Body& body,
             lights);
         setupEclipseShadows(body, lights, now);
 
-        auto atmosphereEntry = std::find_if(
-            m_brunetonAtmospheres.begin(),
-            m_brunetonAtmospheres.end(),
-            [&body](const BrunetonAtmosphereEntry& entry)
-            {
-                return entry.body == &body;
-            });
-        if (atmosphereEntry != m_brunetonAtmospheres.end())
-        {
-            rp.surfaceBodyId =
-                static_cast<float>(
-                    atmosphereEntry->surfaceBodyId);
-        }
         renderObject(pos, distance, observer,
                      nearPlaneDistance, farPlaneDistance,
                      rp, lights, m);
@@ -3310,192 +3141,12 @@ void Renderer::renderPlanet(Body& body,
 }
 
 
-bool Renderer::renderBrunetonAtmospheres(const FramebufferObject& source,
-                                         int width,
-                                         int height,
-                                         int originX,
-                                         int originY)
-{
-    if (m_brunetonAtmospheres.empty() || depthPartitions.empty())
-        return true;
-
-    std::vector<Eigen::Vector2f> partitionNearFar;
-    partitionNearFar.reserve(depthPartitions.size());
-    for (const auto& partition : depthPartitions)
-    {
-        partitionNearFar.emplace_back(
-            -partition.nearZ,
-            -partition.farZ);
-    }
-    m_atmosphereRenderer->setSceneDepth(
-        source.depthTexture(),
-        partitionNearFar,
-        width,
-        height,
-        originX,
-        originY);
-
-    const BodyFeaturesManager* bodyFeaturesManager =
-        GetBodyFeaturesManager();
-    Matrices matrices = { &m_projMatrix, &m_modelMatrix };
-
-    for (const auto& entry : m_brunetonAtmospheres)
-    {
-        Body& body = *entry.body;
-        const Atmosphere* atmosphere =
-            bodyFeaturesManager->getAtmosphere(&body);
-        if (atmosphere == nullptr)
-            continue;
-
-        auto* program =
-            getShaderManager().getShader(
-                StaticShader::BrunetonAtmosphere);
-        if (program == nullptr ||
-            getShaderManager().isErrorProgram(program))
-        {
-            continue;
-        }
-
-        auto* resource =
-            m_brunetonAtmosphereManager->find(
-                atmosphere->brunetonLutFile);
-        if (resource == nullptr)
-            continue;
-
-        const float radius = body.getRadius();
-        const Vector3f semiAxes = body.getSemiAxes() / radius;
-        const Quaterniond q =
-            body.getRotationModel(m_renderTime)->spin(m_renderTime) *
-            body.getEclipticToEquatorial(m_renderTime);
-        const Quaternionf orientation =
-            body.getGeometryOrientation() * q.cast<float>();
-
-        const engine::GeometryHandle geometryHandle =
-            body.getGeometry();
-        const RenderGeometry* geometry = nullptr;
-        if (geometryHandle != engine::GeometryHandle::Invalid)
-            geometry = m_geometryManager->find(geometryHandle);
-
-        Vector3f scaleFactors;
-        bool isNormalized = false;
-        if (geometry == nullptr || geometry->isNormalized())
-        {
-            scaleFactors = radius * semiAxes;
-            isNormalized = true;
-        }
-        else
-        {
-            scaleFactors =
-                Vector3f::Constant(body.getGeometryScale());
-        }
-
-        const Matrix3f planetRotation =
-            orientation.toRotationMatrix();
-        const Vector3f eyePosition =
-            -(planetRotation * entry.position)
-                 .cwiseQuotient(scaleFactors);
-        bool insideBody =
-            geometryHandle == engine::GeometryHandle::Invalid &&
-            (scaleFactors.x() == scaleFactors.y() && scaleFactors.x() == scaleFactors.z()
-                 ? entry.distance < static_cast<double>(scaleFactors.x())
-                 : eyePosition.squaredNorm() < 1.0f);
-        if (geometryHandle == engine::GeometryHandle::Invalid && insideBody)
-        {
-            continue;
-        }
-
-        LightingState lights;
-        setupObjectLighting(
-            lightSourceList,
-            secondaryIlluminators,
-            orientation,
-            scaleFactors,
-            entry.position,
-            isNormalized,
-            lights);
-        assert(lights.nLights <= MaxLights);
-        lights.ambientColor = ambientColor.toVector3();
-        setupRingShadows(
-            bodyFeaturesManager->getRings(&body),
-            q.cast<float>(),
-            orientation,
-            std::max(
-                1.0f,
-                static_cast<float>(entry.distance) - radius),
-            lights);
-        setupEclipseShadows(body, lights, m_renderTime);
-
-        Texture* cloudTexture = nullptr;
-        Texture* cloudNormalMap = nullptr;
-        if (util::is_set(renderFlags, RenderFlags::ShowCloudMaps))
-        {
-            if (atmosphere->cloudTexture !=
-                util::TextureHandle::Invalid)
-            {
-                cloudTexture =
-                    m_textureManager->find(
-                        atmosphere->cloudTexture);
-            }
-            if (atmosphere->cloudNormalMap !=
-                util::TextureHandle::Invalid)
-            {
-                cloudNormalMap =
-                    m_textureManager->find(
-                        atmosphere->cloudNormalMap);
-            }
-        }
-
-        if (!canIntegrateBrunetonClouds(
-                atmosphere,
-                lights,
-                cloudTexture,
-                cloudNormalMap))
-        {
-            cloudTexture = nullptr;
-        }
-
-        float cloudTextureOffset = 0.0f;
-        if (atmosphere->cloudSpeed != 0.0f)
-        {
-            cloudTextureOffset = static_cast<float>(
-                -math::pfmod(
-                    m_renderTime * atmosphere->cloudSpeed * 0.5 *
-                        celestia::numbers::inv_pi,
-                    1.0));
-        }
-
-        RenderInfo ri;
-        ri.eyePos_obj = eyePosition;
-        ri.orientation =
-            getCameraOrientationf() * orientation.conjugate();
-
-        m_atmosphereRenderer->renderBruneton(
-            ri,
-            lights,
-            matrices,
-            *resource,
-            atmosphere->brunetonLuminanceScale,
-            scaleFactors,
-            orientation,
-            source.colorTexture(),
-            entry.surfaceBodyId,
-            cloudTexture,
-            cloudNormalMap,
-            atmosphere->cloudHeight,
-            cloudTextureOffset);
-    }
-
-    return true;
-}
-
-
 void Renderer::renderRingSystem(Body& body,
                                 const Vector3f& pos,
                                 float distance,
                                 const Observer& observer,
                                 float nearPlaneDistance,
-                                const Matrices &m,
-                                celestia::render::RingRenderHalf renderHalf)
+                                const Matrices &m)
 {
     const BodyFeaturesManager* bodyFeaturesManager = GetBodyFeaturesManager();
 
@@ -3588,8 +3239,7 @@ void Renderer::renderRingSystem(Body& body,
                                 renderShadow,
                                 segmentSizeInPixels,
                                 ringsMVP,
-                                false,
-                                renderHalf);
+                                false);
 }
 
 
@@ -4051,23 +3701,6 @@ void Renderer::buildRenderLists(const Vector3d& astrocentricObserverPos,
                 // In both cases, it's the wrong quantity to use (e.g. for objects with orbits
                 // defined relative to the SSB.)
                 rle.sun = -pos_s.cast<float>();
-
-                if (rle.discSizeInPixels > 1.0f &&
-                    util::is_set(
-                        renderFlags,
-                        RenderFlags::ShowAtmospheres) &&
-                    projectionMode->supportsBrunetonAtmospheres())
-                {
-                    const Atmosphere* atmosphere =
-                        GetBodyFeaturesManager()->getAtmosphere(body);
-                    if (atmosphere != nullptr &&
-                        !atmosphere->brunetonLutFile.empty() &&
-                        m_brunetonAtmosphereManager->find(
-                            atmosphere->brunetonLutFile) != nullptr)
-                    {
-                        m_needsBrunetonPass = true;
-                    }
-                }
 
                 addRenderListEntries(rle, *body, isLabeled);
             }
@@ -5787,18 +5420,6 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
         // Test the object's bounding sphere against the view frustum
         if (frustum.testSphere(center, cullRadius) != math::FrustumAspect::Outside)
         {
-            if (m_brunetonPostprocessEnabled &&
-                ri.renderableType == RenderListEntry::RenderableBody &&
-                ri.discSizeInPixels > 1.0f &&
-                atmosphere != nullptr &&
-                !atmosphere->brunetonLutFile.empty() &&
-                m_brunetonAtmosphereManager->find(
-                    atmosphere->brunetonLutFile) != nullptr)
-            {
-                m_brunetonAtmospheres.push_back(
-                    { ri.body, ri.position, ri.distance });
-            }
-
             if (ri.discSizeInPixels <= 1.0f)
             {
                 // Sub-pixel objects are rendered as points in front of
@@ -6339,13 +5960,10 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
         }
 
         // Render annotations in this interval
-        if (!m_brunetonPostprocessEnabled)
-        {
-            annotation = renderSortedAnnotations(annotation,
-                                                 nearPlaneDistance,
-                                                 farPlaneDistance,
-                                                 FontStyle::Normal);
-        }
+        annotation = renderSortedAnnotations(annotation,
+                                             nearPlaneDistance,
+                                             farPlaneDistance,
+                                             FontStyle::Normal);
         endObjectAnnotations();
     }
 

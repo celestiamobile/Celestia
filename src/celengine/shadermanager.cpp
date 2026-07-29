@@ -1458,8 +1458,6 @@ buildFragmentShader(const ShaderProperties& props)
         source += ScatteringConstantDeclarations(props);
 
     source += DeclareUniform("eyePosition", Shader_Vector3);
-    if (util::is_set(props.texUsage, TexUsage::SurfaceId))
-        source += DeclareUniform("surfaceBodyId", Shader_Float);
 
     if (util::is_set(props.lightModel, LightingModel::LunarLambertModel))
         source += DeclareUniform("lunarLambert", Shader_Float);
@@ -1813,9 +1811,6 @@ buildFragmentShader(const ShaderProperties& props)
         source += "fragColor.a *= 1.0 - smoothstep(lineEdge - lineHalfPx, lineEdge + lineHalfPx, abs(lineU));\n";
     }
 
-    if (util::is_set(props.texUsage, TexUsage::SurfaceId))
-        source += "fragColor.a = -surfaceBodyId;\n";
-
     source += "}\n";
 
     DumpFSSource(source);
@@ -1887,7 +1882,6 @@ buildRingsFragmentShader(const ShaderProperties& props)
     source += FragmentHeader;
 
     source += DeclareUniform("ambientColor", Shader_Vector3);
-    source += DeclareUniform("ringHalf", Shader_Float);
 
     source += DeclareLights(props);
 
@@ -1918,9 +1912,6 @@ buildRingsFragmentShader(const ShaderProperties& props)
 
     source += "\nvoid main(void)\n{\n";
 
-    source += "float ringSide = dot(position, eyePosition);\n";
-    source += "if ((ringHalf > 0.0 && ringSide <= 0.0) || "
-              "(ringHalf < 0.0 && ringSide > 0.0)) discard;\n";
     source += "vec4 diff = vec4(ambientColor, 1.0);\n";
 
     // Get the normalized direction from the eye to the vertex
@@ -2942,7 +2933,6 @@ CelestiaGLProgram::initParameters()
     }
 
     opacity      = floatParam("opacity");
-    surfaceBodyId = floatParam("surfaceBodyId");
     ambientColor = vec3Param("ambientColor");
 
     if (util::is_set(props.texUsage, TexUsage::RingShadowTexture))
@@ -2956,7 +2946,6 @@ CelestiaGLProgram::initParameters()
     {
         ringWidth            = floatParam("ringWidth");
         ringRadius           = floatParam("ringRadius");
-        ringHalf             = floatParam("ringHalf");
     }
 
     textureOffset = floatParam("texCoordOffset");

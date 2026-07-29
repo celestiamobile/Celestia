@@ -538,7 +538,6 @@ private:
     std::optional<bool> dragStartFromSurface { std::nullopt };
     std::optional<Eigen::Vector2f> dragStart{ std::nullopt };
 
-    std::unique_ptr<BrunetonViewportEffect> brunetonViewportEffect;
     std::vector<std::unique_ptr<ViewportEffect>> viewportEffects;
     bool isViewportEffectUsed { false };
     bool needsUpdateFonts{ false };

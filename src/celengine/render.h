@@ -108,8 +108,6 @@ enum class RenderMode
 
 struct RenderPreparation
 {
-    bool needsBrunetonPass{ false };
-    bool brunetonPassActive{ false };
 };
 
 class Renderer
@@ -178,8 +176,6 @@ class Renderer
         float faintestVisible,
         const Selection& sel);
     void renderPrepared(const RenderPreparation&);
-    void renderDeferredOverlays();
-    bool hasDeferredDepthAnnotations() const;
 
     bool getInfo(std::map<std::string, std::string>& info) const;
 
@@ -443,12 +439,6 @@ class Renderer
     {
         return m_brunetonAtmosphereManager.get();
     }
-    bool renderBrunetonAtmospheres(
-        const FramebufferObject&,
-        int width,
-        int height,
-        int originX,
-        int originY);
 
  public:
     struct RenderProperties
@@ -462,7 +452,6 @@ class Renderer
         Eigen::Vector3f semiAxes{ Eigen::Vector3f::Ones() };
         float radius{ 1.0f };
         float geometryScale{ 1.0f };
-        float surfaceBodyId{ 0.0f };
         celestia::engine::GeometryHandle geometry{ celestia::engine::GeometryHandle::Invalid };
 	bool isStar{ false };
     };
@@ -472,14 +461,6 @@ class Renderer
         int index;
         float nearZ;
         float farZ;
-    };
-
-    struct BrunetonAtmosphereEntry
-    {
-        Body* body;
-        Eigen::Vector3f position;
-        double distance;
-        GLint surfaceBodyId{ 0 };
     };
 
  private:
@@ -554,9 +535,7 @@ class Renderer
                           float distance,
                           const Observer& observer,
                           float nearPlaneDistance,
-                          const Matrices&,
-                          celestia::render::RingRenderHalf);
-    void renderDeferredRingSystems(const Observer&);
+                          const Matrices&);
 
     void renderStar(const Star& star,
                     const Eigen::Vector3f& pos,
@@ -669,7 +648,6 @@ class Renderer
                            FontStyle fs);
     void renderBackgroundAnnotations(FontStyle fs);
     void renderForegroundAnnotations(FontStyle fs);
-    void renderDeferredDepthAnnotations();
     void renderObjectAnnotations(std::vector<Annotation>& annotations,
                                  std::size_t interval);
     std::vector<Annotation>::iterator renderSortedAnnotations(std::vector<Annotation>::iterator,
@@ -763,23 +741,10 @@ class Renderer
     std::vector<RenderListEntry> renderList;
     std::vector<SecondaryIlluminator> secondaryIlluminators;
     std::vector<DepthBufferPartition> depthPartitions;
-    std::vector<BrunetonAtmosphereEntry> m_brunetonAtmospheres;
     std::vector<Annotation> backgroundAnnotations;
     std::vector<Annotation> foregroundAnnotations;
     std::vector<Annotation> depthSortedAnnotations;
     std::vector<Annotation> objectAnnotations;
-    struct DeferredObjectAnnotationBatch
-    {
-        std::size_t interval;
-        std::vector<Annotation> annotations;
-    };
-    std::vector<DeferredObjectAnnotationBatch> m_deferredObjectAnnotationBatches;
-    struct DeferredRingSystem
-    {
-        std::size_t interval;
-        RenderListEntry entry;
-    };
-    std::vector<DeferredRingSystem> m_deferredRingSystems;
     std::vector<OrbitPathListEntry> orbitPathList;
     LightingState::EclipseShadowVector eclipseShadows[MaxLights];
     std::vector<const Star*> nearStars;
@@ -803,8 +768,6 @@ class Renderer
 
     int currentIntervalIndex{ 0 };
     double m_renderTime{ 0.0 };
-    bool m_brunetonPostprocessEnabled{ false };
-    bool m_needsBrunetonPass{ false };
 
     struct PreparedRender
     {
@@ -816,16 +779,6 @@ class Renderer
         double now;
     };
     std::optional<PreparedRender> m_preparedRender;
-
-    struct DeferredOverlays
-    {
-        const Observer* observer;
-        Selection selection;
-        celestia::math::InfiniteFrustum transformedFrustum;
-        double now;
-        bool renderSelectionPointer;
-    };
-    std::optional<DeferredOverlays> m_deferredOverlays;
 
     PipelineState m_pipelineState;
 

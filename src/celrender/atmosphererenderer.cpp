@@ -56,50 +56,7 @@ AtmosphereRenderer::AtmosphereRenderer(Renderer &renderer) :
 {
 }
 
-AtmosphereRenderer::~AtmosphereRenderer()
-{
-    if (m_depthPartitionTexture != 0)
-        glDeleteTextures(1, &m_depthPartitionTexture);
-}
-
-void
-AtmosphereRenderer::setSceneDepth(
-    GLuint depthTexture,
-    const std::vector<Eigen::Vector2f>& partitionNearFar,
-    int width,
-    int height,
-    int originX,
-    int originY)
-{
-    m_sceneDepthTexture = depthTexture;
-    m_depthPartitionCount =
-        static_cast<int>(partitionNearFar.size());
-    m_sceneWidth = width;
-    m_sceneHeight = height;
-    m_sceneOriginX = originX;
-    m_sceneOriginY = originY;
-
-    if (m_depthPartitionTexture == 0)
-        glGenTextures(1, &m_depthPartitionTexture);
-
-    glActiveTexture(GL_TEXTURE4);
-    glBindTexture(GL_TEXTURE_2D, m_depthPartitionTexture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(
-        GL_TEXTURE_2D,
-        0,
-        GL_RG32F,
-        static_cast<GLsizei>(partitionNearFar.size()),
-        1,
-        0,
-        GL_RG,
-        GL_FLOAT,
-        partitionNearFar.data());
-    glActiveTexture(GL_TEXTURE0);
-}
+AtmosphereRenderer::~AtmosphereRenderer() = default;
 
 void AtmosphereRenderer::initGL()
 {
@@ -153,6 +110,70 @@ void AtmosphereRenderer::initGL()
         sizeof(vertices[0]),
         0);
     m_brunetonVo.setCount(static_cast<GLsizei>(vertices.size()));
+
+    // Build a unit sphere mesh used to rasterize the atmosphere shell. The
+    // vertex shader scales it by the top radius. Triangles are wound so that
+    // the exterior is front-facing (CCW), so back-face culling keeps only the
+    // near hemisphere (the atmosphere entry surface).
+    constexpr int shellStacks = 32;
+    constexpr int shellSlices = 64;
+    constexpr float shellPi = numbers::pi_v<float>;
+    std::vector<std::array<float, 3>> shellVertices;
+    shellVertices.reserve((shellStacks + 1) * (shellSlices + 1));
+    for (int i = 0; i <= shellStacks; ++i)
+    {
+        const float phi =
+            static_cast<float>(i) / static_cast<float>(shellStacks) * shellPi;
+        const float y = std::cos(phi);
+        const float r = std::sin(phi);
+        for (int j = 0; j <= shellSlices; ++j)
+        {
+            const float theta =
+                static_cast<float>(j) / static_cast<float>(shellSlices) *
+                2.0f * shellPi;
+            shellVertices.push_back(
+                { r * std::cos(theta), y, r * std::sin(theta) });
+        }
+    }
+
+    std::vector<unsigned short> shellIndices;
+    shellIndices.reserve(shellStacks * shellSlices * 6);
+    const int shellStride = shellSlices + 1;
+    for (int i = 0; i < shellStacks; ++i)
+    {
+        for (int j = 0; j < shellSlices; ++j)
+        {
+            const auto a = static_cast<unsigned short>(i * shellStride + j);
+            const auto b = static_cast<unsigned short>(a + shellStride);
+            const auto c = static_cast<unsigned short>(a + 1);
+            const auto d = static_cast<unsigned short>(b + 1);
+            shellIndices.push_back(a);
+            shellIndices.push_back(c);
+            shellIndices.push_back(b);
+            shellIndices.push_back(c);
+            shellIndices.push_back(d);
+            shellIndices.push_back(b);
+        }
+    }
+
+    m_shellBo = gl::Buffer(gl::Buffer::TargetHint::Array);
+    m_shellBo.setData(shellVertices);
+    m_shellVo = gl::VertexObject(gl::VertexObject::Primitive::Triangles);
+    m_shellVo.addVertexBuffer(
+        m_shellBo,
+        CelestiaGLProgram::VertexCoordAttributeIndex,
+        3,
+        gl::VertexObject::DataType::Float,
+        false,
+        sizeof(shellVertices[0]),
+        0);
+    gl::Buffer shellIndexBuffer(gl::Buffer::TargetHint::ElementArray);
+    shellIndexBuffer.setData(shellIndices);
+    m_shellVo.setIndexBuffer(
+        std::move(shellIndexBuffer),
+        0,
+        gl::VertexObject::IndexType::UnsignedShort);
+    m_shellVo.setCount(static_cast<GLsizei>(shellIndices.size()));
 }
 
 void
@@ -375,33 +396,29 @@ AtmosphereRenderer::renderBruneton(
     const RenderInfo& ri,
     const LightingState& ls,
     const Matrices& m,
+    const Eigen::Matrix4f& planetModelView,
+    float nearPlaneDistance,
     const BrunetonAtmosphereResource& resource,
     float luminanceScale,
     const Eigen::Vector3f& bodySemiAxes,
     const Eigen::Quaternionf& bodyOrientation,
-    GLuint surfaceIdTexture,
-    GLint surfaceBodyId,
     Texture* cloudTexture,
     Texture* cloudNormalMap,
     float cloudHeight,
     float cloudTextureOffset)
 {
-    bool useDualSource = false;
-#ifndef GL_ES
-    useDualSource = ls.nLights > 0 && gl::dualSourceBlending;
-#endif
+    // The hybrid atmosphere renders directly into the scene framebuffer (the
+    // window's default framebuffer / drawable) rather than an offscreen FBO.
+    // Dual-source blending (GL_SRC1_COLOR) targeting the default framebuffer
+    // fails to build a pipeline state on some drivers (notably Apple's
+    // Metal-backed OpenGL), which silently drops the very expensive Bruneton
+    // shader onto the software rasterizer and appears to hang. The two-pass
+    // blending path below (multiply by transmittance, then add in-scattering)
+    // is mathematically equivalent and uses only universally supported blend
+    // factors, so we always take it.
 
     ShaderManager& shaderManager = m_renderer.getShaderManager();
-    auto* program = shaderManager.getShader(
-        StaticShader::BrunetonAtmosphere,
-        useDualSource
-            ? StaticShaderOptions::DualSource
-            : StaticShaderOptions::None);
-    if (useDualSource && shaderManager.isErrorProgram(program))
-    {
-        useDualSource = false;
-        program = shaderManager.getShader(StaticShader::BrunetonAtmosphere);
-    }
+    auto* program = shaderManager.getShader(StaticShader::BrunetonAtmosphere);
     if (program == nullptr)
         return false;
 
@@ -480,6 +497,27 @@ AtmosphereRenderer::renderBruneton(
         camera *= minimumCameraRadius / cameraRadius;
     Vec3ShaderParameter(programId, "camera") = camera;
     Vec3ShaderParameter(programId, "earth_center") = Eigen::Vector3f::Zero();
+
+    // Outside the atmosphere: draw the top-radius sphere so the depth test
+    // handles occlusion. Use the shell only when it clears the near plane;
+    // otherwise (inside, or skimming just above the top) it gets clipped and
+    // leaves a seam, so fall back to a full-screen quad.
+    const float shellClearance = cameraRadius - parameters.topRadius;
+    const bool useShell = shellClearance > nearPlaneDistance * 2.0f;
+    IntegerShaderParameter(programId, "use_shell") = useShell ? 1 : 0;
+    FloatShaderParameter(programId, "shell_radius") = parameters.topRadius;
+    // Place the shell with the planet's own model-view so it stays attached.
+    // Pre-scale by 1/bottom_radius to turn Bruneton units into the unit-sphere
+    // units the planet model-view expects. Reconstructing from modelFromView
+    // instead only works for spheres and detaches the shell on oblate planets.
+    Eigen::Matrix4f modelScale = Eigen::Matrix4f::Identity();
+    const float invBottomRadius = 1.0f / parameters.bottomRadius;
+    modelScale(0, 0) = invBottomRadius;
+    modelScale(1, 1) = invBottomRadius;
+    modelScale(2, 2) = invBottomRadius;
+    Mat4ShaderParameter(programId, "clip_from_model") =
+        (*m.projection) * planetModelView * modelScale;
+
     Eigen::Vector3f sunDirection =
         ls.nLights == 0
             ? Eigen::Vector3f::UnitZ()
@@ -599,16 +637,6 @@ AtmosphereRenderer::renderBruneton(
         Eigen::Map<const Eigen::Vector3f>(
             parameters.sunSpectralRadianceToLuminance.data());
     FloatShaderParameter(programId, "luminance_scale") = luminanceScale;
-    Vec2ShaderParameter(programId, "viewport_size") =
-        Eigen::Vector2f(
-            static_cast<float>(m_sceneWidth),
-            static_cast<float>(m_sceneHeight));
-    Vec2ShaderParameter(programId, "viewport_origin") =
-        Eigen::Vector2f(
-            static_cast<float>(m_sceneOriginX),
-            static_cast<float>(m_sceneOriginY));
-    IntegerShaderParameter(programId, "depth_partition_count") =
-        m_depthPartitionCount;
 
     IntegerShaderParameter(programId, "combined_scattering_textures") =
         parameters.combinedScattering ? 1 : 0;
@@ -627,12 +655,7 @@ AtmosphereRenderer::renderBruneton(
     IntegerShaderParameter(programId, "transmittance_texture") = 0;
     IntegerShaderParameter(programId, "scattering_texture") = 1;
     IntegerShaderParameter(programId, "single_mie_scattering_texture") = 2;
-    IntegerShaderParameter(programId, "scene_depth_texture") = 3;
-    IntegerShaderParameter(programId, "depth_partition_texture") = 4;
     IntegerShaderParameter(programId, "irradiance_texture") = 5;
-    IntegerShaderParameter(programId, "surface_id_texture") = 7;
-    FloatShaderParameter(programId, "surface_body_id") =
-        static_cast<float>(surfaceBodyId);
 
     TextureTile cloudTile(0);
     const bool renderClouds =
@@ -672,18 +695,12 @@ AtmosphereRenderer::renderBruneton(
         parameters.combinedScattering
             ? resource.scatteringTexture()
             : resource.singleMieTexture());
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, m_sceneDepthTexture);
-    glActiveTexture(GL_TEXTURE4);
-    glBindTexture(GL_TEXTURE_2D, m_depthPartitionTexture);
     glActiveTexture(GL_TEXTURE5);
     glBindTexture(GL_TEXTURE_2D, resource.irradianceTexture());
     glActiveTexture(GL_TEXTURE6);
     glBindTexture(
         GL_TEXTURE_2D,
         renderClouds ? cloudTile.texID : resource.transmittanceTexture());
-    glActiveTexture(GL_TEXTURE7);
-    glBindTexture(GL_TEXTURE_2D, surfaceIdTexture);
     glActiveTexture(GL_TEXTURE8);
     glBindTexture(
         GL_TEXTURE_2D,
@@ -698,21 +715,21 @@ AtmosphereRenderer::renderBruneton(
             : resource.transmittanceTexture());
     glActiveTexture(GL_TEXTURE0);
 
+    gl::VertexObject& vo = useShell ? m_shellVo : m_brunetonVo;
+    // Both meshes are wound CCW and global culling is on, so force CCW front.
+    glFrontFace(GL_CCW);
+
     Renderer::PipelineState state;
     state.blending = true;
-    if (useDualSource)
-    {
-        state.blendFunc = { GL_ONE, GL_SRC1_COLOR };
-        m_renderer.setPipelineState(state);
-        IntegerShaderParameter(programId, "render_mode") = 1;
-        m_brunetonVo.draw();
-        return true;
-    }
+    // Depth-test the shell so foreground objects occlude it, but don't write
+    // depth since it is translucent.
+    state.depthTest = useShell;
+    state.depthMask = false;
 
     state.blendFunc = { GL_ZERO, GL_SRC_COLOR };
     m_renderer.setPipelineState(state);
     IntegerShaderParameter(programId, "render_mode") = 0;
-    m_brunetonVo.draw();
+    vo.draw();
 
     if (ls.nLights == 0)
         return true;
@@ -720,7 +737,7 @@ AtmosphereRenderer::renderBruneton(
     state.blendFunc = { GL_ONE, GL_ONE };
     m_renderer.setPipelineState(state);
     IntegerShaderParameter(programId, "render_mode") = 1;
-    m_brunetonVo.draw();
+    vo.draw();
     return true;
 }
 

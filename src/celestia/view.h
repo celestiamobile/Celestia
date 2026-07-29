@@ -55,10 +55,7 @@ public:
                     int gWidth,
                     int gHeight,
                     bool multisampleFirstFbo);
-    void updateBrunetonFBO(int gWidth, int gHeight);
-    void releaseBrunetonFBO();
     FramebufferObject *getFBO(int index) const;
-    FramebufferObject *getBrunetonFBO() const;
 
     Type           type;
 
@@ -73,7 +70,6 @@ public:
 
 private:
     std::vector<std::unique_ptr<FramebufferObject>> fbos;
-    std::unique_ptr<FramebufferObject> brunetonFbo;
 };
 
 }

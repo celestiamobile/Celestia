@@ -99,7 +99,6 @@ enum class TexUsage : std::uint32_t
     StaticPointSize         = 0x10000,
     LineAsTriangles         = 0x20000,
     TextureCoordTransform   = 0x40000,
-    SurfaceId               = 0x80000,
 };
 
 ENUM_CLASS_BITWISE_OPS(TexUsage);
@@ -290,11 +289,9 @@ public:
     FloatShaderParameter shininess;
     Vec3ShaderParameter ambientColor;
     FloatShaderParameter opacity;
-    FloatShaderParameter surfaceBodyId;
 
     FloatShaderParameter ringWidth;
     FloatShaderParameter ringRadius;
-    FloatShaderParameter ringHalf;
     Vec4ShaderParameter ringPlane;
     Vec3ShaderParameter ringCenter;
 

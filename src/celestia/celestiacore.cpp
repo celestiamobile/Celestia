@@ -2064,11 +2064,10 @@ void CelestiaCore::draw(View* view)
     if (view->type != View::ViewWindow) return;
 
     bool viewportEffectUsed = false;
-    bool brunetonActive = false;
     const int nEffects = static_cast<int>(viewportEffects.size());
     // Capture the screen framebuffer before any binding changes so we can
     // restore it after the effect chain without relying on preprocess to save it.
-    auto screenFbo = brunetonViewportEffect != nullptr || nEffects > 0
+    auto screenFbo = nEffects > 0
         ? std::make_optional(FramebufferObject::wrapCurrentBinding())
         : std::nullopt;
     auto x = static_cast<int>(view->x * static_cast<float>(metrics.width));
@@ -2082,59 +2081,25 @@ void CelestiaCore::draw(View* view)
     auto preparation = view->isRootView()
         ? sim->prepareRender(*renderer)
         : sim->prepareRender(*renderer, *view->observer);
-    if (!preparation.needsBrunetonPass)
-        view->releaseBrunetonFBO();
 
     if (nEffects > 0)
     {
         view->updateFBOs(viewportEffects,
                          metrics.width,
                          metrics.height,
-                         !preparation.needsBrunetonPass);
+                         true);
         genericEffectsActive = true;
         for (int i = 0; i < nEffects; ++i)
             genericEffectsActive =
                 genericEffectsActive && view->getFBO(i) != nullptr;
     }
 
-    if (preparation.needsBrunetonPass &&
-        brunetonViewportEffect != nullptr &&
-        (nEffects == 0 || genericEffectsActive))
-    {
-        view->updateBrunetonFBO(metrics.width, metrics.height);
-        FramebufferObject* sceneFbo = view->getBrunetonFBO();
-        brunetonActive =
-            sceneFbo != nullptr &&
-            brunetonViewportEffect->preprocess(renderer, sceneFbo);
-    }
-
-    if (preparation.needsBrunetonPass &&
-        !brunetonActive &&
-        genericEffectsActive)
-    {
-        view->updateFBOs(viewportEffects,
-                         metrics.width,
-                         metrics.height,
-                         true);
-        for (int i = 0; i < nEffects; ++i)
-            genericEffectsActive =
-                genericEffectsActive && view->getFBO(i) != nullptr;
-    }
-
-    if (brunetonActive)
-    {
-        process = true;
-    }
-    else if (genericEffectsActive)
+    if (genericEffectsActive)
     {
         FramebufferObject* sceneFbo = view->getFBO(0);
         process =
             sceneFbo != nullptr &&
             viewportEffects.front()->preprocess(renderer, sceneFbo);
-    }
-    else
-    {
-        process = false;
     }
 
     renderer->setRenderRegion(
@@ -2143,33 +2108,11 @@ void CelestiaCore::draw(View* view)
         viewWidth,
         viewHeight,
         !view->isRootView() && !process);
-    preparation.brunetonPassActive = brunetonActive;
     renderer->renderPrepared(preparation);
 
     if (process)
     {
         bool ok = true;
-        if (brunetonActive)
-        {
-            FramebufferObject* dst =
-                nEffects == 0
-                    ? &screenFbo.value()
-                    : view->getFBO(0);
-            if (nEffects == 0)
-                renderer->setRenderRegion(x, y, viewWidth, viewHeight);
-
-            FramebufferObject* src = view->getBrunetonFBO();
-            if (!brunetonViewportEffect->prerender(renderer, src, dst) ||
-                !brunetonViewportEffect->render(
-                    renderer, src, viewWidth, viewHeight))
-            {
-                GetLogger()->error(
-                    "Unable to render Bruneton viewport effect.\n");
-                ok = false;
-            }
-            renderer->renderDeferredOverlays();
-        }
-
         for (int i = 0; genericEffectsActive && i < nEffects; i++)
         {
             if (!ok)
@@ -2708,8 +2651,6 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
                                                                      metrics.screenDpi);
     }
     renderer->setProjectionMode(projectionMode);
-
-    brunetonViewportEffect = std::make_unique<BrunetonViewportEffect>();
 
     if (!config->viewportEffect.empty() && config->viewportEffect != "none")
     {

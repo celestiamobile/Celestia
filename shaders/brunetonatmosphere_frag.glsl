@@ -78,9 +78,6 @@ uniform sampler2D transmittance_texture;
 uniform sampler3D scattering_texture;
 uniform sampler3D single_mie_scattering_texture;
 uniform sampler2D irradiance_texture;
-uniform sampler2D scene_depth_texture;
-uniform sampler2D surface_id_texture;
-uniform sampler2D depth_partition_texture;
 uniform sampler2D cloud_texture;
 uniform sampler2D cloud_normal_texture;
 uniform sampler2D ring_shadow_texture;
@@ -88,12 +85,10 @@ uniform int combined_scattering_textures;
 uniform int precomputed_luminance;
 uniform int manual_float_filtering;
 uniform int manual_scattering_filtering;
-uniform int depth_partition_count;
 uniform int render_clouds;
 uniform int render_cloud_normals;
 uniform int cloud_normal_texture_dxt5;
 uniform int cloud_texture_has_alpha;
-uniform float surface_body_id;
 uniform vec3 camera;
 uniform vec3 earth_center;
 uniform vec3 sun_direction;
@@ -102,8 +97,6 @@ uniform vec3 sun_spectral_radiance_to_luminance;
 uniform float luminance_scale;
 uniform float cloud_radius;
 uniform float cloud_texture_offset;
-uniform vec2 viewport_size;
-uniform vec2 viewport_origin;
 uniform int render_mode;
 uniform int eclipse_shadow_count;
 uniform vec4 eclipse_shadow_tex_gen_s[MAX_ECLIPSE_SHADOWS];
@@ -120,7 +113,6 @@ uniform float ring_shadow_inverse_width;
 uniform float ring_shadow_lod;
 
 in vec3 view_ray;
-in vec3 view_ray_view;
 
 Number ClampCosine(Number mu)
 {
@@ -760,86 +752,6 @@ vec2 RaySphereIntersections(
 
     Length root = sqrt(discriminant);
     return vec2(-b - root, -b + root);
-}
-
-Length ReconstructSceneDistance(
-    float depth,
-    float distance_scale)
-{
-    if (depth >= 1.0)
-        return 1.0e30;
-
-    float count = float(depth_partition_count);
-    int partition_index = clamp(
-        int(floor((1.0 - depth) * count)),
-        0,
-        depth_partition_count - 1);
-    float range_min =
-        1.0 - float(partition_index + 1) / count;
-    float local_depth =
-        clamp((depth - range_min) * count, 0.0, 1.0);
-    float ndc_z = local_depth * 2.0 - 1.0;
-
-    vec2 near_far = texelFetch(
-        depth_partition_texture,
-        ivec2(partition_index, 0),
-        0).rg;
-    float denominator =
-        near_far.y + near_far.x -
-        ndc_z * (near_far.y - near_far.x);
-    float view_z =
-        2.0 * near_far.x * near_far.y /
-        denominator;
-    return view_z * distance_scale;
-}
-
-Length GetSceneDistance()
-{
-    vec2 uv =
-        (gl_FragCoord.xy - viewport_origin) / viewport_size;
-    float depth = texture(scene_depth_texture, uv).r;
-    Direction ray_view = normalize(view_ray_view);
-    float model_units_per_km =
-        length(view_ray) / max(length(view_ray_view), 1.0e-6);
-    float distance_scale =
-        model_units_per_km / max(-ray_view.z, 1.0e-6);
-    return ReconstructSceneDistance(depth, distance_scale);
-}
-
-bool IsVisibleSurfaceNearby()
-{
-    ivec2 size = textureSize(surface_id_texture, 0);
-    ivec2 pixel = clamp(
-        ivec2(gl_FragCoord.xy - viewport_origin),
-        ivec2(0),
-        size - ivec2(1));
-    float center_alpha =
-        texelFetch(surface_id_texture, pixel, 0).a;
-    if (center_alpha >= 0.9999)
-        return false;
-    if (abs(-center_alpha - surface_body_id) < 0.25)
-        return true;
-
-    for (int y = -1; y <= 1; ++y)
-    {
-        for (int x = -1; x <= 1; ++x)
-        {
-            if (x == 0 && y == 0)
-                continue;
-            ivec2 sample_pixel = clamp(
-                pixel + ivec2(x, y),
-                ivec2(0),
-                size - ivec2(1));
-            float visible_surface_id =
-                -texelFetch(
-                    surface_id_texture,
-                    sample_pixel,
-                    0).a;
-            if (abs(visible_surface_id - surface_body_id) < 0.25)
-                return true;
-        }
-    }
-    return false;
 }
 
 Number GetDirectShadowVisibility(Position position);
@@ -1672,18 +1584,17 @@ void main()
     vec3 view_direction = normalize(view_ray);
     vec3 transmittance;
     Position camera_position = camera - earth_center;
-    Length scene_distance = GetSceneDistance();
     vec2 ground_intersections = RaySphereIntersections(
         camera_position,
         view_direction,
         atmosphere.bottom_radius);
-    bool visible_atmosphere_surface = IsVisibleSurfaceNearby();
-    if (visible_atmosphere_surface)
-    {
-        scene_distance = ground_intersections.x >= 0.0
-            ? ground_intersections.x
-            : 1.0e30;
-    }
+    // Occlusion by foreground objects is resolved by the hardware depth
+    // test on the atmosphere shell geometry, so the only scene surface the
+    // shader must account for is the planet's own ground, found analytically.
+    bool visible_atmosphere_surface = ground_intersections.x >= 0.0;
+    Length scene_distance = visible_atmosphere_surface
+        ? ground_intersections.x
+        : 1.0e30;
     vec2 atmosphere_intersections = RaySphereIntersections(
         camera_position, view_direction, atmosphere.top_radius);
 

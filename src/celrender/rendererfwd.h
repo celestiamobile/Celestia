@@ -16,6 +16,5 @@ class OpenClusterRenderer;
 class PsfGlowLargeRenderer;
 class ReferenceMarkRenderer;
 class RingRenderer;
-enum class RingRenderHalf;
 class SkyGridRenderer;
 }

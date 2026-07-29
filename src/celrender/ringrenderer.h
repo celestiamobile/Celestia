@@ -25,13 +25,6 @@ struct RingSystem;
 namespace celestia::render
 {
 
-enum class RingRenderHalf
-{
-    Both,
-    Near,
-    Far,
-};
-
 class RingRenderer
 {
 public:
@@ -46,8 +39,7 @@ public:
                      bool renderShadow,
                      float segmentSizeInPixels,
                      const Matrices &m,
-                     bool inside,
-                     RingRenderHalf renderHalf = RingRenderHalf::Both);
+                     bool inside);
 
 private:
     void initializeLOD(unsigned int, std::uint32_t);

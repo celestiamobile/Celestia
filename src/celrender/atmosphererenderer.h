@@ -72,24 +72,16 @@ public:
         const RenderInfo&,
         const LightingState&,
         const Matrices&,
+        const Eigen::Matrix4f& planetModelView,
+        float nearPlaneDistance,
         const BrunetonAtmosphereResource&,
         float luminanceScale,
         const Eigen::Vector3f& bodySemiAxes,
         const Eigen::Quaternionf& bodyOrientation,
-        GLuint surfaceIdTexture,
-        GLint surfaceBodyId,
         Texture* cloudTexture,
         Texture* cloudNormalMap,
         float cloudHeight,
         float cloudTextureOffset);
-
-    void setSceneDepth(
-        GLuint depthTexture,
-        const std::vector<Eigen::Vector2f>& partitionNearFar,
-        int width,
-        int height,
-        int originX,
-        int originY);
 
     void initGL();
 
@@ -127,13 +119,8 @@ private:
     gl::VertexObject              m_vo;
     gl::Buffer                    m_brunetonBo;
     gl::VertexObject              m_brunetonVo;
-    GLuint                        m_depthPartitionTexture{ 0 };
-    GLuint                        m_sceneDepthTexture{ 0 };
-    int                           m_depthPartitionCount{ 0 };
-    int                           m_sceneWidth{ 0 };
-    int                           m_sceneHeight{ 0 };
-    int                           m_sceneOriginX{ 0 };
-    int                           m_sceneOriginY{ 0 };
+    gl::Buffer                    m_shellBo;
+    gl::VertexObject              m_shellVo;
     bool                          m_initialized{ false };
 };
 
