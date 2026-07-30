@@ -5284,6 +5284,14 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
     // Remove objects from the render list that lie completely outside the
     // view frustum.
     auto notCulled = renderList.begin();
+
+    // Pull the near plane out if needed to keep the far/near ratio in range.
+    auto clampNearForRatio = [](float &nearZ, float farZ)
+    {
+        if (farZ / nearZ > MaxFarNearRatio * 0.5f)
+            nearZ = farZ / (MaxFarNearRatio * 0.5f);
+    };
+
     const BodyFeaturesManager* bodyFeaturesManager = GetBodyFeaturesManager();
     for (auto &ri : renderList)
     {
@@ -5291,6 +5299,8 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
         float radius = 1.0f;
         float cullRadius = 1.0f;
         float cloudHeight = 0.0f;
+        float ringOuterRadius = 0.0f;
+        float ringInnerRadius = 0.0f;
 
         switch (ri.renderableType)
         {
@@ -5314,13 +5324,14 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
                 rings != nullptr && util::is_set(renderFlags, RenderFlags::ShowPlanetRings) &&
                 ri.distance <= rings->innerRadius)
             {
-                // Inside the rings: they are drawn inline with the body (no
-                // separate ring entry), so the body entry must encompass the
-                // ring extent for culling and depth partitioning.
-                radius = rings->outerRadius;
-                convex = false;
+                // Inside the rings: cull and far-clip to the ring extent, but
+                // keep the near plane based on the planet so a nearby surface
+                // isn't clipped.
+                ringOuterRadius = rings->outerRadius;
+                ringInnerRadius = rings->innerRadius;
             }
-            else if (!ri.body->isEllipsoid())
+
+            if (!ri.body->isEllipsoid())
                 convex = false;
 
             cullRadius = radius;
@@ -5330,6 +5341,7 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
                 cloudHeight = max(atmosphere->cloudHeight,
                                   getAtmosphereShellHeight(atmosphere->mieScaleHeight));
             }
+            cullRadius = std::max(cullRadius, ringOuterRadius);
             break;
 
         default:
@@ -5372,11 +5384,19 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
                 }
                 ri.nearZ = std::min(nearZ, -bodyMinNearZ);
 
+                // Pull the near plane in to the nearest possible ring point so
+                // rings near the inner edge aren't clipped.
+                if (ringInnerRadius > 0.0f)
+                {
+                    float ringClearance = std::max(ringInnerRadius - d, MinNearPlaneDistance);
+                    float ringNearZ = std::max(MinNearPlaneDistance, ringClearance * nearZcoeff);
+                    ri.nearZ = std::max(ri.nearZ, -ringNearZ);
+                }
+
                 if (!convex)
                 {
-                    ri.farZ = center.z() - radius;
-                    if (ri.farZ / ri.nearZ > MaxFarNearRatio * 0.5f)
-                        ri.nearZ = ri.farZ / (MaxFarNearRatio * 0.5f);
+                    ri.farZ = center.z() - std::max(radius, ringOuterRadius);
+                    clampNearForRatio(ri.nearZ, ri.farZ);
                 }
                 else
                 {
@@ -5405,6 +5425,13 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
                                           ? std::sqrt(math::square(d) - math::square(eradius)) * 1.1f
                                           : MinNearPlaneDistance;
                         ri.farZ = -horizon;
+                    }
+
+                    // Extend the far plane to the back of the rings.
+                    if (ringOuterRadius > 0.0f)
+                    {
+                        ri.farZ = std::min(ri.farZ, center.z() - ringOuterRadius);
+                        clampNearForRatio(ri.nearZ, ri.farZ);
                     }
                 }
             }
