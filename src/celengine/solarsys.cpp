@@ -11,6 +11,7 @@
 // of the License, or (at your option) any later version.
 
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <istream>
@@ -743,6 +744,22 @@ void ReadAtmosphere(Body* body,
     //atmosData->getNumber("RayleighScaleHeight", atmosphere->rayleighScaleHeight);
     if (auto absorptionCoeff = atmosData.getVector3<float>("Absorption"); absorptionCoeff.has_value())
         atmosphere->absorptionCoeff = *absorptionCoeff;
+
+    if (auto lutFile = GetFilename(atmosData, "LUTFile"sv, "Invalid filename in Atmosphere LUTFile\n");
+        lutFile.has_value())
+    {
+        atmosphere->brunetonLutFile = lutFile->empty()
+            ? std::filesystem::path{}
+            : path / *lutFile;
+    }
+    if (auto luminanceScale = atmosData.getNumber<float>("LUTLuminanceScale");
+        luminanceScale.has_value())
+    {
+        if (std::isfinite(*luminanceScale) && *luminanceScale > 0.0f)
+            atmosphere->brunetonLuminanceScale = *luminanceScale;
+        else
+            GetLogger()->error("Atmosphere LUTLuminanceScale must be finite and positive.\n");
+    }
 
     // Get the cloud map settings
     if (auto cloudHeight = atmosData.getLength<float>("CloudHeight"); cloudHeight.has_value())

@@ -54,6 +54,7 @@ public:
 
     virtual Eigen::Vector3f getPickRay(float x, float y, float zoom) const = 0;
     virtual void configureShaderManager(ShaderManager *) const = 0;
+    virtual bool supportsBrunetonAtmospheres() const { return true; }
     virtual bool project(const Eigen::Vector3f& pos,
                          const Eigen::Matrix4f& existingModelViewMatrix,
                          const Eigen::Matrix4f& existingProjectionMatrix,

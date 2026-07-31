@@ -13,19 +13,26 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <string>
 
 #include <celcompat/numbers.h>
 #include <celengine/atmosphere.h>
+#include <celengine/body.h>
 #include <celengine/glsupport.h>
 #include <celengine/lightenv.h>
 #include <celengine/lodspheremesh.h>
 #include <celengine/render.h>
 #include <celengine/renderinfo.h>
 #include <celengine/shadermanager.h>
+#include <celengine/texture.h>
+#include <celengine/texmanager.h>
+#include <celengine/brunetonatmospherefile.h>
 #include <celmath/frustum.h>
 #include <celmath/mathlib.h>
 #include <celmath/vecgl.h>
 #include <celutil/indexlist.h>
+
+#include "brunetonatmosphereresource.h"
 
 using celestia::util::BuildIndexList;
 using celestia::util::IndexListCapacity;
@@ -82,6 +89,91 @@ void AtmosphereRenderer::initGL()
         sizeof(SkyVertex),
         offsetof(SkyVertex, color));
     m_vo.setIndexBuffer(gl::Buffer(gl::Buffer::TargetHint::ElementArray), 0, gl::VertexObject::IndexType::UnsignedShort);
+
+    constexpr std::array<std::array<float, 4>, 4> vertices
+    {{
+        {{ -1.0f, -1.0f, 0.0f, 1.0f }},
+        {{  1.0f, -1.0f, 0.0f, 1.0f }},
+        {{ -1.0f,  1.0f, 0.0f, 1.0f }},
+        {{  1.0f,  1.0f, 0.0f, 1.0f }},
+    }};
+    m_brunetonBo = gl::Buffer(gl::Buffer::TargetHint::Array);
+    m_brunetonBo.setData(vertices);
+    m_brunetonVo =
+        gl::VertexObject(gl::VertexObject::Primitive::TriangleStrip);
+    m_brunetonVo.addVertexBuffer(
+        m_brunetonBo,
+        CelestiaGLProgram::VertexCoordAttributeIndex,
+        4,
+        gl::VertexObject::DataType::Float,
+        false,
+        sizeof(vertices[0]),
+        0);
+    m_brunetonVo.setCount(static_cast<GLsizei>(vertices.size()));
+
+    // Build a unit sphere mesh used to rasterize the atmosphere shell. The
+    // vertex shader scales it by the top radius. Triangles are wound so that
+    // the exterior is front-facing (CCW), so back-face culling keeps only the
+    // near hemisphere (the atmosphere entry surface).
+    constexpr int shellStacks = 32;
+    constexpr int shellSlices = 64;
+    constexpr float shellPi = numbers::pi_v<float>;
+    std::vector<std::array<float, 3>> shellVertices;
+    shellVertices.reserve((shellStacks + 1) * (shellSlices + 1));
+    for (int i = 0; i <= shellStacks; ++i)
+    {
+        const float phi =
+            static_cast<float>(i) / static_cast<float>(shellStacks) * shellPi;
+        const float y = std::cos(phi);
+        const float r = std::sin(phi);
+        for (int j = 0; j <= shellSlices; ++j)
+        {
+            const float theta =
+                static_cast<float>(j) / static_cast<float>(shellSlices) *
+                2.0f * shellPi;
+            shellVertices.push_back(
+                { r * std::cos(theta), y, r * std::sin(theta) });
+        }
+    }
+
+    std::vector<unsigned short> shellIndices;
+    shellIndices.reserve(shellStacks * shellSlices * 6);
+    const int shellStride = shellSlices + 1;
+    for (int i = 0; i < shellStacks; ++i)
+    {
+        for (int j = 0; j < shellSlices; ++j)
+        {
+            const auto a = static_cast<unsigned short>(i * shellStride + j);
+            const auto b = static_cast<unsigned short>(a + shellStride);
+            const auto c = static_cast<unsigned short>(a + 1);
+            const auto d = static_cast<unsigned short>(b + 1);
+            shellIndices.push_back(a);
+            shellIndices.push_back(c);
+            shellIndices.push_back(b);
+            shellIndices.push_back(c);
+            shellIndices.push_back(d);
+            shellIndices.push_back(b);
+        }
+    }
+
+    m_shellBo = gl::Buffer(gl::Buffer::TargetHint::Array);
+    m_shellBo.setData(shellVertices);
+    m_shellVo = gl::VertexObject(gl::VertexObject::Primitive::Triangles);
+    m_shellVo.addVertexBuffer(
+        m_shellBo,
+        CelestiaGLProgram::VertexCoordAttributeIndex,
+        3,
+        gl::VertexObject::DataType::Float,
+        false,
+        sizeof(shellVertices[0]),
+        0);
+    gl::Buffer shellIndexBuffer(gl::Buffer::TargetHint::ElementArray);
+    shellIndexBuffer.setData(shellIndices);
+    m_shellVo.setIndexBuffer(
+        std::move(shellIndexBuffer),
+        0,
+        gl::VertexObject::IndexType::UnsignedShort);
+    m_shellVo.setCount(static_cast<GLsizei>(shellIndices.size()));
 }
 
 void
@@ -297,6 +389,356 @@ AtmosphereRenderer::computeLegacy(
 
     // Create the index list
     BuildIndexList(static_cast<ushort>(nRings), static_cast<ushort>(nSlices), m_skyIndices);
+}
+
+bool
+AtmosphereRenderer::renderBruneton(
+    const RenderInfo& ri,
+    const LightingState& ls,
+    const Matrices& m,
+    const Eigen::Matrix4f& planetModelView,
+    float nearPlaneDistance,
+    const BrunetonAtmosphereResource& resource,
+    float luminanceScale,
+    const Eigen::Vector3f& bodySemiAxes,
+    const Eigen::Quaternionf& bodyOrientation,
+    Texture* cloudTexture,
+    Texture* cloudNormalMap,
+    float cloudHeight,
+    float cloudTextureOffset)
+{
+    // The hybrid atmosphere renders directly into the scene framebuffer (the
+    // window's default framebuffer / drawable) rather than an offscreen FBO.
+    // Dual-source blending (GL_SRC1_COLOR) targeting the default framebuffer
+    // fails to build a pipeline state on some drivers (notably Apple's
+    // Metal-backed OpenGL), which silently drops the very expensive Bruneton
+    // shader onto the software rasterizer and appears to hang. The two-pass
+    // blending path below (multiply by transmittance, then add in-scattering)
+    // is mathematically equivalent and uses only universally supported blend
+    // factors, so we always take it.
+
+    ShaderManager& shaderManager = m_renderer.getShaderManager();
+    auto* program = shaderManager.getShader(StaticShader::BrunetonAtmosphere);
+    if (program == nullptr)
+        return false;
+
+    const auto& parameters = resource.parameters();
+    const GLuint programId = program->getID();
+    program->use();
+
+    Eigen::Matrix4f modelFromView = Eigen::Matrix4f::Identity();
+    modelFromView.topLeftCorner<3, 3>() =
+        (parameters.bottomRadius *
+         bodySemiAxes.cwiseInverse()).asDiagonal() *
+        ri.orientation.conjugate().toRotationMatrix();
+    Mat4ShaderParameter(programId, "model_from_view") = modelFromView;
+    Mat4ShaderParameter(programId, "view_from_clip") = m.projection->inverse();
+
+    FloatShaderParameter(programId, "atmosphere.bottom_radius") =
+        parameters.bottomRadius;
+    FloatShaderParameter(programId, "atmosphere.top_radius") =
+        parameters.topRadius;
+    const auto setDensityLayer =
+        [programId](const char* name,
+                    const engine::BrunetonDensityProfileLayer& layer)
+    {
+        std::string uniformName{name};
+        FloatShaderParameter(
+            programId, (uniformName + ".width").c_str()) = layer.width;
+        FloatShaderParameter(
+            programId, (uniformName + ".exp_term").c_str()) = layer.expTerm;
+        FloatShaderParameter(
+            programId, (uniformName + ".exp_scale").c_str()) = layer.expScale;
+        FloatShaderParameter(
+            programId, (uniformName + ".linear_term").c_str()) =
+            layer.linearTerm;
+        FloatShaderParameter(
+            programId, (uniformName + ".constant_term").c_str()) =
+            layer.constantTerm;
+    };
+    setDensityLayer(
+        "atmosphere.rayleigh_density0", parameters.rayleighDensity[0]);
+    setDensityLayer(
+        "atmosphere.rayleigh_density1", parameters.rayleighDensity[1]);
+    setDensityLayer(
+        "atmosphere.mie_density0", parameters.mieDensity[0]);
+    setDensityLayer(
+        "atmosphere.mie_density1", parameters.mieDensity[1]);
+    setDensityLayer(
+        "atmosphere.absorption_density0", parameters.absorptionDensity[0]);
+    setDensityLayer(
+        "atmosphere.absorption_density1", parameters.absorptionDensity[1]);
+    Vec3ShaderParameter(programId, "atmosphere.solar_irradiance") =
+        Eigen::Map<const Eigen::Vector3f>(
+            parameters.solarIrradiance.data());
+    FloatShaderParameter(programId, "atmosphere.sun_angular_radius") =
+        parameters.sunAngularRadius;
+    Vec3ShaderParameter(programId, "atmosphere.rayleigh_scattering") =
+        Eigen::Map<const Eigen::Vector3f>(parameters.rayleighScattering.data());
+    Vec3ShaderParameter(programId, "atmosphere.mie_scattering") =
+        Eigen::Map<const Eigen::Vector3f>(parameters.mieScattering.data());
+    Vec3ShaderParameter(programId, "atmosphere.mie_extinction") =
+        Eigen::Map<const Eigen::Vector3f>(parameters.mieExtinction.data());
+    FloatShaderParameter(programId, "atmosphere.mie_phase_function_g") =
+        parameters.miePhaseFunctionG;
+    Vec3ShaderParameter(programId, "atmosphere.absorption_extinction") =
+        Eigen::Map<const Eigen::Vector3f>(
+            parameters.absorptionExtinction.data());
+    FloatShaderParameter(programId, "atmosphere.mu_s_min") =
+        parameters.muSMin;
+
+    Eigen::Vector3f camera = ri.eyePos_obj * parameters.bottomRadius;
+    const float cameraRadius = camera.norm();
+    if (cameraRadius == 0.0f)
+        return false;
+    const float minimumCameraRadius =
+        std::nextafter(parameters.bottomRadius, parameters.topRadius);
+    if (cameraRadius > 0.0f && cameraRadius < minimumCameraRadius)
+        camera *= minimumCameraRadius / cameraRadius;
+    Vec3ShaderParameter(programId, "camera") = camera;
+    Vec3ShaderParameter(programId, "earth_center") = Eigen::Vector3f::Zero();
+
+    // Outside the atmosphere: draw the top-radius sphere so the depth test
+    // handles occlusion. Use the shell only when it clears the near plane;
+    // otherwise (inside, or skimming just above the top) it gets clipped and
+    // leaves a seam, so fall back to a full-screen quad.
+    const float shellClearance = cameraRadius - parameters.topRadius;
+    const bool useShell = shellClearance > nearPlaneDistance * 2.0f;
+    IntegerShaderParameter(programId, "use_shell") = useShell ? 1 : 0;
+    FloatShaderParameter(programId, "shell_radius") = parameters.topRadius;
+    // Place the shell with the planet's own model-view so it stays attached.
+    // Pre-scale by 1/bottom_radius to turn Bruneton units into the unit-sphere
+    // units the planet model-view expects. Reconstructing from modelFromView
+    // instead only works for spheres and detaches the shell on oblate planets.
+    Eigen::Matrix4f modelScale = Eigen::Matrix4f::Identity();
+    const float invBottomRadius = 1.0f / parameters.bottomRadius;
+    modelScale(0, 0) = invBottomRadius;
+    modelScale(1, 1) = invBottomRadius;
+    modelScale(2, 2) = invBottomRadius;
+    Mat4ShaderParameter(programId, "clip_from_model") =
+        (*m.projection) * planetModelView * modelScale;
+
+    Eigen::Vector3f sunDirection =
+        ls.nLights == 0
+            ? Eigen::Vector3f::UnitZ()
+            : ls.lights[0].direction_obj;
+    sunDirection =
+        (parameters.bottomRadius *
+         bodySemiAxes.cwiseInverse()).cwiseProduct(sunDirection).normalized();
+    Vec3ShaderParameter(programId, "sun_direction") = sunDirection;
+
+    unsigned int eclipseShadowCount = 0;
+    if (ls.nLights > 0 && ls.shadows[0] != nullptr)
+    {
+        eclipseShadowCount = std::min(
+            MaxShaderEclipseShadows,
+            static_cast<unsigned int>(ls.shadows[0]->size()));
+    }
+    IntegerShaderParameter(programId, "eclipse_shadow_count") =
+        static_cast<int>(eclipseShadowCount);
+    if (eclipseShadowCount > 0)
+    {
+        Eigen::Affine3f rotation(bodyOrientation.conjugate());
+        Eigen::Matrix4f atmosphereToWorld =
+            (rotation *
+             Eigen::Scaling(bodySemiAxes / parameters.bottomRadius)).matrix();
+        Eigen::Matrix4f shadowBias;
+        shadowBias << 0.5f, 0.0f, 0.0f, 0.5f,
+                      0.0f, 0.5f, 0.0f, 0.5f,
+                      0.0f, 0.0f, 0.5f, 0.5f,
+                      0.0f, 0.0f, 0.0f, 1.0f;
+
+        for (unsigned int i = 0; i < eclipseShadowCount; ++i)
+        {
+            const EclipseShadow& shadow = ls.shadows[0]->at(i);
+            const float umbra = shadow.umbraRadius / shadow.penumbraRadius;
+            const float falloff =
+                -shadow.maxDepth /
+                std::max(0.001f, 1.0f - std::fabs(umbra));
+
+            Eigen::Vector3f u = shadow.direction.unitOrthogonal();
+            Eigen::Vector3f v = u.cross(shadow.direction);
+            Eigen::Matrix4f shadowRotation;
+            shadowRotation << u.transpose(),                0.0f,
+                              v.transpose(),                0.0f,
+                              shadow.direction.transpose(), 0.0f,
+                              0.0f, 0.0f, 0.0f,             1.0f;
+            Eigen::Matrix4f worldToShadow =
+                shadowRotation *
+                Eigen::Affine3f(
+                    Eigen::Scaling(1.0f / shadow.penumbraRadius)).matrix() *
+                Eigen::Affine3f(
+                    Eigen::Translation3f(-shadow.origin)).matrix();
+            Eigen::Matrix4f shadowFromAtmosphere =
+                shadowBias * worldToShadow * atmosphereToWorld;
+            const std::string index = "[" + std::to_string(i) + "]";
+            Vec4ShaderParameter(
+                programId,
+                ("eclipse_shadow_tex_gen_s" + index).c_str()) =
+                shadowFromAtmosphere.row(0);
+            Vec4ShaderParameter(
+                programId,
+                ("eclipse_shadow_tex_gen_t" + index).c_str()) =
+                shadowFromAtmosphere.row(1);
+            FloatShaderParameter(
+                programId,
+                ("eclipse_shadow_falloff" + index).c_str()) = falloff;
+            FloatShaderParameter(
+                programId,
+                ("eclipse_shadow_max_depth" + index).c_str()) =
+                shadow.maxDepth;
+        }
+    }
+
+    TextureTile ringShadowTile(0);
+    RingSystem* ringSystem = ls.shadowingRingSystem;
+    Texture* ringShadowTexture = nullptr;
+    const bool hasRingShadow =
+        ls.nLights > 0 &&
+        ls.lights[0].castsShadows &&
+        ringSystem != nullptr &&
+        ringSystem == ls.ringShadows[0].ringSystem &&
+        (ringShadowTexture =
+             m_renderer.getTextureManager()->findShadow(
+                 ringSystem->texture)) != nullptr &&
+        (ringShadowTile =
+             ringShadowTexture->getTile(0, 0, 0)).texID != 0;
+    IntegerShaderParameter(programId, "render_ring_shadows") =
+        hasRingShadow ? 1 : 0;
+    IntegerShaderParameter(programId, "ring_shadow_texture") = 9;
+    Vec3ShaderParameter(programId, "ring_shadow_plane_normal") =
+        hasRingShadow
+            ? ls.ringPlaneNormal
+            : Eigen::Vector3f::UnitY();
+    Vec3ShaderParameter(programId, "ring_shadow_sun_direction") =
+        ls.nLights > 0
+            ? ls.lights[0].direction_obj
+            : Eigen::Vector3f::UnitZ();
+    Vec3ShaderParameter(programId, "ring_shadow_position_scale") =
+        bodySemiAxes / parameters.bottomRadius;
+    FloatShaderParameter(programId, "ring_shadow_inner_radius") =
+        hasRingShadow ? ringSystem->innerRadius : 0.0f;
+    FloatShaderParameter(programId, "ring_shadow_outer_radius") =
+        hasRingShadow ? ringSystem->outerRadius : 0.0f;
+    FloatShaderParameter(programId, "ring_shadow_inverse_width") =
+        hasRingShadow
+            ? 1.0f /
+                std::max(
+                    ringSystem->outerRadius -
+                        ringSystem->innerRadius,
+                    1.0e-6f)
+            : 0.0f;
+    FloatShaderParameter(programId, "ring_shadow_lod") =
+        hasRingShadow ? ls.ringShadows[0].texLod : 0.0f;
+    Vec3ShaderParameter(programId, "sky_spectral_radiance_to_luminance") =
+        Eigen::Map<const Eigen::Vector3f>(
+            parameters.skySpectralRadianceToLuminance.data());
+    Vec3ShaderParameter(programId, "sun_spectral_radiance_to_luminance") =
+        Eigen::Map<const Eigen::Vector3f>(
+            parameters.sunSpectralRadianceToLuminance.data());
+    FloatShaderParameter(programId, "luminance_scale") = luminanceScale;
+
+    IntegerShaderParameter(programId, "combined_scattering_textures") =
+        parameters.combinedScattering ? 1 : 0;
+    IntegerShaderParameter(programId, "precomputed_luminance") =
+        parameters.valueMode ==
+            engine::BrunetonLutValueMode::PrecomputedLuminance
+        ? 1
+        : 0;
+    IntegerShaderParameter(programId, "manual_float_filtering") =
+        resource.usesManualFloatFiltering() ? 1 : 0;
+    IntegerShaderParameter(programId, "manual_scattering_filtering") =
+        resource.usesManualFloatFiltering() &&
+                resource.usesFullPrecisionScattering()
+            ? 1
+            : 0;
+    IntegerShaderParameter(programId, "transmittance_texture") = 0;
+    IntegerShaderParameter(programId, "scattering_texture") = 1;
+    IntegerShaderParameter(programId, "single_mie_scattering_texture") = 2;
+    IntegerShaderParameter(programId, "irradiance_texture") = 5;
+
+    TextureTile cloudTile(0);
+    const bool renderClouds =
+        cloudTexture != nullptr &&
+        (cloudTile = cloudTexture->getTile(0, 0, 0)).texID != 0;
+    IntegerShaderParameter(programId, "render_clouds") =
+        renderClouds ? 1 : 0;
+    IntegerShaderParameter(programId, "cloud_texture") = 6;
+    TextureTile cloudNormalTile(0);
+    const bool renderCloudNormals =
+        renderClouds &&
+        cloudNormalMap != nullptr &&
+        (cloudNormalTile = cloudNormalMap->getTile(0, 0, 0)).texID != 0;
+    IntegerShaderParameter(programId, "render_cloud_normals") =
+        renderCloudNormals ? 1 : 0;
+    IntegerShaderParameter(programId, "cloud_normal_texture") = 8;
+    IntegerShaderParameter(programId, "cloud_normal_texture_dxt5") =
+        renderCloudNormals &&
+                (cloudNormalMap->getFormatOptions() & Texture::DXT5NormalMap)
+            ? 1
+            : 0;
+    IntegerShaderParameter(programId, "cloud_texture_has_alpha") =
+        renderClouds && cloudTexture->hasAlpha() ? 1 : 0;
+    FloatShaderParameter(programId, "cloud_radius") =
+        parameters.bottomRadius *
+        (1.0f + cloudHeight / bodySemiAxes.maxCoeff());
+    FloatShaderParameter(programId, "cloud_texture_offset") =
+        cloudTextureOffset;
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, resource.transmittanceTexture());
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_3D, resource.scatteringTexture());
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(
+        GL_TEXTURE_3D,
+        parameters.combinedScattering
+            ? resource.scatteringTexture()
+            : resource.singleMieTexture());
+    glActiveTexture(GL_TEXTURE5);
+    glBindTexture(GL_TEXTURE_2D, resource.irradianceTexture());
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(
+        GL_TEXTURE_2D,
+        renderClouds ? cloudTile.texID : resource.transmittanceTexture());
+    glActiveTexture(GL_TEXTURE8);
+    glBindTexture(
+        GL_TEXTURE_2D,
+        renderCloudNormals
+            ? cloudNormalTile.texID
+            : resource.transmittanceTexture());
+    glActiveTexture(GL_TEXTURE9);
+    glBindTexture(
+        GL_TEXTURE_2D,
+        hasRingShadow
+            ? ringShadowTile.texID
+            : resource.transmittanceTexture());
+    glActiveTexture(GL_TEXTURE0);
+
+    gl::VertexObject& vo = useShell ? m_shellVo : m_brunetonVo;
+    // Both meshes are wound CCW and global culling is on, so force CCW front.
+    glFrontFace(GL_CCW);
+
+    Renderer::PipelineState state;
+    state.blending = true;
+    // Depth-test the shell so foreground objects occlude it, but don't write
+    // depth since it is translucent.
+    state.depthTest = useShell;
+    state.depthMask = false;
+
+    state.blendFunc = { GL_ZERO, GL_SRC_COLOR };
+    m_renderer.setPipelineState(state);
+    IntegerShaderParameter(programId, "render_mode") = 0;
+    vo.draw();
+
+    if (ls.nLights == 0)
+        return true;
+
+    state.blendFunc = { GL_ONE, GL_ONE };
+    m_renderer.setPipelineState(state);
+    IntegerShaderParameter(programId, "render_mode") = 1;
+    vo.draw();
+    return true;
 }
 
 void

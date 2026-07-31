@@ -52,6 +52,7 @@ const std::filesystem::path ShaderDirectory{ "shaders" };
 
 constexpr std::array StaticShaderBaseNames
 {
+    "brunetonatmosphere"sv,
     "comet"sv,
     "crosshair"sv,
     "depth"sv,
@@ -59,6 +60,8 @@ constexpr std::array StaticShaderBaseNames
     "galaxy150"sv,
     "globular"sv,
     "largestar"sv,
+    "linearcopy"sv,
+    "lineardepthcopy"sv,
     "psfstarglow"sv,
     "psfstarglowlarge"sv,
     "psfstarpoint"sv,
@@ -2422,13 +2425,24 @@ buildProgram(const ShaderProperties& props, bool fisheyeEnabled)
 }
 
 std::shared_ptr<CelestiaGLProgram>
-buildProgram(std::string_view vs, std::string_view fs, bool fisheyeEnabled,
-             StaticShaderOptions options = StaticShaderOptions::None)
+buildProgram(std::string_view vs,
+             std::string_view fs,
+             bool fisheyeEnabled,
+             StaticShaderOptions options = StaticShaderOptions::None,
+             bool dualSource = false)
 {
     std::string_view toneMapDefine =
         util::is_set(options, StaticShaderOptions::ToneMap) ? "#define TONE_MAP\n"sv : ""sv;
     std::string vsSrc = fmt::format("{}{}{}{}{}\n", VersionHeader, CommonHeader, VertexHeader, VPFunction(fisheyeEnabled), vs);
-    std::string fsSrc = fmt::format("{}{}{}{}{}\n", VersionHeader, CommonHeader, FragmentHeader, toneMapDefine, fs);
+    std::string_view dualSourceDefine =
+        dualSource ? "#define DUAL_SOURCE_BLENDING\nout vec4 atmosphereTransmission;\n"sv : ""sv;
+    std::string fsSrc = fmt::format("{}{}{}{}{}{}\n",
+                                    VersionHeader,
+                                    CommonHeader,
+                                    FragmentHeader,
+                                    toneMapDefine,
+                                    dualSourceDefine,
+                                    fs);
 
     DumpVSSource(vsSrc);
     DumpFSSource(fsSrc);
@@ -2445,6 +2459,11 @@ buildProgram(std::string_view vs, std::string_view fs, bool fisheyeEnabled,
         {
             builder.attach(std::move(_vs));
             builder.attach(std::move(_fs));
+            if (dualSource)
+            {
+                builder.bindFragmentOutput(0, 0, "fragColor");
+                builder.bindFragmentOutput(0, 1, "atmosphereTransmission");
+            }
             program = builder.link(status);
         }
     }
@@ -2744,7 +2763,9 @@ ShaderManager::getShader(StaticShader staticShader, const GeomShaderParams* gsPa
 }
 
 CelestiaGLProgram*
-ShaderManager::getShader(StaticShader staticShader, StaticShaderOptions options, const GeomShaderParams* gsParams)
+ShaderManager::getShader(StaticShader staticShader,
+                         StaticShaderOptions options,
+                         const GeomShaderParams* gsParams)
 {
     StaticShaderProperties props{ staticShader, options };
     auto [it, inserted] = m_staticShaders.try_emplace(props);
@@ -2757,6 +2778,7 @@ ShaderManager::getShader(StaticShader staticShader, StaticShaderOptions options,
 std::shared_ptr<CelestiaGLProgram>
 ShaderManager::loadShader(StaticShaderProperties props, const GeomShaderParams* gsParams)
 {
+    bool dualSource = util::is_set(props.options, StaticShaderOptions::DualSource);
     auto name = StaticShaderBaseNames[static_cast<std::size_t>(props.shader)];
     auto vs = ReadShaderFile(ShaderDirectory / std::filesystem::u8path(fmt::format("{}_vert.glsl", name)));
     if (vs.empty())
@@ -2777,7 +2799,7 @@ ShaderManager::loadShader(StaticShaderProperties props, const GeomShaderParams* 
     }
     else
     {
-        result = buildProgram(vs, fs, m_fisheyeEnabled, props.options);
+        result = buildProgram(vs, fs, m_fisheyeEnabled, props.options, dualSource);
     }
 
     return result ? result : getErrorProgram();

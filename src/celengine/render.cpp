@@ -62,6 +62,7 @@
 #include <celrender/asterismrenderer.h>
 #include <celrender/atmosphererenderer.h>
 #include <celrender/boundariesrenderer.h>
+#include <celrender/brunetonatmospheremanager.h>
 #include <celrender/cometrenderer.h>
 #include <celrender/eclipticlinerenderer.h>
 #include <celrender/legacylargestarrenderer.h>
@@ -131,6 +132,24 @@ static constexpr float MinRelativeOccluderRadius = 0.005f;
 // invisible. The atmosphere fades in over the following pixel, and the ring
 // system is only split around the atmosphere once it reaches this thickness.
 static constexpr float MinAtmosphereThicknessInPixels = 2.0f;
+static bool
+canIntegrateBrunetonClouds(const Atmosphere* atmosphere,
+                           const LightingState& lights,
+                           const Texture* cloudTexture,
+                           const Texture* cloudNormalMap)
+{
+    return atmosphere != nullptr &&
+           atmosphere->cloudHeight > 0.0f &&
+           lights.nLights > 0 &&
+           cloudTexture != nullptr &&
+           cloudTexture->getLODCount() == 1 &&
+           cloudTexture->getUTileCount(0) == 1 &&
+           cloudTexture->getVTileCount(0) == 1 &&
+           (cloudNormalMap == nullptr ||
+            (cloudNormalMap->getLODCount() == 1 &&
+             cloudNormalMap->getUTileCount(0) == 1 &&
+             cloudNormalMap->getVTileCount(0) == 1));
+}
 
 // Size at which the orbit cache will be flushed of old orbit paths
 static constexpr unsigned int OrbitCacheCullThreshold = 200;
@@ -429,6 +448,8 @@ bool Renderer::init(int winWidth, int winHeight,
                     std::shared_ptr<engine::ResourceSystem> resourceSystem)
 {
     m_resourceSystem = std::move(resourceSystem);
+    m_brunetonAtmosphereManager =
+        std::make_unique<celestia::render::BrunetonAtmosphereManager>(*m_resourceSystem);
     m_geometryManager = std::make_unique<RenderGeometryManager>(geometryManager, *m_resourceSystem);
     m_textureManager = std::make_unique<TextureManager>(texturePaths, resolution, *m_resourceSystem);
     detailOptions = _detailOptions;
@@ -901,24 +922,32 @@ void Renderer::endObjectAnnotations()
 {
     objectAnnotationSetOpen = false;
 
-    if (!objectAnnotations.empty())
-    {
-        Renderer::PipelineState ps;
-        ps.blending = true;
-        ps.blendFunc = {GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA};
-        ps.depthMask = true;
-        ps.depthTest = true;
-        ps.smoothLines = true;
-        setPipelineState(ps);
+    if (objectAnnotations.empty())
+        return;
 
-        renderAnnotations(objectAnnotations.begin(),
-                          objectAnnotations.end(),
-                          -depthPartitions[currentIntervalIndex].nearZ,
-                          -depthPartitions[currentIntervalIndex].farZ,
-                          FontStyle::Normal);
+    renderObjectAnnotations(
+        objectAnnotations,
+        static_cast<std::size_t>(currentIntervalIndex));
+    objectAnnotations.clear();
+}
 
-        objectAnnotations.clear();
-    }
+void Renderer::renderObjectAnnotations(std::vector<Annotation>& annotations,
+                                       std::size_t interval)
+{
+    Renderer::PipelineState ps;
+    ps.blending = true;
+    ps.blendFunc = {GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA};
+    ps.depthMask = true;
+    ps.depthTest = true;
+    ps.smoothLines = true;
+    setPipelineState(ps);
+
+    renderAnnotations(
+        annotations.begin(),
+        annotations.end(),
+        -depthPartitions[interval].nearZ,
+        -depthPartitions[interval].farZ,
+        FontStyle::Normal);
 }
 
 
@@ -1416,13 +1445,17 @@ void Renderer::renderItem(const RenderListEntry& rle,
 }
 
 
-void Renderer::render(const Observer& observer,
-                      const Universe& universe,
-                      float faintestMagNight,
-                      const Selection& sel)
+RenderPreparation
+Renderer::prepareRender(const Observer& observer,
+                        const Universe& universe,
+                        float faintestMagNight,
+                        const Selection& sel)
 {
+    assert(!m_preparedRender.has_value());
+
     // Get the observer's time
     double now = observer.getTime();
+    m_renderTime = now;
     realTime = observer.getRealTime();
 
     frameCount++;
@@ -1529,6 +1562,30 @@ void Renderer::render(const Observer& observer,
 
     ambientColor = Color(ambientLightLevel, ambientLightLevel, ambientLightLevel).linearize(gl::sRGBRendering);
 
+    m_preparedRender.emplace(PreparedRender{
+        &observer,
+        &universe,
+        sel,
+        std::move(frustum),
+        std::move(xfrustum),
+        now,
+    });
+    return {};
+}
+
+void Renderer::renderPrepared(const RenderPreparation&)
+{
+    assert(m_preparedRender.has_value());
+    PreparedRender prepared = std::move(*m_preparedRender);
+    m_preparedRender.reset();
+
+    const Observer& observer = *prepared.observer;
+    const Universe& universe = *prepared.universe;
+    const Selection& sel = prepared.selection;
+    const math::InfiniteFrustum& frustum = prepared.frustum;
+    const math::InfiniteFrustum& xfrustum = prepared.transformedFrustum;
+    const double now = prepared.now;
+
     // glClear(GL_DEPTH_BUFFER_BIT) is masked by glDepthMask. A previous pass
     // (e.g. a post-process quad from a prior view) may have left depthMask=false,
     // which would silently skip clearing the depth buffer for this view.
@@ -1609,12 +1666,13 @@ void Renderer::render(const Observer& observer,
     int nIntervals = buildDepthPartitions();
     renderSolarSystemObjects(observer, nIntervals, now);
 
+    const bool renderPointer =
+        showSelectionPointer &&
+        !selectionVisible &&
+        util::is_set(renderFlags, RenderFlags::ShowMarkers);
     renderForegroundAnnotations(FontStyle::Normal);
-
-    if (showSelectionPointer && !selectionVisible && util::is_set(renderFlags, RenderFlags::ShowMarkers))
-    {
+    if (renderPointer)
         renderSelectionPointer(observer, now, xfrustum, sel);
-    }
 
 #ifndef GL_ES
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
@@ -2520,13 +2578,36 @@ void Renderer::renderObject(const Vector3f& pos,
     if (atmosphere != nullptr && atmosphere->cloudSpeed != 0.0f)
         cloudTexOffset = static_cast<float>(-math::pfmod(now * atmosphere->cloudSpeed * 0.5 * celestia::numbers::inv_pi, 1.0));
 
+    const bool useBruneton =
+        atmosphere != nullptr &&
+        !atmosphere->brunetonLutFile.empty() &&
+        util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
+        !insidePlanet &&
+        projectionMode->supportsBrunetonAtmospheres();
+    auto* brunetonProgram = useBruneton
+        ? getShaderManager().getShader(StaticShader::BrunetonAtmosphere)
+        : nullptr;
+    auto* brunetonResource =
+        brunetonProgram != nullptr &&
+        !getShaderManager().isErrorProgram(brunetonProgram)
+            ? m_brunetonAtmosphereManager->find(atmosphere->brunetonLutFile)
+            : nullptr;
+    Atmosphere effectiveAtmosphere;
+    const Atmosphere* surfaceAtmosphere = atmosphere;
+    if (brunetonResource != nullptr)
+    {
+        effectiveAtmosphere = *atmosphere;
+        effectiveAtmosphere.mieScaleHeight = 0.0f;
+        surfaceAtmosphere = &effectiveAtmosphere;
+    }
+
     if (obj.geometry == engine::GeometryHandle::Invalid)
     {
         // A null model indicates that this body is a sphere
         if (lit)
         {
             renderEllipsoid_GLSL(ri, ls,
-                                 atmosphere, cloudTexOffset,
+                                 surfaceAtmosphere, cloudTexOffset,
                                  scaleFactors,
                                  renderFlags,
                                  obj.orientation,
@@ -2551,7 +2632,7 @@ void Renderer::renderObject(const Vector3f& pos,
                                 ri,
                                 texOverride,
                                 ls,
-                                obj.atmosphere,
+                                surfaceAtmosphere,
                                 geometryScale,
                                 renderFlags,
                                 obj.orientation,
@@ -2592,6 +2673,7 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
                                 const Vector3f& pos,
                                 double distance,
                                 float radius,
+                                float nearPlaneDistance,
                                 const Vector3f& scaleFactors,
                                 bool insidePlanet,
                                 bool lit,
@@ -2603,6 +2685,35 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
                                 const Matrices& m)
 {
     Matrices planetMVP = { m.projection, &planetMV };
+
+    // Use the Bruneton model when the body defines precomputed LUTs and the
+    // projection supports it; otherwise fall back to the legacy atmosphere.
+    const bool useBruneton =
+        !atmosphere->brunetonLutFile.empty() &&
+        util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
+        !insidePlanet &&
+        projectionMode->supportsBrunetonAtmospheres();
+    auto* brunetonProgram = useBruneton
+        ? getShaderManager().getShader(StaticShader::BrunetonAtmosphere)
+        : nullptr;
+    auto* brunetonResource =
+        brunetonProgram != nullptr &&
+        !getShaderManager().isErrorProgram(brunetonProgram)
+            ? m_brunetonAtmosphereManager->find(atmosphere->brunetonLutFile)
+            : nullptr;
+    // Bruneton can shade the clouds in-scattering itself; when it does, skip
+    // the separate cloud pass and drop Mie from the cloud atmosphere.
+    const bool integrateBrunetonClouds =
+        brunetonResource != nullptr &&
+        canIntegrateBrunetonClouds(atmosphere, ls, cloudTex, cloudNormalMap);
+    const Atmosphere* cloudAtmosphere = atmosphere;
+    Atmosphere effectiveAtmosphere;
+    if (brunetonResource != nullptr)
+    {
+        effectiveAtmosphere = *atmosphere;
+        effectiveAtmosphere.mieScaleHeight = 0.0f;
+        cloudAtmosphere = &effectiveAtmosphere;
+    }
 
     // Compute the apparent thickness in pixels of the atmosphere.
     // If it's only one pixel thick, it can look quite unsightly
@@ -2621,7 +2732,24 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
         fade = 1.0f;
     }
 
-    if (fade > 0 && util::is_set(renderFlags, RenderFlags::ShowAtmospheres) && atmosphere->height > 0.0f &&
+    if (brunetonResource != nullptr && useBruneton)
+    {
+        m_atmosphereRenderer->renderBruneton(
+            ri,
+            ls,
+            m,
+            planetMV,
+            nearPlaneDistance,
+            *brunetonResource,
+            atmosphere->brunetonLuminanceScale,
+            scaleFactors,
+            obj.orientation,
+            cloudTex,
+            cloudNormalMap,
+            atmosphere->cloudHeight,
+            cloudTexOffset);
+    }
+    else if (fade > 0 && util::is_set(renderFlags, RenderFlags::ShowAtmospheres) && atmosphere->height > 0.0f &&
         !insidePlanet)
     {
         // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
@@ -2655,7 +2783,7 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
     }
 
     // If there's a cloud layer, we'll render it now.
-    if (cloudTex != nullptr && !insidePlanet)
+    if (cloudTex != nullptr && !insidePlanet && !integrateBrunetonClouds)
     {
         float cloudScale = 1.0f + atmosphere->cloudHeight / radius;
         Matrix4f cmv = math::scale(planetMV, cloudScale);
@@ -2681,7 +2809,7 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
         if (lit)
         {
             renderClouds_GLSL(ri, ls,
-                              atmosphere,
+                              cloudAtmosphere,
                               cloudTex,
                               cloudNormalMap,
                               cloudTexOffset,
@@ -2843,7 +2971,7 @@ void Renderer::renderPlanetAtmosphere(Body& body,
         cloudTexOffset = static_cast<float>(-math::pfmod(now * atmosphere->cloudSpeed * 0.5 * celestia::numbers::inv_pi, 1.0));
 
     renderAtmosphere(atmosphere, ri, ls, rp, pos, distance, radius,
-                     scaleFactors, insidePlanet, lit,
+                     nearPlaneDistance, scaleFactors, insidePlanet, lit,
                      cloudTex, cloudNormalMap, cloudTexOffset,
                      viewFrustum, planetMV, m);
 }
@@ -3001,6 +3129,116 @@ bool Renderer::testEclipse(const Body& receiver,
     return isReceiverShadowed;
 }
 
+void
+Renderer::setupEclipseShadows(const Body& receiver,
+                              LightingState& lightingState,
+                              double now)
+{
+    for (unsigned int li = 0; li < lightingState.nLights; ++li)
+    {
+        eclipseShadows[li].clear();
+        lightingState.shadows[li] = &eclipseShadows[li];
+    }
+
+    if (!util::is_set(renderFlags, RenderFlags::ShowEclipseShadows))
+        return;
+
+    const Body* testBody = &receiver;
+    for (;;)
+    {
+        if (const FrameTree* frameTree = testBody->getFrameTree(); frameTree)
+        {
+            for (unsigned int i = 0, nPhases = frameTree->childCount();
+                 i < nPhases;
+                 ++i)
+            {
+                const auto& phase = frameTree->getChild(i);
+                if (phase->startTime() > now || phase->endTime() <= now) //NOSONAR
+                    continue;
+
+                for (unsigned int li = 0; li < lightingState.nLights; ++li) //NOSONAR
+                    testEclipse(receiver, *phase->body(), lightingState, li, now);
+            }
+        }
+
+        testBody =
+            testBody->getTimeline()->findPhase(now).getFrameTree()->getOwner().body();
+        if (testBody == nullptr)
+            break;
+
+        for (unsigned int li = 0; li < lightingState.nLights; ++li)
+            testEclipse(receiver, *testBody, lightingState, li, now);
+    }
+}
+
+void
+Renderer::setupRingShadows(RingSystem* rings,
+                           const Quaternionf& ringOrientation,
+                           const Quaternionf& bodyOrientation,
+                           float minimumViewDistance,
+                           LightingState& lightingState)
+{
+    if (rings == nullptr ||
+        !util::is_set(renderFlags, RenderFlags::ShowPlanetRings) ||
+        !util::is_set(renderFlags, RenderFlags::ShowRingShadows))
+    {
+        return;
+    }
+
+    for (unsigned int li = 0; li < lightingState.nLights; ++li)
+    {
+        RingShadow& shadow = lightingState.ringShadows[li];
+        shadow.ringSystem = rings;
+        shadow.casterOrientation = ringOrientation;
+        shadow.origin = Vector3f::Zero();
+        shadow.direction =
+            -lightingState.lights[li].position.normalized().cast<float>();
+        shadow.texLod = 0.0f;
+    }
+
+    lightingState.shadowingRingSystem = rings;
+    lightingState.ringPlaneNormal =
+        (bodyOrientation * ringOrientation.conjugate()) *
+        Vector3f::UnitY();
+    lightingState.ringCenter = Vector3f::Zero();
+
+    const Texture* ringsTexture = m_textureManager->find(rings->texture);
+    if (ringsTexture == nullptr)
+        return;
+
+    const float ringWidth = rings->outerRadius - rings->innerRadius;
+    const float textureWidth =
+        static_cast<float>(ringsTexture->getWidth());
+    float maxLod = std::log2(textureWidth);
+    if (maxLod > 1.0f)
+        maxLod -= 1.0f;
+    for (unsigned int li = 0; li < lightingState.nLights; ++li)
+    {
+        const float projectedRingSize =
+            std::abs(
+                lightingState.lights[li].direction_obj.dot(
+                    lightingState.ringPlaneNormal)) *
+            ringWidth;
+        const float projectedPixels =
+            projectedRingSize /
+            std::max(minimumViewDistance * pixelSize, 1.0e-6f);
+        const float ringFeatureSize =
+            projectedRingSize /
+            std::max(textureWidth * rings->innerRadius, 1.0e-6f);
+        const float areaLightLod =
+            std::log2(std::max(
+                lightingState.lights[li].apparentSize /
+                    std::max(ringFeatureSize, 1.0e-6f),
+                1.0f));
+        const float gpuLod =
+            std::log2(std::max(
+                textureWidth / std::max(projectedPixels, 1.0f),
+                1.0f));
+        lightingState.ringShadows[li].texLod =
+            std::min(std::max(areaLightLod, gpuLod), maxLod);
+    }
+}
+
 
 // Builds the render properties, orientation and lighting (eclipse and ring
 // shadows) for a planet. Shared by the surface and atmosphere passes so their
@@ -3067,133 +3305,13 @@ void Renderer::setupPlanetLighting(Body& body, // NOSONAR(cpp:S107,cpp:S3776)
 
         lights.ambientColor = ambientColor.toVector3();
 
-        // Clear out the list of eclipse shadows
-        for (unsigned int li = 0; li < lights.nLights; li++)
-        {
-            eclipseShadows[li].clear();
-            lights.shadows[li] = &eclipseShadows[li];
-        }
-
-
-        // Add ring shadow records for each light
-        if (rp.rings != nullptr &&
-            util::is_set(renderFlags, RenderFlags::ShowPlanetRings) &&
-            util::is_set(renderFlags, RenderFlags::ShowRingShadows))
-        {
-            for (unsigned int li = 0; li < lights.nLights; li++)
-            {
-                lights.ringShadows[li].ringSystem = rp.rings;
-                lights.ringShadows[li].casterOrientation = q.cast<float>();
-                lights.ringShadows[li].origin = Vector3f::Zero();
-                lights.ringShadows[li].direction = -lights.lights[li].position.normalized().cast<float>();
-            }
-        }
-
-        // Calculate eclipse circumstances
-        if (util::is_set(renderFlags, RenderFlags::ShowEclipseShadows))
-        {
-            const Body* testBody = &body;
-            for (;;)
-            {
-                // Check for eclipse shadows from the satellites of the current object
-                // Note this only test direct satellites, binary satellites won't work here.
-                // Hopefully the exoplanet astronomers don't find any binary exomoons in the
-                // near future...
-                if (const FrameTree* frameTree = testBody->getFrameTree(); frameTree)
-                {
-                    for (unsigned int i = 0, nPhases = frameTree->childCount(); i < nPhases; ++i)
-                    {
-                        const auto& phase = frameTree->getChild(i);
-                        if (phase->startTime() > now || phase->endTime() <= now) //NOSONAR
-                            continue;
-
-                        for (unsigned int li = 0; li < lights.nLights; ++li) //NOSONAR
-                            testEclipse(body, *phase->body(), lights, li, now);
-                    }
-                }
-
-                testBody = testBody->getTimeline()->findPhase(now).getFrameTree()->getOwner().body();
-                if (!testBody)
-                    break;
-
-                // Check for eclipses from the parent object
-                for (unsigned int li = 0; li < lights.nLights; ++li)
-                    testEclipse(body, *testBody, lights, li, now);
-            }
-        }
-
-        // Sort out the ring shadows; only one ring shadow source is supported right now. This means
-        // that exotic cases with shadows from two ring different ring systems aren't handled.
-        for (unsigned int li = 0; li < lights.nLights; li++)
-        {
-            RingSystem* rings = lights.ringShadows[li].ringSystem;
-            if (!rings)
-                continue;
-
-            // Use the first set of ring shadows found (shadowing the brightest light
-            // source.)
-            if (lights.shadowingRingSystem == nullptr)
-            {
-                lights.shadowingRingSystem = rings;
-                lights.ringPlaneNormal = (rp.orientation * lights.ringShadows[li].casterOrientation.conjugate()) * Vector3f::UnitY();
-                lights.ringCenter = rp.orientation * lights.ringShadows[li].origin;
-            }
-
-            // Light sources have a finite size, which causes some blurring of the texture. Simulate
-            // this effect by using a lower LOD (i.e. a smaller mipmap level, indicated somewhat
-            // confusingly by a _higher_ LOD value.
-            float ringWidth = rings->outerRadius - rings->innerRadius;
-            float projectedRingSize = std::abs(lights.lights[li].direction_obj.dot(lights.ringPlaneNormal)) * ringWidth;
-            float projectedRingSizeInPixels = projectedRingSize / (max(nearPlaneDistance, altitude) * pixelSize);
-            const Texture* ringsTex = m_textureManager->find(rings->texture);
-            if (!ringsTex)
-            {
-                lights.ringShadows[li].texLod = 0.0f;
-                continue;
-            }
-
-            // Calculate the approximate distance from the shadowed object to the rings
-            Hyperplane<float, 3> ringPlane(lights.ringPlaneNormal, lights.ringCenter);
-            float cosLightAngle = lights.lights[li].direction_obj.dot(ringPlane.normal());
-            float approxRingDistance = rings->innerRadius;
-            if (abs(cosLightAngle) < 0.99999f)
-                approxRingDistance = abs(ringPlane.offset() / cosLightAngle);
-            if (lights.ringCenter.norm() < rings->innerRadius)
-                approxRingDistance = max(approxRingDistance, rings->innerRadius - lights.ringCenter.norm());
-
-            // Calculate the LOD based on the size of the smallest
-            // ring feature relative to the apparent size of the light source.
-            float ringTextureWidth = ringsTex->getWidth();
-            float ringFeatureSize = (projectedRingSize / ringTextureWidth) / approxRingDistance;
-            float relativeFeatureSize = lights.lights[li].apparentSize / ringFeatureSize;
-            //float areaLightLod = log(max(relativeFeatureSize, 1.0f)) / log(2.0f);
-            float areaLightLod = log2(max(relativeFeatureSize, 1.0f));
-
-            // Compute the LOD that would be automatically used by the GPU.
-            float texelToPixelRatio = ringTextureWidth / projectedRingSizeInPixels;
-            float gpuLod = log2(texelToPixelRatio);
-
-            //float lod = max(areaLightLod, log(texelToPixelRatio) / log(2.0f));
-            float lod = max(areaLightLod, gpuLod);
-
-            // maxLOD is the index of the smallest mipmap (or close to it for non-power-of-two
-            // textures.) We can't make the lod larger than this.
-            float maxLod = log2((float) ringsTex->getWidth());
-            if (maxLod > 1.0f)
-            {
-                // Avoid using the 1x1 mipmap, as it appears to cause 'bleeding' when
-                // the light source is very close to the ring plane. This is probably
-                // a numerical precision issue from calculating the intersection of
-                // between a ray and plane that are nearly parallel.
-                maxLod -= 1.0f;
-            }
-            lod = min(lod, maxLod);
-
-            // textureLod() is core in GLSL 1.30+ / GLSL ES 3.00, which is now
-            // the floor; the explicit LOD is always honored, so no bias-fallback
-            // adjustment is needed here.
-            lights.ringShadows[li].texLod = lod;
-        }
+        setupRingShadows(
+            rp.rings,
+            q.cast<float>(),
+            rp.orientation,
+            std::max(nearPlaneDistance, altitude),
+            lights);
+        setupEclipseShadows(body, lights, now);
 
 }
 
@@ -5584,6 +5702,7 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
         float cloudHeight = 0.0f;
         float ringOuterRadius = 0.0f;
         float ringInnerRadius = 0.0f;
+        const Atmosphere* atmosphere = nullptr;
 
         switch (ri.renderableType)
         {
@@ -5621,7 +5740,8 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
                 convex = false;
 
             cullRadius = radius;
-            if (const Atmosphere* atmosphere = bodyFeaturesManager->getAtmosphere(ri.body); atmosphere != nullptr)
+            atmosphere = bodyFeaturesManager->getAtmosphere(ri.body);
+            if (atmosphere != nullptr)
             {
                 cullRadius += atmosphere->height;
                 cloudHeight = max(atmosphere->cloudHeight,

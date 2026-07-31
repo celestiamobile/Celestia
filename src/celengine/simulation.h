@@ -29,6 +29,7 @@
 #include <celengine/observer.h>
 
 class Renderer;
+struct RenderPreparation;
 
 class Simulation
 {
@@ -44,8 +45,8 @@ public:
     double getArrivalTime() const;
 
     void update(double dt);
-    void render(Renderer&);
-    void render(Renderer&, Observer&);
+    RenderPreparation prepareRender(Renderer&);
+    RenderPreparation prepareRender(Renderer&, Observer&);
 
     Selection pickObject(const Eigen::Vector3f& pickRay, RenderFlags renderFlags, float tolerance = 0.0f);
 

@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include <filesystem>
+
 #include <Eigen/Core>
 
 #include <celutil/color.h>
@@ -36,4 +38,7 @@ struct Atmosphere
     Eigen::Vector3f absorptionCoeff{ Eigen::Vector3f::Zero() };
 
     float cloudShadowDepth{ 0.0f };
+
+    std::filesystem::path brunetonLutFile;
+    float brunetonLuminanceScale{ 1.0e-5f };
 };

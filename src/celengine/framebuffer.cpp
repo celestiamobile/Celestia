@@ -38,7 +38,12 @@ invalidateAttachments(GLenum target, GLsizei count, const GLenum *tokens)
 
 } // namespace
 
-FramebufferObject::FramebufferObject(GLuint width, GLuint height, Attachment attachments, int samples, bool useFloatColor) :
+FramebufferObject::FramebufferObject(GLuint width,
+                                     GLuint height,
+                                     Attachment attachments,
+                                     int samples,
+                                     bool useFloatColor,
+                                     DepthFilter depthFilter) :
     m_width(width),
     m_height(height),
     m_colorTexId(0),
@@ -46,6 +51,7 @@ FramebufferObject::FramebufferObject(GLuint width, GLuint height, Attachment att
     m_fboId(0),
     m_samples(samples > 1 ? samples : 1),
     m_useFloatColor(useFloatColor),
+    m_depthFilter(depthFilter),
     m_status(GL_FRAMEBUFFER_UNSUPPORTED),
     m_owned(true)
 {
@@ -63,6 +69,7 @@ FramebufferObject::FramebufferObject(GLuint fboId) :
     m_fboId(fboId),
     m_samples(1),
     m_useFloatColor(false),
+    m_depthFilter(DepthFilter::Linear),
     m_status(GL_FRAMEBUFFER_COMPLETE),
     m_owned(false)
 {
@@ -86,6 +93,7 @@ FramebufferObject::FramebufferObject(FramebufferObject &&other) noexcept:
     m_depthRboId(other.m_depthRboId),
     m_samples(other.m_samples),
     m_useFloatColor(other.m_useFloatColor),
+    m_depthFilter(other.m_depthFilter),
     m_status(other.m_status),
     m_owned(other.m_owned)
 {
@@ -109,6 +117,7 @@ FramebufferObject& FramebufferObject::operator=(FramebufferObject &&other) noexc
     m_depthRboId    = other.m_depthRboId;
     m_samples       = other.m_samples;
     m_useFloatColor = other.m_useFloatColor;
+    m_depthFilter   = other.m_depthFilter;
     m_status        = other.m_status;
     m_owned         = other.m_owned;
 
@@ -189,10 +198,10 @@ FramebufferObject::generateDepthTexture()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 #endif
 
-    // Only nearest sampling is appropriate for depth textures
-    // But we can use linear to decrease aliasing
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    const GLint filter =
+        m_depthFilter == DepthFilter::Linear ? GL_LINEAR : GL_NEAREST;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
 
     // Clamp to edge
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -244,7 +253,7 @@ FramebufferObject::generateFbo(Attachment attachments)
     }
 #endif
 
-    if (celestia::util::is_set(attachments, Attachment::Depth) && !useRenderbufferMSAA)
+    if (celestia::util::is_set(attachments, Attachment::Depth))
     {
         generateDepthTexture();
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_depthTexId, 0);
@@ -325,16 +334,7 @@ FramebufferObject::generateMSAAFbo(Attachment attachments)
         }
         m_samples = 1;
 
-        // The texture-based FBO (m_fboId) was created without a depth attachment
-        // because depth was supposed to come from the MSAA renderbuffer.  Now that
-        // it becomes the sole render target we need to add depth so the scene
-        // renders correctly.
         glBindFramebuffer(GL_FRAMEBUFFER, m_fboId);
-        if (celestia::util::is_set(attachments, Attachment::Depth))
-        {
-            generateDepthTexture();
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_depthTexId, 0);
-        }
         m_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
         glBindFramebuffer(GL_FRAMEBUFFER, oldFboId);
     }
@@ -422,14 +422,20 @@ FramebufferObject::resolve() const
     if (scissorEnabled)
         glDisable(GL_SCISSOR_TEST);
 
-    // Desktop GL / GLES3: blit the MSAA color renderbuffer into the resolve texture FBO.
+    GLbitfield mask = 0;
+    if (m_colorRboId != 0)
+        mask |= GL_COLOR_BUFFER_BIT;
+    if (m_depthRboId != 0)
+        mask |= GL_DEPTH_BUFFER_BIT;
+
+    // Desktop GL / GLES3: resolve multisampled renderbuffers into sampleable textures.
     // GL_READ_FRAMEBUFFER / GL_DRAW_FRAMEBUFFER and glBlitFramebuffer are available on
     // desktop GL (via ARB_framebuffer_object, which is required) and GLES 3.0+.
     glBindFramebuffer(GL_READ_FRAMEBUFFER, m_msaaFboId);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fboId);
     glBlitFramebuffer(0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height),
                       0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height),
-                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+                      mask, GL_NEAREST);
 
     // Discard the MSAA renderbuffers now that color has been resolved.
     std::array<GLenum, 2> msaaAttachments{};

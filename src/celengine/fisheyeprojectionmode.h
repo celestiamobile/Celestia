@@ -43,6 +43,7 @@ public:
     Eigen::Vector3f getPickRay(float x, float y, float zoom) const override;
 
     void configureShaderManager(ShaderManager *) const override;
+    bool supportsBrunetonAtmospheres() const override { return false; }
     bool project(const Eigen::Vector3f& pos,
                  const Eigen::Matrix4f& existingModelViewMatrix,
                  const Eigen::Matrix4f& existingProjectionMatrix,

@@ -29,13 +29,16 @@ class LightingState;
 
 enum class StaticShader
 {
-    Comet = 0,
+    BrunetonAtmosphere = 0,
+    Comet,
     Crosshair,
     Depth,
     Galaxy,
     Galaxy150,
     Globular,
     LargeStar,
+    LinearCopy,
+    LinearDepthCopy,
     PsfStarGlow,
     PsfStarGlowLarge,
     PsfStarPoint,
@@ -51,8 +54,9 @@ enum class StaticShader
 // Compile-time options that select variants of a static shader via #define injection.
 enum class StaticShaderOptions : std::uint8_t
 {
-    None    = 0,
-    ToneMap = 0x01,
+    None       = 0,
+    ToneMap    = 0x01,
+    DualSource = 0x02,
 };
 
 ENUM_CLASS_BITWISE_OPS(StaticShaderOptions);
@@ -71,6 +75,7 @@ struct std::hash<StaticShaderProperties>
 {
     std::size_t operator()(const StaticShaderProperties&) const;
 };
+
 
 enum class TexUsage : std::uint32_t
 {
@@ -242,6 +247,7 @@ public:
     ~CelestiaGLProgram() = default;
 
     void use() const { program.use(); }
+    GLuint getID() const noexcept { return program.getID(); }
 
     void setLightParameters(const LightingState& ls,
                             Color materialDiffuse,
@@ -393,6 +399,10 @@ public:
     CelestiaGLProgram* getShader(const ShaderProperties&);
     CelestiaGLProgram* getShader(StaticShader, const GeomShaderParams* = nullptr);
     CelestiaGLProgram* getShader(StaticShader, StaticShaderOptions, const GeomShaderParams* = nullptr);
+    bool isErrorProgram(const CelestiaGLProgram* program) const noexcept
+    {
+        return program != nullptr && program == m_errorProgram.get();
+    }
 
     void setFisheyeEnabled(bool enabled);
 

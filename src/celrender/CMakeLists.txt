@@ -3,6 +3,10 @@ set(CELRENDER_SOURCES
   asterismrenderer.h
   atmosphererenderer.cpp
   atmosphererenderer.h
+  brunetonatmospheremanager.cpp
+  brunetonatmospheremanager.h
+  brunetonatmosphereresource.cpp
+  brunetonatmosphereresource.h
   boundariesrenderer.cpp
   boundariesrenderer.h
   cometrenderer.cpp

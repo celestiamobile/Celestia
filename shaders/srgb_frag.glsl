@@ -19,14 +19,23 @@ vec3 linearToSRGB(vec3 c)
     return mix(lower, higher, step(vec3(0.0031308), c));
 }
 
+float interleavedGradientNoise(vec2 position)
+{
+    return fract(52.9829189 * fract(dot(
+        position, vec2(0.06711056, 0.00583715))));
+}
+
 void main(void)
 {
     vec4 color = texture(tex, texCoord);
 #ifdef TONE_MAP
     // Exponential tone mapping to roll off HDR highlights.
     vec3 mapped = vec3(1.0) - exp(-exposure * color.rgb);
-    fragColor = vec4(linearToSRGB(mapped), color.a);
+    vec3 encoded = linearToSRGB(mapped);
 #else
-    fragColor = vec4(linearToSRGB(color.rgb), color.a);
+    vec3 encoded = linearToSRGB(color.rgb);
 #endif
+    float dither =
+        (interleavedGradientNoise(gl_FragCoord.xy) - 0.5) / 255.0;
+    fragColor = vec4(clamp(encoded + dither, 0.0, 1.0), color.a);
 }

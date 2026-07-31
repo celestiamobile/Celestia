@@ -13,6 +13,7 @@
 #include <array>
 #include <list>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -33,6 +34,7 @@
 #include <celengine/texmanager.h>
 #include <celengine/textlayout.h>
 #include <celimage/pixelformat.h>
+#include <celmath/frustum.h>
 #include <celrender/rendererfwd.h>
 #include "rendercolors.h"
 #include "renderflags.h"
@@ -44,7 +46,12 @@ class ReferenceMark;
 class CurvePlot;
 class CurvePlotVertexBuffer;
 class PointStarVertexBuffer;
-namespace celestia::render { class PsfStarVertexBuffer; class StarPipelineOwner; }
+namespace celestia::render
+{
+class BrunetonAtmosphereManager;
+class PsfStarVertexBuffer;
+class StarPipelineOwner;
+}
 namespace celestia::engine { class ResourceSystem; }
 class Observer;
 struct Surface;
@@ -99,6 +106,10 @@ enum class RenderMode
 {
     Fill = 0,
     Line = 1
+};
+
+struct RenderPreparation
+{
 };
 
 class Renderer
@@ -161,10 +172,12 @@ class Renderer
 
     void setRenderMode(RenderMode);
     void autoMag(float& faintestMag, float zoom);
-    void render(const Observer&,
-                const Universe&,
-                float faintestVisible,
-                const Selection& sel);
+    RenderPreparation prepareRender(
+        const Observer&,
+        const Universe&,
+        float faintestVisible,
+        const Selection& sel);
+    void renderPrepared(const RenderPreparation&);
 
     bool getInfo(std::map<std::string, std::string>& info) const;
 
@@ -424,6 +437,10 @@ class Renderer
 
     celestia::engine::RenderGeometryManager* getGeometryManager() const noexcept { return m_geometryManager.get(); }
     celestia::engine::TextureManager* getTextureManager() const noexcept { return m_textureManager.get(); }
+    celestia::render::BrunetonAtmosphereManager* getBrunetonAtmosphereManager() const noexcept
+    {
+        return m_brunetonAtmosphereManager.get();
+    }
 
  public:
     struct RenderProperties
@@ -514,6 +531,7 @@ class Renderer
                           const Eigen::Vector3f& pos,
                           double distance,
                           float radius,
+                          float nearPlaneDistance,
                           const Eigen::Vector3f& scaleFactors,
                           bool insidePlanet,
                           bool lit,
@@ -631,6 +649,14 @@ class Renderer
                      LightingState& lightingState,
                      unsigned int lightIndex,
                      double now);
+    void setupEclipseShadows(const Body& receiver,
+                             LightingState& lightingState,
+                             double now);
+    void setupRingShadows(RingSystem* rings,
+                          const Eigen::Quaternionf& ringOrientation,
+                          const Eigen::Quaternionf& bodyOrientation,
+                          float minimumViewDistance,
+                          LightingState& lightingState);
 
     void labelConstellations(const AsterismList& asterisms,
                              const Observer& observer);
@@ -660,6 +686,8 @@ class Renderer
                            FontStyle fs);
     void renderBackgroundAnnotations(FontStyle fs);
     void renderForegroundAnnotations(FontStyle fs);
+    void renderObjectAnnotations(std::vector<Annotation>& annotations,
+                                 std::size_t interval);
     std::vector<Annotation>::iterator renderSortedAnnotations(std::vector<Annotation>::iterator,
                                                               float nearDist,
                                                               float farDist,
@@ -792,6 +820,18 @@ class Renderer
     std::uint32_t frameCount{ 0 };
 
     int currentIntervalIndex{ 0 };
+    double m_renderTime{ 0.0 };
+
+    struct PreparedRender
+    {
+        const Observer* observer;
+        const Universe* universe;
+        Selection selection;
+        celestia::math::InfiniteFrustum frustum;
+        celestia::math::InfiniteFrustum transformedFrustum;
+        double now;
+    };
+    std::optional<PreparedRender> m_preparedRender;
 
     PipelineState m_pipelineState;
 
@@ -865,6 +905,7 @@ class Renderer
     std::unique_ptr<celestia::render::SkyGridRenderer> m_skyGridRenderer;
 
     std::shared_ptr<celestia::engine::ResourceSystem> m_resourceSystem;
+    std::unique_ptr<celestia::render::BrunetonAtmosphereManager> m_brunetonAtmosphereManager;
     std::unique_ptr<celestia::engine::RenderGeometryManager> m_geometryManager;
     std::unique_ptr<celestia::engine::TextureManager> m_textureManager;
 

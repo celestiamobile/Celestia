@@ -1,0 +1,10 @@
+# Pilot optical properties, not a validated Titan retrieval.
+# Haze wavelength dependence approximates Tomasko et al. (2008),
+# doi:10.1016/j.pss.2007.11.019. Methane absorption is intentionally zero
+# pending a traceable visible cross-section table.
+wavelength_nm,rayleigh_scattering_per_m,mie_scattering_per_m,mie_extinction_per_m,absorption_extinction_per_m,ground_albedo
+360,0.000328517165531,0.0000687933750198,0.0000838943597802,0,0.10
+440,0.000147216796875,0.0000518399851914,0.0000632194941358,0,0.10
+550,0.0000603,0.0000415384615385,0.0000461538461538,0,0.14
+680,0.0000258066967954,0.0000325091286114,0.0000342201353804,0,0.18
+830,0.0000116266794921,0.0000245438554944,0.0000258356373625,0,0.18

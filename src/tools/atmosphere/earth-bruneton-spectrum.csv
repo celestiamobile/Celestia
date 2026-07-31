@@ -1,0 +1,6 @@
+wavelength_nm,rayleigh_scattering_per_m,mie_scattering_per_m,mie_extinction_per_m,absorption_extinction_per_m,ground_albedo
+360,3.31000052e-5,3.996e-6,4.44e-6,8.50167e-8,0.1
+440,3.31000052e-5,3.996e-6,4.44e-6,8.50167e-8,0.1
+550,1.35577628e-5,3.996e-6,4.44e-6,1.8809e-6,0.1
+680,5.8023394e-6,3.996e-6,4.44e-6,6.497166e-7,0.1
+830,5.8023394e-6,3.996e-6,4.44e-6,6.497166e-7,0.1

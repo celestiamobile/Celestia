@@ -2064,46 +2064,67 @@ void CelestiaCore::draw(View* view)
     if (view->type != View::ViewWindow) return;
 
     bool viewportEffectUsed = false;
-
-    int nEffects = static_cast<int>(viewportEffects.size());
-    FramebufferObject *fbo = nullptr;
+    const int nEffects = static_cast<int>(viewportEffects.size());
     // Capture the screen framebuffer before any binding changes so we can
     // restore it after the effect chain without relying on preprocess to save it.
-    auto screenFbo = nEffects > 0 ? std::make_optional(FramebufferObject::wrapCurrentBinding())
-                                  : std::nullopt;
-    if (nEffects > 0)
-    {
-        // create/update FBOs for viewport effect chain
-        view->updateFBOs(viewportEffects, metrics.width, metrics.height);
-        fbo = view->getFBO(0);
-    }
-    bool process = fbo != nullptr && viewportEffects[0]->preprocess(renderer, fbo);
-
+    auto screenFbo = nEffects > 0
+        ? std::make_optional(FramebufferObject::wrapCurrentBinding())
+        : std::nullopt;
     auto x = static_cast<int>(view->x * static_cast<float>(metrics.width));
     auto y = static_cast<int>(view->y * static_cast<float>(metrics.height));
     auto viewWidth = static_cast<int>(view->width * static_cast<float>(metrics.width));
     auto viewHeight = static_cast<int>(view->height * static_cast<float>(metrics.height));
-    // If we need to process, we draw to the FBO which starts at point zero
-    renderer->setRenderRegion(process ? 0 : x, process ? 0 : y, viewWidth, viewHeight, !view->isRootView() && !process);
+    bool process = false;
+    bool genericEffectsActive = false;
+    renderer->setRenderRegion(
+        x, y, viewWidth, viewHeight, !view->isRootView());
+    auto preparation = view->isRootView()
+        ? sim->prepareRender(*renderer)
+        : sim->prepareRender(*renderer, *view->observer);
 
-    if (view->isRootView())
-        sim->render(*renderer);
-    else
-        sim->render(*renderer, *view->observer);
+    if (nEffects > 0)
+    {
+        view->updateFBOs(viewportEffects,
+                         metrics.width,
+                         metrics.height,
+                         true);
+        genericEffectsActive = true;
+        for (int i = 0; i < nEffects; ++i)
+            genericEffectsActive =
+                genericEffectsActive && view->getFBO(i) != nullptr;
+    }
+
+    if (genericEffectsActive)
+    {
+        FramebufferObject* sceneFbo = view->getFBO(0);
+        process =
+            sceneFbo != nullptr &&
+            viewportEffects.front()->preprocess(renderer, sceneFbo);
+    }
+
+    renderer->setRenderRegion(
+        process ? 0 : x,
+        process ? 0 : y,
+        viewWidth,
+        viewHeight,
+        !view->isRootView() && !process);
+    renderer->renderPrepared(preparation);
 
     if (process)
     {
         bool ok = true;
-        for (int i = 0; i < nEffects; i++)
+        for (int i = 0; genericEffectsActive && i < nEffects; i++)
         {
+            if (!ok)
+                break;
+
             FramebufferObject* dst;
             if (i == nEffects - 1)
             {
                 // The last effect renders to the screen FBO, needs to be reset
                 // to start from (x,y) instead of point zero
                 dst = &screenFbo.value();
-                if (x != 0 || y != 0)
-                    renderer->setRenderRegion(x, y, viewWidth, viewHeight);
+                renderer->setRenderRegion(x, y, viewWidth, viewHeight);
             }
             else
             {

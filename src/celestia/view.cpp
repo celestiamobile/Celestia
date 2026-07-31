@@ -262,7 +262,10 @@ View::drawBorder(Overlay* overlay, int gWidth, int gHeight, const Color &color, 
 
 
 void
-View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, int gWidth, int gHeight)
+View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects,
+                 int gWidth,
+                 int gHeight,
+                 bool multisampleFirstFbo)
 {
     int count = static_cast<int>(effects.size());
     auto newWidth = static_cast<GLuint>(width * gWidth);
@@ -276,7 +279,9 @@ View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, in
     if (currentSamples < 1)
         currentSamples = 1;
 
-    int samplesToRequest = currentSamples;
+    // A preceding viewport effect has already resolved the scene, so its
+    // destination must not run the following fullscreen shader once per sample.
+    int samplesToRequest = multisampleFirstFbo ? currentSamples : 1;
 
     if (static_cast<int>(fbos.size()) != count)
         fbos.resize(count);
@@ -315,7 +320,6 @@ View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, in
         }
     }
 }
-
 
 FramebufferObject*
 View::getFBO(int index) const

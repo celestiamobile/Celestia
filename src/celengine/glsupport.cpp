@@ -11,6 +11,7 @@ namespace celestia::gl
 #ifdef GL_ES
 CELAPI bool OES_texture_border_clamp          = false; //NOSONAR
 CELAPI bool OES_geometry_shader               = false; //NOSONAR
+CELAPI bool OES_texture_float_linear          = false; //NOSONAR
 #else
 CELAPI bool ARB_invalidate_subdata             = false; //NOSONAR
 #endif
@@ -83,6 +84,7 @@ bool init(util::array_view<std::string> ignore) noexcept
 #ifdef GL_ES
     OES_texture_border_clamp           = check_extension(ignore, "GL_OES_texture_border_clamp") || check_extension(ignore, "GL_EXT_texture_border_clamp");
     OES_geometry_shader                = check_extension(ignore, "GL_OES_geometry_shader") || check_extension(ignore, "GL_EXT_geometry_shader");
+    OES_texture_float_linear           = check_extension(ignore, "GL_OES_texture_float_linear");
     dualSourceBlending                 = check_extension(ignore, "GL_EXT_blend_func_extended");
     if (dualSourceBlending)
     {

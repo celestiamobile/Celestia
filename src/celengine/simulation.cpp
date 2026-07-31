@@ -38,21 +38,23 @@ Simulation::~Simulation()
 }
 
 
-void Simulation::render(Renderer& renderer)
+RenderPreparation
+Simulation::prepareRender(Renderer& renderer)
 {
-    renderer.render(*activeObserver,
-                    *universe,
-                    faintestVisible,
-                    selection);
+    return renderer.prepareRender(*activeObserver,
+                                  *universe,
+                                  faintestVisible,
+                                  selection);
 }
 
 
-void Simulation::render(Renderer& renderer, Observer& observer)
+RenderPreparation
+Simulation::prepareRender(Renderer& renderer, Observer& observer)
 {
-    renderer.render(observer,
-                    *universe,
-                    faintestVisible,
-                    selection);
+    return renderer.prepareRender(observer,
+                                  *universe,
+                                  faintestVisible,
+                                  selection);
 }
 
 

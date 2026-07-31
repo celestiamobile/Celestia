@@ -26,6 +26,7 @@ class Renderer;
 struct RenderInfo;
 class LightingState;
 struct Matrices;
+class Texture;
 
 namespace celestia::math
 {
@@ -34,6 +35,8 @@ class Frustum;
 
 namespace celestia::render
 {
+
+class BrunetonAtmosphereResource;
 
 class AtmosphereRenderer
 {
@@ -64,6 +67,21 @@ public:
         float                     radius,
         const math::Frustum      &frustum,
         const Matrices           &m);
+
+    bool renderBruneton(
+        const RenderInfo&,
+        const LightingState&,
+        const Matrices&,
+        const Eigen::Matrix4f& planetModelView,
+        float nearPlaneDistance,
+        const BrunetonAtmosphereResource&,
+        float luminanceScale,
+        const Eigen::Vector3f& bodySemiAxes,
+        const Eigen::Quaternionf& bodyOrientation,
+        Texture* cloudTexture,
+        Texture* cloudNormalMap,
+        float cloudHeight,
+        float cloudTextureOffset);
 
     void initGL();
 
@@ -99,6 +117,10 @@ private:
     std::vector<SkyContourPoint>  m_skyContour;
     gl::Buffer                    m_bo;
     gl::VertexObject              m_vo;
+    gl::Buffer                    m_brunetonBo;
+    gl::VertexObject              m_brunetonVo;
+    gl::Buffer                    m_shellBo;
+    gl::VertexObject              m_shellVo;
     bool                          m_initialized{ false };
 };
 
