@@ -81,7 +81,9 @@ public:
         Texture* cloudTexture,
         Texture* cloudNormalMap,
         float cloudHeight,
-        float cloudTextureOffset);
+        float cloudTextureOffset,
+        unsigned int cloudFboTexture,
+        const Eigen::Vector4f& cloudFboViewport);
 
     void initGL();
 

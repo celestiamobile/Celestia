@@ -726,6 +726,19 @@ class Renderer
 
     void createShadowFBO();
 
+    // Render the cloud sphere (albedo + coverage, unlit) into m_cloudFBO so the
+    // Bruneton shell shader can sample high-resolution / virtual-texture cloud
+    // maps in screen space and composite them with atmospheric scattering.
+    // Returns the FBO color texture id, or 0 on failure.
+    unsigned int renderCloudsToFBO(const RenderInfo& ri,
+                                   Texture* cloudTex,
+                                   float cloudTexOffset,
+                                   double distance,
+                                   float radius,
+                                   float cloudHeight,
+                                   const celestia::math::Frustum& viewFrustum,
+                                   const Matrices& cloudMatrices);
+
  private:
     std::unique_ptr<ShaderManager> shaderManager{ std::make_unique<ShaderManager>() };
 
@@ -871,6 +884,10 @@ class Renderer
     // Size of a texture used in shadow mapping
     unsigned m_shadowMapSize { 0 };
     std::unique_ptr<FramebufferObject> m_shadowFBO;
+
+    // Offscreen buffer holding screen-space cloud albedo + coverage for the
+    // Bruneton shell composite path (see renderCloudsToFBO).
+    std::unique_ptr<FramebufferObject> m_cloudFBO;
 
     std::unique_ptr<celestia::gl::VertexObject> m_markerVO;
     std::unique_ptr<celestia::gl::Buffer> m_markerBO;

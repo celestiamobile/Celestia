@@ -2665,6 +2665,93 @@ void Renderer::renderObject(const Vector3f& pos,
 }
 
 
+// Render the cloud sphere (albedo + coverage, unlit) into m_cloudFBO so the
+// Bruneton shell shader can sample high-resolution / virtual-texture cloud maps
+// in screen space and composite them with atmospheric scattering. The clouds
+// are drawn unlit (raw albedo) because all lighting and aerial perspective are
+// applied later in the shell shader, exactly as the analytic single-tile path
+// does. Returns the FBO color texture id, or 0 on failure.
+unsigned int
+Renderer::renderCloudsToFBO(const RenderInfo& ri,
+                            Texture* cloudTex,
+                            float cloudTexOffset,
+                            double distance,
+                            float radius,
+                            float cloudHeight,
+                            const math::Frustum& viewFrustum,
+                            const Matrices& cloudMatrices)
+{
+    if (cloudTex == nullptr || viewportWidth <= 0 || viewportHeight <= 0)
+        return 0;
+
+    // (Re)create the FBO to match the current viewport region.
+    if (m_cloudFBO == nullptr ||
+        m_cloudFBO->width() != static_cast<GLuint>(viewportWidth) ||
+        m_cloudFBO->height() != static_cast<GLuint>(viewportHeight))
+    {
+        m_cloudFBO = std::make_unique<FramebufferObject>(
+            static_cast<GLuint>(viewportWidth),
+            static_cast<GLuint>(viewportHeight),
+            FramebufferObject::Attachment::Color,
+            1,
+            /* useFloatColor = */ true);
+        if (!m_cloudFBO->isValid())
+        {
+            GetLogger()->warn("Error creating cloud FBO.\n");
+            m_cloudFBO = nullptr;
+            return 0;
+        }
+    }
+
+    ShaderProperties shadprop;
+    shadprop.texUsage = TexUsage::DiffuseTexture | TexUsage::TextureCoordTransform;
+    shadprop.lightModel = LightingModel::UnlitModel;
+    auto* prog = getShaderManager().getShader(shadprop);
+    if (prog == nullptr)
+        return 0;
+
+    GLint oldFbo = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &oldFbo);
+
+    GLboolean scissorWasEnabled = glIsEnabled(GL_SCISSOR_TEST);
+    glDisable(GL_SCISSOR_TEST);
+
+    m_cloudFBO->bind();
+    glViewport(0, 0, viewportWidth, viewportHeight);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    prog->use();
+    prog->setMVPMatrices(*cloudMatrices.projection, *cloudMatrices.modelview);
+    prog->textureOffset = cloudTexOffset;
+
+    // If we're beneath the cloud level, render the interior of the cloud
+    // sphere (mirrors the legacy separate cloud pass).
+    bool below = distance - radius < cloudHeight;
+    if (below)
+        glFrontFace(GL_CW);
+
+    PipelineState ps;
+    ps.blending = false;
+    ps.depthTest = false;
+    ps.depthMask = false;
+    setPipelineState(ps);
+
+    cloudTex->bind();
+    m_lodSphere->render(viewFrustum, ri.pixWidth, &cloudTex, 1, prog);
+
+    if (below)
+        glFrontFace(GL_CCW);
+
+    m_cloudFBO->unbind(oldFbo);
+    glViewport(m_viewport[0], m_viewport[1], m_viewport[2], m_viewport[3]);
+    if (scissorWasEnabled)
+        glEnable(GL_SCISSOR_TEST);
+
+    return m_cloudFBO->colorTexture();
+}
+
+
 // Draws a planet's atmosphere and cloud layer.
 void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S107)
                                 const RenderInfo& ri,
@@ -2706,6 +2793,20 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
     const bool integrateBrunetonClouds =
         brunetonResource != nullptr &&
         canIntegrateBrunetonClouds(atmosphere, ls, cloudTex, cloudNormalMap);
+    // Virtual-texture (multi-tile / multi-LOD) cloud maps cannot be sampled by
+    // the shell shader's single analytic base-tile lookup. For those we render
+    // the cloud sphere into an offscreen FBO and let the shell composite it in
+    // screen space, keeping full resolution while still integrating the clouds
+    // with the atmosphere.
+    const bool cloudIsVirtualTexture =
+        cloudTex != nullptr &&
+        (cloudTex->getLODCount() > 1 ||
+         cloudTex->getUTileCount(0) > 1 ||
+         cloudTex->getVTileCount(0) > 1);
+    const bool integrateBrunetonCloudsFBO =
+        brunetonResource != nullptr && useBruneton && lit &&
+        atmosphere->cloudHeight > 0.0f && ls.nLights > 0 &&
+        cloudIsVirtualTexture && !insidePlanet;
     const Atmosphere* cloudAtmosphere = atmosphere;
     Atmosphere effectiveAtmosphere;
     if (brunetonResource != nullptr)
@@ -2734,6 +2835,27 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
 
     if (brunetonResource != nullptr && useBruneton)
     {
+        unsigned int cloudFboTexture = 0;
+        Eigen::Vector4f cloudFboViewport(
+            static_cast<float>(m_viewport[0]),
+            static_cast<float>(m_viewport[1]),
+            static_cast<float>(viewportWidth),
+            static_cast<float>(viewportHeight));
+        if (integrateBrunetonCloudsFBO)
+        {
+            float cloudScale = 1.0f + atmosphere->cloudHeight / radius;
+            Matrix4f cmv = math::scale(planetMV, cloudScale);
+            Matrices cloudMVP = { m.projection, &cmv };
+            cloudFboTexture = renderCloudsToFBO(ri,
+                                                cloudTex,
+                                                cloudTexOffset,
+                                                distance,
+                                                radius,
+                                                atmosphere->cloudHeight,
+                                                viewFrustum,
+                                                cloudMVP);
+        }
+
         m_atmosphereRenderer->renderBruneton(
             ri,
             ls,
@@ -2747,7 +2869,9 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
             cloudTex,
             cloudNormalMap,
             atmosphere->cloudHeight,
-            cloudTexOffset);
+            cloudTexOffset,
+            cloudFboTexture,
+            cloudFboViewport);
     }
     else if (fade > 0 && util::is_set(renderFlags, RenderFlags::ShowAtmospheres) && atmosphere->height > 0.0f &&
         !insidePlanet)
@@ -2783,7 +2907,8 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
     }
 
     // If there's a cloud layer, we'll render it now.
-    if (cloudTex != nullptr && !insidePlanet && !integrateBrunetonClouds)
+    if (cloudTex != nullptr && !insidePlanet && !integrateBrunetonClouds &&
+        !integrateBrunetonCloudsFBO)
     {
         float cloudScale = 1.0f + atmosphere->cloudHeight / radius;
         Matrix4f cmv = math::scale(planetMV, cloudScale);

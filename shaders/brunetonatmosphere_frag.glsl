@@ -80,6 +80,7 @@ uniform sampler3D single_mie_scattering_texture;
 uniform sampler2D irradiance_texture;
 uniform sampler2D cloud_texture;
 uniform sampler2D cloud_normal_texture;
+uniform sampler2D cloud_color_texture;
 uniform sampler2D ring_shadow_texture;
 uniform int combined_scattering_textures;
 uniform int precomputed_luminance;
@@ -89,6 +90,9 @@ uniform int render_clouds;
 uniform int render_cloud_normals;
 uniform int cloud_normal_texture_dxt5;
 uniform int cloud_texture_has_alpha;
+uniform int cloud_from_fbo;
+uniform vec2 cloud_fbo_viewport_origin;
+uniform vec2 cloud_fbo_viewport_size;
 uniform vec3 camera;
 uniform vec3 earth_center;
 uniform vec3 sun_direction;
@@ -793,6 +797,17 @@ vec4 SampleCloud(vec2 texture_uv)
     return vec4(sample_value.rgb, density);
 }
 
+// Screen-space cloud albedo + coverage from the FBO produced by the unlit
+// cloud-sphere pass. rgb = cloud albedo, a = coverage. Sampling in screen space
+// gives full virtual-texture resolution that the analytic base-tile lookup
+// cannot reach.
+vec4 SampleCloudFbo()
+{
+    vec2 uv = (gl_FragCoord.xy - cloud_fbo_viewport_origin) /
+              cloud_fbo_viewport_size;
+    return texture(cloud_color_texture, uv);
+}
+
 Direction GetCloudNormal(
     Direction geometric_normal,
     vec2 texture_uv)
@@ -889,7 +904,9 @@ vec4 GetCloudColor(
     Position cloud_point = origin + ray * cloud_distance;
     Direction geometric_normal = normalize(cloud_point);
     vec2 texture_uv = GetCloudTextureUv(geometric_normal);
-    vec4 cloud_sample = SampleCloud(texture_uv);
+    vec4 cloud_sample = cloud_from_fbo != 0
+        ? SampleCloudFbo()
+        : SampleCloud(texture_uv);
     cloud_sample.a = clamp(cloud_sample.a, 0.0, 1.0);
     float alpha = cloud_sample.a;
     if (alpha <= 0.0)
@@ -1624,7 +1641,9 @@ void main()
                 vec2 texture_uv =
                     GetCloudTextureUv(geometric_normal);
                 cloud_alpha =
-                    clamp(SampleCloud(texture_uv).a, 0.0, 1.0);
+                    clamp((cloud_from_fbo != 0
+                            ? SampleCloudFbo()
+                            : SampleCloud(texture_uv)).a, 0.0, 1.0);
             }
             transmittance = GetSkyTransmittance(
                 camera_position,

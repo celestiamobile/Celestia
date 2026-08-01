@@ -405,7 +405,9 @@ AtmosphereRenderer::renderBruneton(
     Texture* cloudTexture,
     Texture* cloudNormalMap,
     float cloudHeight,
-    float cloudTextureOffset)
+    float cloudTextureOffset,
+    unsigned int cloudFboTexture,
+    const Eigen::Vector4f& cloudFboViewport)
 {
     // The hybrid atmosphere renders directly into the scene framebuffer (the
     // window's default framebuffer / drawable) rather than an offscreen FBO.
@@ -685,6 +687,20 @@ AtmosphereRenderer::renderBruneton(
     FloatShaderParameter(programId, "cloud_texture_offset") =
         cloudTextureOffset;
 
+    // High-resolution / virtual-texture cloud composite: when a cloud FBO
+    // texture is supplied, the shell shader samples cloud albedo + coverage
+    // from it in screen space instead of the single analytic base tile. The
+    // FBO was rendered with the same camera, so gl_FragCoord maps directly into
+    // it once the viewport origin/size are accounted for.
+    const bool cloudFromFbo = renderClouds && cloudFboTexture != 0;
+    IntegerShaderParameter(programId, "cloud_from_fbo") = cloudFromFbo ? 1 : 0;
+    IntegerShaderParameter(programId, "cloud_color_texture") = 11;
+    Vec2ShaderParameter(programId, "cloud_fbo_viewport_origin") =
+        Eigen::Vector2f(cloudFboViewport.x(), cloudFboViewport.y());
+    Vec2ShaderParameter(programId, "cloud_fbo_viewport_size") =
+        Eigen::Vector2f(std::max(cloudFboViewport.z(), 1.0f),
+                        std::max(cloudFboViewport.w(), 1.0f));
+
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, resource.transmittanceTexture());
     glActiveTexture(GL_TEXTURE1);
@@ -713,6 +729,10 @@ AtmosphereRenderer::renderBruneton(
         hasRingShadow
             ? ringShadowTile.texID
             : resource.transmittanceTexture());
+    glActiveTexture(GL_TEXTURE11);
+    glBindTexture(
+        GL_TEXTURE_2D,
+        cloudFromFbo ? cloudFboTexture : resource.transmittanceTexture());
     glActiveTexture(GL_TEXTURE0);
 
     gl::VertexObject& vo = useShell ? m_shellVo : m_brunetonVo;
