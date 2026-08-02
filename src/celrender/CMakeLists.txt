@@ -9,6 +9,8 @@ set(CELRENDER_SOURCES
   cometrenderer.h
   eclipticlinerenderer.cpp
   eclipticlinerenderer.h
+  hillaireatmosphererenderer.cpp
+  hillaireatmosphererenderer.h
   galaxyrenderer.cpp
   galaxyrenderer.h
   globularrenderer.cpp

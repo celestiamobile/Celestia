@@ -9,6 +9,7 @@ class CometRenderer;
 class EclipticLineRenderer;
 class GalaxyRenderer;
 class GlobularRenderer;
+class HillaireAtmosphereRenderer;
 class LegacyLargeStarRenderer;
 class LineRenderer;
 class NebulaRenderer;

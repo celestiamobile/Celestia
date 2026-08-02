@@ -69,6 +69,7 @@
 #include <celrender/linerenderer.h>
 #include <celrender/galaxyrenderer.h>
 #include <celrender/globularrenderer.h>
+#include <celrender/hillaireatmosphererenderer.h>
 #include <celrender/nebularenderer.h>
 #include <celrender/openclusterrenderer.h>
 #include <celrender/referencemarkrenderer.h>
@@ -191,6 +192,7 @@ Renderer::Renderer() :
     m_starPipelineOwner(std::make_unique<celestia::render::StarPipelineOwner>()),
     curvePlotVertexBuffer(std::make_unique<CurvePlotVertexBuffer>(*this)),
     m_atmosphereRenderer(std::make_unique<AtmosphereRenderer>(*this)),
+    m_hillaireAtmosphereRenderer(std::make_unique<celestia::render::HillaireAtmosphereRenderer>(*this)),
     m_cometRenderer(std::make_unique<CometRenderer>(*this)),
     m_eclipticLineRenderer(std::make_unique<EclipticLineRenderer>(*this)),
     m_galaxyRenderer(std::make_unique<GalaxyRenderer>(*this)),
@@ -438,6 +440,7 @@ bool Renderer::init(int winWidth, int winHeight,
     atmosphereExtinctionFactor = -std::log(atmosphereExtinctionThreshold);
 
     m_atmosphereRenderer->initGL();
+    m_hillaireAtmosphereRenderer->initGL();
     if (!m_cometRenderer->initGL())
         return false;
 
@@ -2628,14 +2631,31 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
         // TODO: convert old style atmopshere parameters
         if (atmosphere->mieScaleHeight > 0.0f)
         {
-            m_atmosphereRenderer->render(
-                ri,
-                *atmosphere,
-                ls,
-                obj.orientation,
-                radius,
-                viewFrustum,
-                planetMVP);
+            static const bool forceLegacy = std::getenv("CEL_ATM_LEGACY") != nullptr;
+            bool drewHillaire = false;
+            if (!forceLegacy)
+            {
+                drewHillaire = m_hillaireAtmosphereRenderer->render(
+                    ri,
+                    *atmosphere,
+                    ls,
+                    obj.orientation,
+                    scaleFactors,
+                    radius,
+                    viewFrustum,
+                    planetMVP);
+            }
+            if (!drewHillaire)
+            {
+                m_atmosphereRenderer->render(
+                    ri,
+                    *atmosphere,
+                    ls,
+                    obj.orientation,
+                    radius,
+                    viewFrustum,
+                    planetMVP);
+            }
         }
         else
         {

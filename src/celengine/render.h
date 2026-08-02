@@ -850,6 +850,7 @@ class Renderer
     std::unique_ptr<celestia::render::AsterismRenderer> m_asterismRenderer;
     std::unique_ptr<celestia::render::BoundariesRenderer> m_boundariesRenderer;
     std::unique_ptr<celestia::render::AtmosphereRenderer> m_atmosphereRenderer;
+    std::unique_ptr<celestia::render::HillaireAtmosphereRenderer> m_hillaireAtmosphereRenderer;
     std::unique_ptr<celestia::render::CometRenderer> m_cometRenderer;
     std::unique_ptr<celestia::render::EclipticLineRenderer> m_eclipticLineRenderer;
     std::unique_ptr<celestia::render::GalaxyRenderer> m_galaxyRenderer;
@@ -886,6 +887,7 @@ class Renderer
     celestia::engine::RendererColors colors{ celestia::engine::RendererColors::defaults() };
 
     friend class celestia::render::AtmosphereRenderer;
+    friend class celestia::render::HillaireAtmosphereRenderer;
     friend class PointStarRenderer;
 };
 

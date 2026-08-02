@@ -16,7 +16,9 @@
 #include "celestiacore.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <cctype>
 #include <cwctype>
@@ -48,6 +50,7 @@
 #include <celengine/console.h>
 #include <celengine/resourcesystem.h>
 #include <celengine/framebuffer.h>
+#include <celengine/glsupport.h>
 #include <celengine/fisheyeprojectionmode.h>
 #include <celengine/frametree.h>
 #include <celengine/location.h>
@@ -2027,6 +2030,38 @@ void CelestiaCore::draw()
 
     if (movieCapture != nullptr && recording)
         movieCapture->captureFrame();
+
+    // Env-gated benchmark harness: CEL_BENCH_FRAMES=N renders N frames after a
+    // warmup of CEL_BENCH_DELAY frames, glFinish-bracketed, then prints fps and
+    // exits. Temporary instrumentation for atmosphere perf work.
+    {
+        static const int benchFrames = []() {
+            const char *e = std::getenv("CEL_BENCH_FRAMES");
+            return e != nullptr ? std::atoi(e) : 0;
+        }();
+        if (benchFrames > 0)
+        {
+            static const int benchDelay = []() {
+                const char *e = std::getenv("CEL_BENCH_DELAY");
+                return e != nullptr ? std::atoi(e) : 60;
+            }();
+            static int benchSeen = 0;
+            static std::chrono::steady_clock::time_point benchT0;
+            glFinish();
+            ++benchSeen;
+            if (benchSeen == benchDelay)
+                benchT0 = std::chrono::steady_clock::now();
+            else if (benchSeen == benchDelay + benchFrames)
+            {
+                auto t1 = std::chrono::steady_clock::now();
+                double secs = std::chrono::duration<double>(t1 - benchT0).count();
+                std::fprintf(stderr, "CEL_BENCH: %d frames in %.3f s = %.1f fps\n",
+                             benchFrames, secs, benchFrames / secs);
+                std::fflush(stderr);
+                std::exit(0);
+            }
+        }
+    }
 
     // Frame rate counter
     nFrames++;
