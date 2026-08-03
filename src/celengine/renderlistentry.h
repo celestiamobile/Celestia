@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <optional>
 
 #include <Eigen/Core>
@@ -26,6 +27,9 @@ struct RenderListEntry
         RenderableStar,
         RenderableBody,
         RenderableRingSystem,
+        RenderableRingSystemNear,
+        RenderableRingSystemFar,
+        RenderableAtmosphere,
         RenderableCometTail,
         RenderableReferenceMark,
     };
@@ -49,4 +53,8 @@ struct RenderListEntry
     RenderableType renderableType;
     bool isOpaque;
     std::optional<Eigen::Quaternionf> orientation;
+
+    // Tie-break rank for co-centered transparent entries. A larger value sorts
+    // farther and is drawn earlier: far ring, atmosphere, near ring.
+    std::uint8_t renderOrder{ 0 };
 };
