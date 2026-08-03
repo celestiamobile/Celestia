@@ -236,7 +236,11 @@ void main()
     {
         vec3 vr_view = (view_from_clip * in_Position).xyz;
         view_ray = (model_from_view * vec4(vr_view, 0.0)).xyz;
-        gl_Position = in_Position;
+        // Emit at the far plane (ndc z = 1) so opaque terrain, which is nearer,
+        // depth-masks the quad. Only true sky/space pixels (cleared depth) pass,
+        // which fixes the grazing-horizon black seam and skips the march on
+        // terrain (early-Z) for a perf win near the ground.
+        gl_Position = vec4(in_Position.xy, in_Position.w, in_Position.w);
     }
 }
 )glsl";
@@ -405,6 +409,8 @@ uniform int  num_lights;
 uniform vec3 light_dir[2];
 uniform vec3 light_illuminance[2];
 uniform float luminance_scale;
+uniform float fade;           // 0..1 smooth ramp-in as the atmosphere grows on screen
+uniform int  use_shell;       // 1 = shell geometry (planet disk visible), 0 = near-ground quad
 
 float fromUnitToSubUv(float u, float res)
 {
@@ -439,14 +445,36 @@ void main()
         }
         pos += dir * t_top;
     }
-
-    float t_max, t_bottom;
-    if (!findAtmosphereTMax(t_max, t_bottom, pos, dir))
+    // Determine the integration limit. The two rendering paths differ:
+    //   * Shell path (planet viewed from space): rays that strike the planet
+    //     must truncate at the ground, otherwise the chord integrates straight
+    //     through the globe and pass 0 multiplies the surface to black.
+    //   * Quad path (near ground): opaque terrain is depth-masked in hardware,
+    //     so only true sky/space pixels reach this shader. Integrate the full
+    //     sky path to the atmosphere exit; truncating at the analytic ground
+    //     here would recreate the grazing-horizon inscatter collapse (black
+    //     seam) in the thin gap where the terrain mesh sags inside the sphere.
+    float t_max;
+    if (use_shell != 0)
     {
-        frag = (render_mode == 0) ? vec4(1.0) : vec4(0.0, 0.0, 0.0, 1.0);
-        return;
+        float t_bottom;
+        if (!findAtmosphereTMax(t_max, t_bottom, pos, dir))
+        {
+            frag = (render_mode == 0) ? vec4(1.0) : vec4(0.0, 0.0, 0.0, 1.0);
+            return;
+        }
+        t_max = min(t_max, T_MAX_MAX);
     }
-    t_max = min(t_max, T_MAX_MAX);
+    else
+    {
+        float t_top = raySphere(pos, dir, atm_top_radius);   // forward atmosphere exit
+        if (t_top <= 0.0)
+        {
+            frag = (render_mode == 0) ? vec4(1.0) : vec4(0.0, 0.0, 0.0, 1.0);
+            return;
+        }
+        t_max = min(t_top, T_MAX_MAX);
+    }
 
     float sample_count = mix(4.0, 32.0, clamp(t_max / 200.0, 0.0, 1.0));
     float sample_count_floored = floor(sample_count);
@@ -501,10 +529,14 @@ void main()
         transmittance *= sample_transmittance;
     }
 
+    // fade smoothly ramps the atmosphere in as it grows past ~2px thick,
+    // matching the legacy renderer and avoiding a pop-on at the fade threshold.
+    // Pass 0 blends transmittance toward 1 (no extinction); pass 1 scales the
+    // additive inscattering.
     if (render_mode == 0)
-        frag = vec4(clamp(transmittance, 0.0, 1.0), 1.0);
+        frag = vec4(mix(vec3(1.0), clamp(transmittance, 0.0, 1.0), fade), 1.0);
     else
-        frag = vec4(max(luminance * luminance_scale, vec3(0.0)), 1.0);
+        frag = vec4(max(luminance * luminance_scale, vec3(0.0)) * fade, 1.0);
 }
 )glsl";
 
@@ -752,7 +784,8 @@ HillaireAtmosphereRenderer::render(
     const Eigen::Vector3f    &semiAxes,
     float                     radius,
     const math::Frustum      &frustum,
-    const Matrices           &m)
+    const Matrices           &m,
+    float                     fade)
 {
     if (!m_initialized)
         initGL();
@@ -775,19 +808,36 @@ HillaireAtmosphereRenderer::render(
 
     float cameraRadius = camera.norm();
 
-    // Lights: up to two directional sources, directions in object space.
-    int numLights = static_cast<int>(std::min<unsigned int>(ls.nLights, 2u));
-    IntegerShaderParameter(programId, "num_lights") = numLights;
-    for (int i = 0; i < numLights; ++i)
+    // Lights: up to two directional sources, directions in object space. Cull
+    // sources whose irradiance is negligible relative to the brightest one; a
+    // faint secondary star (e.g. Earth's ~0.0007 irradiance companion) adds no
+    // visible scattering but doubles the per-sample LUT sampling cost, which
+    // matters for the near-ground full-screen march.
+    unsigned int candidateLights = std::min<unsigned int>(ls.nLights, 2u);
+    float maxIrr = 0.0f;
+    for (unsigned int i = 0; i < candidateLights; ++i)
+        maxIrr = std::max(maxIrr, ls.lights[i].irradiance);
+    const float irrCutoff = maxIrr * 0.01f;
+
+    int numLights = 0;
+    for (unsigned int i = 0; i < candidateLights; ++i)
     {
+        float irr = ls.lights[i].irradiance;
+        if (irr < irrCutoff)
+            continue;
         Eigen::Vector3f d = ls.lights[i].direction_obj.normalized();
         Color c = ls.lights[i].color;
-        Eigen::Vector3f illum(c.red(), c.green(), c.blue());
-        std::string di = "light_dir[" + std::to_string(i) + "]";
-        std::string ii = "light_illuminance[" + std::to_string(i) + "]";
+        // color is the light's chromaticity; irradiance is its magnitude. Scale
+        // by irradiance so faint secondary stars don't light the atmosphere as
+        // brightly as the primary sun (which would paint a spurious day-side).
+        Eigen::Vector3f illum(c.red() * irr, c.green() * irr, c.blue() * irr);
+        std::string di = "light_dir[" + std::to_string(numLights) + "]";
+        std::string ii = "light_illuminance[" + std::to_string(numLights) + "]";
         Vec3ShaderParameter(programId, di.c_str()) = d;
         Vec3ShaderParameter(programId, ii.c_str()) = illum;
+        ++numLights;
     }
+    IntegerShaderParameter(programId, "num_lights") = numLights;
 
     static const float lumScale = []() {
         if (const char* e = std::getenv("CEL_ATM_LUM"))
@@ -795,6 +845,7 @@ HillaireAtmosphereRenderer::render(
         return 6.0f;
     }();
     FloatShaderParameter(programId, "luminance_scale") = lumScale;
+    FloatShaderParameter(programId, "fade") = fade;
 
     // LUT textures.
     glActiveTexture(GL_TEXTURE0);
@@ -831,7 +882,11 @@ HillaireAtmosphereRenderer::render(
 
     Renderer::PipelineState ps;
     ps.blending = true;
-    ps.depthTest = useShell;
+    // Depth-test both paths. The shell is real geometry; the quad is emitted at
+    // the far plane so nearer terrain masks it (fixes the grazing-horizon seam
+    // and early-Z rejects terrain for a perf win). depthMask stays off so the
+    // atmosphere never writes depth.
+    ps.depthTest = true;
     ps.depthMask = false;
 
     gl::VertexObject &vo = useShell ? m_shellVo : m_quadVo;

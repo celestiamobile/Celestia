@@ -62,7 +62,8 @@ public:
         const Eigen::Vector3f    &semiAxes,
         float                     radius,
         const math::Frustum      &frustum,
-        const Matrices           &m);
+        const Matrices           &m,
+        float                     fade);
 
 private:
     // Physical, km-based atmosphere parameters derived from a Celestia

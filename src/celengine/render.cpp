@@ -2643,7 +2643,8 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
                     scaleFactors,
                     radius,
                     viewFrustum,
-                    planetMVP);
+                    planetMVP,
+                    fade);
             }
             if (!drewHillaire)
             {
