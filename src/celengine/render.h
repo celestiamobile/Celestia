@@ -630,6 +630,7 @@ class Renderer
 
     bool testEclipse(const Body& receiver,
                      const Body& caster,
+                     float receiverShadowRadius,
                      LightingState& lightingState,
                      unsigned int lightIndex,
                      double now);
