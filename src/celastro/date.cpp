@@ -437,6 +437,129 @@ TDBtoTT(double tdb)
     return tdb - secsToDays(TDBcorrection(tdb));
 }
 
+// Polynomial approximations by Espenak and Meeus:
+// https://eclipse.gsfc.nasa.gov/SEhelp/deltatpoly2004.html
+double
+estimateDeltaT(double year)
+{
+    double t;
+    double u;
+
+    if (year < -500.0)
+    {
+        u = (year - 1820.0) / 100.0;
+        return -20.0 + 32.0 * u * u;
+    }
+    if (year < 500.0)
+    {
+        u = year / 100.0;
+        return 10583.6
+             + u * (-1014.41
+             + u * (33.78311
+             + u * (-5.952053
+             + u * (-0.1798452
+             + u * (0.022174192
+             + u * 0.0090316521)))));
+    }
+    if (year < 1600.0)
+    {
+        u = (year - 1000.0) / 100.0;
+        return 1574.2
+             + u * (-556.01
+             + u * (71.23472
+             + u * (0.319781
+             + u * (-0.8503463
+             + u * (-0.005050998
+             + u * 0.0083572073)))));
+    }
+    if (year < 1700.0)
+    {
+        t = year - 1600.0;
+        return 120.0 - 0.9808 * t - 0.01532 * t * t + t * t * t / 7129.0;
+    }
+    if (year < 1800.0)
+    {
+        t = year - 1700.0;
+        return 8.83
+             + t * (0.1603
+             + t * (-0.0059285
+             + t * (0.00013336
+             - t / 1174000.0)));
+    }
+    if (year < 1860.0)
+    {
+        t = year - 1800.0;
+        return 13.72
+             + t * (-0.332447
+             + t * (0.0068612
+             + t * (0.0041116
+             + t * (-0.00037436
+             + t * (0.0000121272
+             + t * (-0.0000001699
+             + t * 0.000000000875))))));
+    }
+    if (year < 1900.0)
+    {
+        t = year - 1860.0;
+        return 7.62
+             + t * (0.5737
+             + t * (-0.251754
+             + t * (0.01680668
+             + t * (-0.0004473624
+             + t / 233174.0))));
+    }
+    if (year < 1920.0)
+    {
+        t = year - 1900.0;
+        return -2.79
+             + t * (1.494119
+             + t * (-0.0598939
+             + t * (0.0061966
+             - t * 0.000197)));
+    }
+    if (year < 1941.0)
+    {
+        t = year - 1920.0;
+        return 21.20
+             + t * (0.84493
+             + t * (-0.076100
+             + t * 0.0020936));
+    }
+    if (year < 1961.0)
+    {
+        t = year - 1950.0;
+        return 29.07 + 0.407 * t - t * t / 233.0 + t * t * t / 2547.0;
+    }
+    if (year < 1986.0)
+    {
+        t = year - 1975.0;
+        return 45.45 + 1.067 * t - t * t / 260.0 - t * t * t / 718.0;
+    }
+    if (year < 2005.0)
+    {
+        t = year - 2000.0;
+        return 63.86
+             + t * (0.3345
+             + t * (-0.060374
+             + t * (0.0017275
+             + t * (0.000651814
+             + t * 0.00002373599))));
+    }
+    if (year < 2050.0)
+    {
+        t = year - 2000.0;
+        return 62.92 + 0.32217 * t + 0.005589 * t * t;
+    }
+    if (year < 2150.0)
+    {
+        u = (year - 1820.0) / 100.0;
+        return -20.0 + 32.0 * u * u - 0.5628 * (2150.0 - year);
+    }
+
+    u = (year - 1820.0) / 100.0;
+    return -20.0 + 32.0 * u * u;
+}
+
 // Convert from Coordinated Universal time to Barycentric Dynamical Time
 Date
 TDBtoUTC(double tdb)

@@ -52,6 +52,13 @@ constexpr double IAU_SECULAR_TERM_VALID_CENTURIES = 50.0;
 // that range, the polynomial terms produce absurd results.
 constexpr double P03LP_VALID_CENTURIES = 5000.0;
 
+double
+decimalYear(double tjd)
+{
+    astro::Date date(tjd);
+    return date.year + (date.month - 0.5) / 12.0;
+}
+
 /*! Base class for IAU rotation models. All IAU rotation models are in the
  *  J2000.0 Earth equatorial frame.
  */
@@ -135,8 +142,13 @@ public:
 
     Eigen::Quaterniond computeSpin(double tjd) const override
     {
-        // TODO: Use a more accurate model for sidereal time
-        double t = tjd - astro::J2000;
+        // Orbital time is TDB, but terrestrial rotation is governed by UT1.
+        // Preserve the existing J2000 phase and apply the accumulated
+        // historical TT-UT1 difference away from the epoch.
+        double tt = astro::TDBtoTT(tjd);
+        double deltaT = astro::estimateDeltaT(decimalYear(tt));
+        double epochDeltaT = astro::estimateDeltaT(decimalYear(astro::J2000));
+        double t = tt - astro::J2000 - astro::secsToDays(deltaT - epochDeltaT);
         double theta = 2 * celestia::numbers::pi * (t * 24.0 / 23.9344694 - 259.853 / 360.0);
 
         return math::YRotation(-theta);

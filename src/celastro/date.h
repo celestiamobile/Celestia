@@ -104,6 +104,11 @@ double TAItoTT(double tai);
 double TTtoTDB(double tt);
 double TDBtoTT(double tdb);
 
+// Estimated difference TT - UT1, in seconds, for a decimal calendar year.
+// Historical values are uncertain and are intended for Earth orientation,
+// not precise civil-time conversion.
+double estimateDeltaT(double year);
+
 // Conversions to and from Julian Date UTC--other time systems
 // should be preferred, since UTC Julian Dates aren't defined
 // during leapseconds.
