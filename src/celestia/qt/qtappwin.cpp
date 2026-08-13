@@ -630,6 +630,8 @@ CelestiaAppWindow::writeSettings()
     bool useLocalTime = m_appCore->getTimeZoneBias() != 0;
     settings.setValue("LocalTime", useLocalTime);
     settings.setValue("TimeZoneName", QString::fromStdString(m_appCore->getTimeZoneName()));
+    settings.setValue("DateFormat", static_cast<int>(m_appCore->getDateFormat()));
+    settings.setValue("HudDetail", m_appCore->getHudDetail());
     settings.endGroup();
 
     settings.setValue("fps", ms_to_fps(timer->interval()));
@@ -1636,6 +1638,20 @@ CelestiaAppWindow::createMenus()
     if (settings.contains("TimeZoneName"))
     {
         m_appCore->setTimeZoneName(settings.value("TimeZoneName").toString().toStdString());
+    }
+
+    if (settings.contains("DateFormat"))
+    {
+        int dateFormat = settings.value("DateFormat").toInt();
+        if (dateFormat >= astro::Date::Locale && dateFormat < astro::Date::FormatCount)
+            m_appCore->setDateFormat(static_cast<astro::Date::Format>(dateFormat));
+    }
+
+    if (settings.contains("HudDetail"))
+    {
+        int hudDetail = settings.value("HudDetail").toInt();
+        if (hudDetail >= 0 && hudDetail <= 2)
+            m_appCore->setHudDetail(hudDetail);
     }
 
     /****** Help Menu ******/

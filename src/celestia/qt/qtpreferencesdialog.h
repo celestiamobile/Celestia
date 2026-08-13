@@ -137,7 +137,9 @@ private slots:
 
     void on_starColorBox_currentIndexChanged(int index);
 
+    void on_timeZoneBox_currentIndexChanged(int index);
     void on_dateFormatBox_currentIndexChanged(int index);
+    void on_hudDetailBox_currentIndexChanged(int index);
 
 protected:
     CelestiaCore* appCore;
