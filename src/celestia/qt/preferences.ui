@@ -1378,21 +1378,41 @@ Valid range: 1.0 to 100.0.</string>
      </widget>
      <widget class="QWidget" name="timeTab">
       <attribute name="title">
-       <string>Time</string>
+       <string>Information</string>
       </attribute>
       <layout class="QFormLayout" name="formLayout">
        <property name="fieldGrowthPolicy">
         <enum>QFormLayout::AllNonFixedFieldsGrow</enum>
        </property>
        <item row="0" column="0">
+        <widget class="QLabel" name="timeZoneLabel">
+         <property name="text">
+          <string>Time zone:</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QComboBox" name="timeZoneBox"/>
+       </item>
+       <item row="1" column="0">
         <widget class="QLabel" name="label_3">
          <property name="text">
           <string>Date display format:</string>
          </property>
         </widget>
        </item>
-       <item row="0" column="1">
+       <item row="1" column="1">
         <widget class="QComboBox" name="dateFormatBox"/>
+       </item>
+       <item row="2" column="0">
+        <widget class="QLabel" name="hudDetailLabel">
+         <property name="text">
+          <string>Information text:</string>
+         </property>
+        </widget>
+       </item>
+       <item row="2" column="1">
+        <widget class="QComboBox" name="hudDetailBox"/>
        </item>
       </layout>
      </widget>
