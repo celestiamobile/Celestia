@@ -74,7 +74,6 @@
 #include <celrender/referencemarkrenderer.h>
 #include <celrender/ringrenderer.h>
 #include <celrender/skygridrenderer.h>
-#include <celrender/gl/buffer.h>
 #include <celrender/gl/vertexobject.h>
 #include <celutil/logger.h>
 #include <celutil/utf8.h>
@@ -470,10 +469,9 @@ bool Renderer::init(int winWidth, int winHeight,
         return false;
 
     m_markerVO = std::make_unique<celestia::gl::VertexObject>(celestia::gl::VertexObject::Primitive::Triangles);
-    m_markerBO = std::make_unique<celestia::gl::Buffer>(celestia::gl::Buffer::TargetHint::Array);
 
     m_rectVO = std::make_unique<celestia::gl::VertexObject>(celestia::gl::VertexObject::Primitive::TriangleFan);
-    m_rectBO = std::make_unique<celestia::gl::Buffer>(celestia::gl::Buffer::TargetHint::Array);
+    m_rectBO = celestia::gl::Buffer::create(celestia::gl::Buffer::TargetHint::Array);
 
     m_lodSphere = std::make_unique<LODSphereMesh>();
 
@@ -1531,10 +1529,17 @@ void Renderer::render(const Observer& observer,
     // atmosphere.  If so, we need to adjust the sky color as well as the
     // limiting magnitude of stars (so stars aren't visible in the daytime
     // on planets with thick atmospheres.)
+    float faintestMagWithoutAtmosphere = faintestMag;
     if (util::is_set(renderFlags, RenderFlags::ShowAtmospheres))
     {
         adjustMagnitudeInsideAtmosphere(faintestMag, saturationMag, now);
     }
+    starAtmosphereBrightness =
+        starStyle == StarStyle::PointSpreadFunction
+            ? celestia::engine::detail::psfAtmosphereBrightness(
+                  faintestMag,
+                  faintestMagWithoutAtmosphere)
+            : 1.0f;
 
     // Now we need to determine how to scale the brightness of stars.  The
     // brightness will be proportional to the apparent magnitude, i.e.
@@ -1845,7 +1850,7 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
 
     float exposureFactor = std::max(starExposure, 1.0e-6f);
     float r              = std::max(starPointRadius, 1.0e-3f);
-    float peakRadScale   = exposureFactor * 3.0f
+    float peakRadScale   = exposureFactor * starAtmosphereBrightness * 3.0f
                            / (celestia::numbers::pi_v<float> * r * r);
     float irradiance     = astro::magToIrradiance(appMag);
     float peakRad        = peakRadScale * irradiance;
@@ -4442,17 +4447,18 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
                                                 * glowA / (2.0f * scale),
                                                 2.5f);
 
-        starRenderer.psf.peakRadScale          = exposureFactor * 3.0f
+        starRenderer.psf.peakRadScale          = exposureFactor * starAtmosphereBrightness * 3.0f
                                                  / (celestia::numbers::pi_v<float> * rLog * rLog);
         starRenderer.psf.dimGate               = dimGate;
         starRenderer.psf.glowA                 = glowA;
         starRenderer.psf.glowPeakLargeThreshold = glowPeakLargeThreshold;
 
         // Extend the iteration cutoff to the soft-clip's natural fade-in
-        // threshold so stars actually grow through dimGate instead of
-        // popping in at whatever peakRad they happen to have just past
-        // Celestia's perceptual faintestMag cutoff.
-        //   peakRad = dimGate  =>  m = (1/0.4) * log10(exposure * 3 / (pi * r^2 * dimGate))
+        // threshold. peakRadScale includes atmospheric eye adaptation, so
+        // daylight shifts this threshold brighter instead of restoring the
+        // night-sky cutoff.
+        //   peakRad = dimGate  =>  m = (1/0.4) *
+        //       log10(atmosphereBrightness * exposure * 3 / (pi * r^2 * dimGate))
         float psfFaintMag = std::log10(starRenderer.psf.peakRadScale / dimGate) / 0.4f;
         iterFaintestMag = std::max(faintestMagNight, psfFaintMag);
     }
@@ -5346,7 +5352,7 @@ static void draw_rectangle_solid(const Renderer &renderer,
                                  const Eigen::Matrix4f& p,
                                  const Eigen::Matrix4f& m,
                                  celestia::gl::VertexObject &vo,
-                                 celestia::gl::Buffer &bo,
+                                 const celestia::gl::Buffer::SharedPtr &bo,
                                  bool &initialized)
 {
     namespace gl = celestia::gl;
@@ -5383,7 +5389,7 @@ static void draw_rectangle_solid(const Renderer &renderer,
             r.colors[i].get(vertices[i].color);
     }
 
-    bo.bind().setData(vertices, gl::Buffer::BufferUsage::StreamDraw);
+    bo->bind().setData(vertices, gl::Buffer::BufferUsage::StreamDraw);
 
     if (!initialized)
     {
@@ -5432,7 +5438,7 @@ void Renderer::drawRectangle(const celestia::Rect &r,
     if(r.type == celestia::Rect::Type::BorderOnly)
         draw_rectangle_border(*this, r, fishEyeOverrideMode, p, m);
     else
-        draw_rectangle_solid(*this, r, fishEyeOverrideMode, p, m, *m_rectVO, *m_rectBO, m_rectInitialized);
+        draw_rectangle_solid(*this, r, fishEyeOverrideMode, p, m, *m_rectVO, m_rectBO, m_rectInitialized);
 }
 
 void Renderer::setRenderRegion(int x, int y, int width, int height, bool withScissor)

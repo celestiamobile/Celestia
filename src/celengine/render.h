@@ -33,6 +33,7 @@
 #include <celengine/texmanager.h>
 #include <celengine/textlayout.h>
 #include <celimage/pixelformat.h>
+#include <celrender/gl/buffer.h>
 #include <celrender/rendererfwd.h>
 #include "rendercolors.h"
 #include "renderflags.h"
@@ -728,6 +729,7 @@ class Renderer
     float brightnessScale{ 1.0f };
     float faintestMag{ 0.0f };
     float faintestPlanetMag{ 0.0f };
+    float starAtmosphereBrightness{ 1.0f };
     float saturationMagNight{ 1.0f };
     float saturationMag{ 1.0f };
     StarStyle starStyle{ StarStyle::FuzzyPointStars };
@@ -834,11 +836,10 @@ class Renderer
     std::unique_ptr<FramebufferObject> m_shadowFBO;
 
     std::unique_ptr<celestia::gl::VertexObject> m_markerVO;
-    std::unique_ptr<celestia::gl::Buffer> m_markerBO;
     bool m_markerDataInitialized{ false };
 
     std::unique_ptr<celestia::gl::VertexObject> m_rectVO;
-    std::unique_ptr<celestia::gl::Buffer> m_rectBO;
+    celestia::gl::Buffer::SharedPtr m_rectBO;
     mutable bool m_rectInitialized{ false };
 
     // Saturation magnitude used to calculate a point star size

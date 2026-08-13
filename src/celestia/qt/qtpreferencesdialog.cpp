@@ -36,6 +36,7 @@
 #include <celengine/texmanager.h>
 #include <celestia/celestiacore.h>
 #include <celutil/gettext.h>
+#include <celutil/tzutil.h>
 
 namespace celestia::qt
 {
@@ -314,15 +315,35 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
     ui.autoMagnitudeCheck->setChecked(util::is_set(renderFlags, ::RenderFlags::ShowAutoMag));
 
     {
+        QSignalBlocker blocker(ui.timeZoneBox);
+        ui.timeZoneBox->addItem(_("Universal Time"), 0);
+
+        std::string tzName;
+        if (int localTimeZoneBias = 0; GetTZInfo(tzName, localTimeZoneBias))
+            ui.timeZoneBox->addItem(_("Local Time"), localTimeZoneBias);
+
+        ui.timeZoneBox->setCurrentIndex(appCore->getTimeZoneBias() == 0 ? 0 : 1);
+    }
+
+    {
         QSignalBlocker blocker(ui.dateFormatBox);
 #ifndef _WIN32
         ui.dateFormatBox->addItem(_("Local format"), astro::Date::Locale);
 #endif
         ui.dateFormatBox->addItem(_("Time zone name"), astro::Date::TZName);
         ui.dateFormatBox->addItem(_("UTC offset"), astro::Date::UTCOffset);
+        ui.dateFormatBox->addItem(_("ISO 8601"), astro::Date::ISO8601);
 
         astro::Date::Format dateFormat = appCore->getDateFormat();
         SetComboBoxValue(ui.dateFormatBox, dateFormat);
+    }
+
+    {
+        QSignalBlocker blocker(ui.hudDetailBox);
+        ui.hudDetailBox->addItem(_("None"), 0);
+        ui.hudDetailBox->addItem(_("Terse"), 1);
+        ui.hudDetailBox->addItem(_("Verbose"), 2);
+        SetComboBoxValue(ui.hudDetailBox, appCore->getHudDetail());
     }
 }
 
@@ -975,11 +996,23 @@ PreferencesDialog::on_starColorBox_currentIndexChanged(int index)
 // Time
 
 void
+PreferencesDialog::on_timeZoneBox_currentIndexChanged(int index)
+{
+    appCore->setTimeZoneBias(ui.timeZoneBox->itemData(index, Qt::UserRole).toInt());
+}
+
+void
 PreferencesDialog::on_dateFormatBox_currentIndexChanged(int index)
 {
     QVariant itemData = ui.dateFormatBox->itemData(index, Qt::UserRole);
-    astro::Date::Format dateFormat = (astro::Date::Format) itemData.toInt();
+    astro::Date::Format dateFormat = static_cast<astro::Date::Format>(itemData.toInt());
     appCore->setDateFormat(dateFormat);
+}
+
+void
+PreferencesDialog::on_hudDetailBox_currentIndexChanged(int index)
+{
+    appCore->setHudDetail(ui.hudDetailBox->itemData(index, Qt::UserRole).toInt());
 }
 
 } // end namespace celestia::qt
