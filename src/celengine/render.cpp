@@ -1529,6 +1529,19 @@ void Renderer::render(const Observer& observer,
 
     setupSecondaryLightSources(secondaryIlluminators, lightSourceList);
 
+    bool automaticToneMapping =
+        toneMappingMode == ToneMappingMode::Automatic &&
+        gl::sRGBRendering;
+    auto renderedLuminance = automaticToneMapping
+        ? m_skyLuminanceFeedback->luminance(observer)
+        : std::nullopt;
+    automaticToneMappingExposure = renderedLuminance.has_value()
+        ? std::clamp(-std::log1p(-0.18f) /
+                         std::max(*renderedLuminance, 1.0e-4f),
+                     1.0e-3f,
+                     1.0f)
+        : 1.0f;
+
     // Scan through the render list to see if we're inside a planetary
     // atmosphere.  If so, we need to adjust the sky color as well as the
     // limiting magnitude of stars (so stars aren't visible in the daytime
@@ -1550,14 +1563,16 @@ void Renderer::render(const Observer& observer,
                 faintestMag,
                 faintestMagWithoutAtmosphere);
 
-        if (auto luminance = m_skyLuminanceFeedback->luminance(observer);
-            luminance.has_value())
+        if (automaticToneMapping && renderedLuminance.has_value())
         {
             // Match the existing 15-magnitude adaptation range, but
-            // drive culling and exposure from rendered sky brightness.
-            // A linear luminance of 0.5 or above represents full daylight.
+            // drive culling and exposure from displayed sky brightness.
+            // A displayed luminance of 0.5 or above represents full daylight.
+            float displayedLuminance =
+                -std::expm1(-automaticToneMappingExposure *
+                            *renderedLuminance);
             float lightness =
-                std::clamp(*luminance * 2.0f, 0.0f, 1.0f);
+                std::clamp(displayedLuminance * 2.0f, 0.0f, 1.0f);
             float magnitudeOffset = 15.0f * lightness;
             faintestMag =
                 faintestMagWithoutAtmosphere - magnitudeOffset;
@@ -1694,7 +1709,8 @@ Renderer::captureSkyLuminance(const Observer& observer,
                               const std::array<int, 4>& viewport)
 {
     m_skyLuminanceFeedback->capture(observer, viewport,
-                                    m_insideAtmosphere,
+                                    toneMappingMode ==
+                                        ToneMappingMode::Automatic &&
                                     gl::sRGBRendering);
 }
 
@@ -5089,6 +5105,13 @@ float Renderer::getToneMappingExposure() const
     return toneMappingExposure;
 }
 
+float Renderer::getEffectiveToneMappingExposure() const
+{
+    return toneMappingMode == ToneMappingMode::Automatic
+        ? automaticToneMappingExposure
+        : toneMappingExposure;
+}
+
 
 void Renderer::setToneMappingMode(ToneMappingMode mode)
 {
@@ -5156,7 +5179,8 @@ void Renderer::invalidateOrbitCache()
 
 bool Renderer::settingsHaveChanged() const
 {
-    return settingsChanged;
+    return settingsChanged ||
+        m_skyLuminanceFeedback->hasPendingReadback();
 }
 
 

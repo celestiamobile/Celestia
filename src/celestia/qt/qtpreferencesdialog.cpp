@@ -237,6 +237,7 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
         QSignalBlocker blocker(ui.toneMappingCombo);
         ui.toneMappingCombo->addItem(_("Off"));
         ui.toneMappingCombo->addItem(_("Manual exposure"));
+        ui.toneMappingCombo->addItem(_("Automatic exposure"));
         ui.toneMappingCombo->setCurrentIndex(
             static_cast<int>(renderer->getToneMappingMode()));
     }
@@ -803,7 +804,8 @@ void
 PreferencesDialog::on_toneMappingCombo_currentIndexChanged(int index) const
 {
     Renderer* renderer = appCore->getRenderer();
-    renderer->setToneMappingMode(static_cast<ToneMappingMode>(std::clamp(index, 0, 1)));
+    renderer->setToneMappingMode(
+        static_cast<ToneMappingMode>(std::clamp(index, 0, 2)));
     // Exposure only applies in Manual tone mapping mode.
     ui.toneMappingExposureLabel->setVisible(index == 1);
     ui.toneMappingExposureSpinBox->setVisible(index == 1);

@@ -19,37 +19,22 @@ namespace
 
 constexpr std::size_t SampleGridSize = 4;
 constexpr std::size_t SampleCount = SampleGridSize * SampleGridSize;
-constexpr std::size_t PixelSize = 4;
+constexpr std::size_t PixelSize = sizeof(float) * 4;
 constexpr std::size_t BufferSize = SampleCount * PixelSize;
 constexpr std::size_t ReadbackCount = 3;
 constexpr double CaptureInterval = 1.0;
 
 float
-toLinear(float value)
-{
-    return value <= 0.04045f
-        ? value / 12.92f
-        : std::pow((value + 0.055f) / 1.055f, 2.4f);
-}
-
-float
-sampleLuminance(const std::uint8_t* pixels, bool linearSource)
+sampleLuminance(const float* pixels)
 {
     std::array<float, SampleCount> luminances;
     for (std::size_t i = 0; i < SampleCount; ++i)
     {
-        const std::uint8_t* pixel = pixels + i * PixelSize;
-        float red = static_cast<float>(pixel[0]) / 255.0f;
-        float green = static_cast<float>(pixel[1]) / 255.0f;
-        float blue = static_cast<float>(pixel[2]) / 255.0f;
-        if (!linearSource)
-        {
-            red = toLinear(red);
-            green = toLinear(green);
-            blue = toLinear(blue);
-        }
+        const float* pixel = pixels + i * 4;
         luminances[i] =
-            0.2126f * red + 0.7152f * green + 0.0722f * blue;
+            0.2126f * pixel[0] +
+            0.7152f * pixel[1] +
+            0.0722f * pixel[2];
     }
 
     constexpr std::size_t percentile = SampleCount * 3 / 4;
@@ -69,7 +54,6 @@ struct SkyLuminanceFeedback::Impl
         GLsync fence{ nullptr };
         std::uint64_t observerId{ 0 };
         std::uint64_t generation{ 0 };
-        bool linearSource{ false };
     };
 
     struct State
@@ -77,7 +61,7 @@ struct SkyLuminanceFeedback::Impl
         float luminance{ 0.0f };
         double lastCaptureTime{ -CaptureInterval };
         std::uint64_t generation{ 0 };
-        bool insideAtmosphere{ false };
+        bool active{ false };
         bool valid{ false };
     };
 
@@ -89,7 +73,9 @@ struct SkyLuminanceFeedback::Impl
         m_sampleFbo = std::make_unique<FramebufferObject>(
             SampleGridSize,
             SampleGridSize,
-            FramebufferObject::Attachment::Color);
+            FramebufferObject::Attachment::Color,
+            1,
+            true);
         if (!m_sampleFbo->isValid())
         {
             celestia::util::GetLogger()->error(
@@ -166,13 +152,12 @@ struct SkyLuminanceFeedback::Impl
             readback.fence = nullptr;
 
             glBindBuffer(GL_PIXEL_PACK_BUFFER, readback.pbo);
-            const auto* pixels = static_cast<const std::uint8_t*>(
+            const auto* pixels = static_cast<const float*>(
                 glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, BufferSize,
                                  GL_MAP_READ_BIT));
             if (pixels != nullptr)
             {
-                float value =
-                    sampleLuminance(pixels, readback.linearSource);
+                float value = sampleLuminance(pixels);
                 State& state = m_states[readback.observerId];
                 if (readback.generation == state.generation)
                 {
@@ -196,23 +181,22 @@ struct SkyLuminanceFeedback::Impl
 
     void capture(const Observer& observer,
                  const std::array<int, 4>& viewport,
-                 bool insideAtmosphere,
-                 bool linearSource)
+                 bool active)
     {
         State& state = m_states[observer.getInstanceId()];
-        if (!insideAtmosphere)
+        if (!active)
         {
-            if (state.insideAtmosphere)
+            if (state.active)
                 ++state.generation;
             state.lastCaptureTime = -CaptureInterval;
-            state.insideAtmosphere = false;
+            state.active = false;
             state.valid = false;
             return;
         }
-        if (!state.insideAtmosphere)
+        if (!state.active)
         {
             state.lastCaptureTime = -CaptureInterval;
-            state.insideAtmosphere = true;
+            state.active = true;
         }
         double captureTime = observer.getRealTime();
         if (captureTime >= state.lastCaptureTime &&
@@ -281,11 +265,10 @@ struct SkyLuminanceFeedback::Impl
         glReadBuffer(GL_COLOR_ATTACHMENT0);
         glBindBuffer(GL_PIXEL_PACK_BUFFER, readback->pbo);
         glReadPixels(0, 0, SampleGridSize, SampleGridSize,
-                     GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+                     GL_RGBA, GL_FLOAT, nullptr);
 
         readback->observerId = observer.getInstanceId();
         readback->generation = state.generation;
-        readback->linearSource = linearSource;
         readback->fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
         if (readback->fence == nullptr)
         {
@@ -314,6 +297,15 @@ struct SkyLuminanceFeedback::Impl
         return it->second.luminance;
     }
 
+    bool hasPendingReadback() const
+    {
+        return std::any_of(m_readbacks.begin(), m_readbacks.end(),
+                          [](const Readback& readback)
+                          {
+                              return readback.fence != nullptr;
+                          });
+    }
+
     std::array<Readback, ReadbackCount> m_readbacks;
     std::unique_ptr<FramebufferObject> m_sampleFbo;
     std::size_t m_nextReadback{ 0 };
@@ -336,11 +328,15 @@ SkyLuminanceFeedback::consume()
 void
 SkyLuminanceFeedback::capture(const Observer& observer,
                               const std::array<int, 4>& viewport,
-                              bool insideAtmosphere,
-                              bool linearSource)
+                              bool active)
 {
-    m_impl->capture(observer, viewport, insideAtmosphere,
-                    linearSource);
+    m_impl->capture(observer, viewport, active);
+}
+
+bool
+SkyLuminanceFeedback::hasPendingReadback() const
+{
+    return m_impl->hasPendingReadback();
 }
 
 std::optional<float>

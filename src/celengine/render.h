@@ -314,6 +314,7 @@ class Renderer
     float getStarExposure() const;
     void  setToneMappingExposure(float e);
     float getToneMappingExposure() const;
+    float getEffectiveToneMappingExposure() const;
     void  setToneMappingMode(ToneMappingMode mode);
     ToneMappingMode getToneMappingMode() const;
     void setResolution(celestia::engine::TextureResolution resolution);
@@ -743,6 +744,7 @@ class Renderer
     float starDimClipFactor{ 10.0f };
     float starExposure{ 10.0f };
     float toneMappingExposure{ 1.0f };
+    float automaticToneMappingExposure{ 1.0f };
     ToneMappingMode toneMappingMode{ ToneMappingMode::None };
 
     Color ambientColor;

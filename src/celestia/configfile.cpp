@@ -68,6 +68,8 @@ applyToneMappingMode(ToneMappingMode& target, const AssociativeArray& hash, std:
         target = ToneMappingMode::None;
     else if (compareIgnoringCase(*str, "Manual") == 0)
         target = ToneMappingMode::Manual;
+    else if (compareIgnoringCase(*str, "Automatic") == 0)
+        target = ToneMappingMode::Automatic;
     else
         GetLogger()->error("Unknown {} value '{}'.\n", key, *str);
 }

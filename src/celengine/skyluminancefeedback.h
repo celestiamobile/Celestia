@@ -20,7 +20,8 @@ public:
 
     void consume();
     void capture(const Observer&, const std::array<int, 4>& viewport,
-                 bool insideAtmosphere, bool linearSource);
+                 bool active);
+    bool hasPendingReadback() const;
     std::optional<float> luminance(const Observer&) const;
 
 private:
