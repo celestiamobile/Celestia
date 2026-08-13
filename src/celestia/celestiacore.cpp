@@ -2091,6 +2091,9 @@ void CelestiaCore::draw(View* view)
     else
         sim->render(*renderer, *view->observer);
 
+    const Observer& observer =
+        view->isRootView() ? sim->getObserver() : *view->observer;
+
     if (process)
     {
         bool ok = true;
@@ -2111,8 +2114,22 @@ void CelestiaCore::draw(View* view)
             }
 
             FramebufferObject* src = view->getFBO(i);
-            if (!viewportEffects[i]->prerender(renderer, src, dst) ||
-                !viewportEffects[i]->render(renderer, src, viewWidth, viewHeight))
+            if (!viewportEffects[i]->prerender(renderer, src, dst))
+            {
+                GetLogger()->error("Unable to prepare viewport effect.\n");
+                ok = false;
+                break;
+            }
+
+            if (i == 0 && src->bindResolveTarget())
+            {
+                renderer->captureSkyLuminance(
+                    observer,
+                    { 0, 0, viewWidth, viewHeight });
+                dst->bind();
+            }
+
+            if (!viewportEffects[i]->render(renderer, src, viewWidth, viewHeight))
             {
                 GetLogger()->error("Unable to render viewport effect.\n");
                 ok = false;
@@ -2122,6 +2139,9 @@ void CelestiaCore::draw(View* view)
         viewportEffectUsed = ok;
     }
     isViewportEffectUsed = viewportEffectUsed;
+
+    if (!process)
+        renderer->captureSkyLuminance(observer);
 }
 
 void CelestiaCore::setSafeAreaInsets(int left, int top, int right, int bottom)

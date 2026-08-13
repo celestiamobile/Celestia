@@ -138,6 +138,7 @@ public:
 
     Observer &operator=(const Observer &o);
 
+    std::uint64_t getInstanceId() const noexcept;
     UniversalCoord getPosition() const;
     void           setPosition(const UniversalCoord&);
 
@@ -283,6 +284,8 @@ public:
     void gotoJourney(const JourneyParams&);
 
 private:
+    static std::uint64_t nextInstanceId();
+
     void computeGotoParameters(const Selection &sel,
                                JourneyParams &jparams,
                                const Eigen::Vector3d &offset,
@@ -313,6 +316,7 @@ private:
     Eigen::Quaterniond undoTransform(const Eigen::Quaterniond&) const;
     void convertFrameCoordinates(const ObserverFrame::SharedConstPtr &newFrame);
 
+    const std::uint64_t m_instanceId;
     double              simTime{ 0.0 };
 
     // Position, orientation, and velocity in the observer's reference frame

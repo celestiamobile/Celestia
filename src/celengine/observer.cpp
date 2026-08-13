@@ -10,6 +10,7 @@
 
 #include "observer.h"
 
+#include <atomic>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -383,6 +384,7 @@ convert(const ObserverFrame::SharedConstPtr& fromFrame,
  */
 
 Observer::Observer(const std::shared_ptr<celestia::engine::ObserverSettings>& settings) :
+    m_instanceId(nextInstanceId()),
     frame(std::make_shared<ObserverFrame>()),
     settings(settings)
 {
@@ -391,6 +393,7 @@ Observer::Observer(const std::shared_ptr<celestia::engine::ObserverSettings>& se
 
 /*! Copy constructor. */
 Observer::Observer(const Observer& o) :
+    m_instanceId(nextInstanceId()),
     simTime(o.simTime),
     position(o.position),
     originalOrientation(o.originalOrientation),
@@ -419,6 +422,19 @@ Observer::Observer(const Observer& o) :
 {
     setFrame(o.frame);
     updateUniversal();
+}
+
+std::uint64_t
+Observer::nextInstanceId()
+{
+    static std::atomic<std::uint64_t> nextId{ 1 };
+    return nextId.fetch_add(1, std::memory_order_relaxed);
+}
+
+std::uint64_t
+Observer::getInstanceId() const noexcept
+{
+    return m_instanceId;
 }
 
 Observer& Observer::operator=(const Observer& o)

@@ -60,6 +60,8 @@ class FramebufferObject
     GLuint depthTexture() const;
 
     bool bind();
+    // Bind the texture-backed target populated by resolve().
+    bool bindResolveTarget();
     bool unbind(GLint oldfboId);
     bool resolve() const;
 

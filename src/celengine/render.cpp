@@ -77,6 +77,7 @@
 #include <celrender/gl/vertexobject.h>
 #include <celutil/logger.h>
 #include <celutil/utf8.h>
+#include "skyluminancefeedback.h"
 #include <celutil/timer.h>
 #include <celttf/truetypefont.h>
 #include "glsupport.h"
@@ -230,7 +231,9 @@ Renderer::Renderer() :
     m_openClusterRenderer(std::make_unique<OpenClusterRenderer>(*this)),
     m_referenceMarkRenderer(std::make_unique<ReferenceMarkRenderer>(*this)),
     m_ringRenderer(std::make_unique<RingRenderer>(*this)),
-    m_skyGridRenderer(std::make_unique<SkyGridRenderer>(*this))
+    m_skyGridRenderer(std::make_unique<SkyGridRenderer>(*this)),
+    m_skyLuminanceFeedback(
+        std::make_unique<celestia::engine::SkyLuminanceFeedback>())
 {
 }
 
@@ -1447,6 +1450,7 @@ void Renderer::render(const Observer& observer,
                       float faintestMagNight,
                       const Selection& sel)
 {
+    m_skyLuminanceFeedback->consume();
     // Get the observer's time
     double now = observer.getTime();
     realTime = observer.getRealTime();
@@ -1530,16 +1534,39 @@ void Renderer::render(const Observer& observer,
     // limiting magnitude of stars (so stars aren't visible in the daytime
     // on planets with thick atmospheres.)
     float faintestMagWithoutAtmosphere = faintestMag;
+    float saturationMagWithoutAtmosphere = saturationMag;
     if (util::is_set(renderFlags, RenderFlags::ShowAtmospheres))
     {
         adjustMagnitudeInsideAtmosphere(faintestMag, saturationMag, now);
     }
-    starAtmosphereBrightness =
-        starStyle == StarStyle::PointSpreadFunction
-            ? celestia::engine::detail::psfAtmosphereBrightness(
-                  faintestMag,
-                  faintestMagWithoutAtmosphere)
-            : 1.0f;
+    m_insideAtmosphere =
+        starStyle == StarStyle::PointSpreadFunction &&
+        faintestMag < faintestMagWithoutAtmosphere;
+    starAtmosphereBrightness = 1.0f;
+    if (starStyle == StarStyle::PointSpreadFunction && m_insideAtmosphere)
+    {
+        starAtmosphereBrightness =
+            celestia::engine::detail::psfAtmosphereBrightness(
+                faintestMag,
+                faintestMagWithoutAtmosphere);
+
+        if (auto luminance = m_skyLuminanceFeedback->luminance(observer);
+            luminance.has_value())
+        {
+            // Match the existing 15-magnitude adaptation range, but
+            // drive culling and exposure from rendered sky brightness.
+            // A linear luminance of 0.5 or above represents full daylight.
+            float lightness =
+                std::clamp(*luminance * 2.0f, 0.0f, 1.0f);
+            float magnitudeOffset = 15.0f * lightness;
+            faintestMag =
+                faintestMagWithoutAtmosphere - magnitudeOffset;
+            saturationMag =
+                saturationMagWithoutAtmosphere - magnitudeOffset;
+            starAtmosphereBrightness =
+                astro::magToIrradiance(magnitudeOffset);
+        }
+    }
 
     // Now we need to determine how to scale the brightness of stars.  The
     // brightness will be proportional to the apparent magnitude, i.e.
@@ -1652,6 +1679,23 @@ void Renderer::render(const Observer& observer,
 #ifndef GL_ES
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
+}
+
+void
+Renderer::captureSkyLuminance(const Observer& observer)
+{
+    std::array<int, 4> viewport;
+    getViewport(viewport);
+    captureSkyLuminance(observer, viewport);
+}
+
+void
+Renderer::captureSkyLuminance(const Observer& observer,
+                              const std::array<int, 4>& viewport)
+{
+    m_skyLuminanceFeedback->capture(observer, viewport,
+                                    m_insideAtmosphere,
+                                    gl::sRGBRendering);
 }
 
 static Eigen::Vector3f

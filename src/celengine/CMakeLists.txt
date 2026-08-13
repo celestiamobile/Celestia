@@ -102,6 +102,8 @@ set(CELENGINE_SOURCES
   render.h
   rendercolors.cpp
   rendercolors.h
+  skyluminancefeedback.cpp
+  skyluminancefeedback.h
   renderflags.h
   renderglsl.cpp
   renderglsl.h

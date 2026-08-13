@@ -47,6 +47,7 @@ class CurvePlotVertexBuffer;
 class PointStarVertexBuffer;
 namespace celestia::render { class PsfStarVertexBuffer; class StarPipelineOwner; }
 namespace celestia::engine { class ResourceSystem; }
+namespace celestia::engine { class SkyLuminanceFeedback; }
 class Observer;
 struct Surface;
 struct RenderInfo;
@@ -166,6 +167,8 @@ class Renderer
                 const Universe&,
                 float faintestVisible,
                 const Selection& sel);
+    void captureSkyLuminance(const Observer&);
+    void captureSkyLuminance(const Observer&, const std::array<int, 4>&);
 
     bool getInfo(std::map<std::string, std::string>& info) const;
 
@@ -730,6 +733,7 @@ class Renderer
     float faintestMag{ 0.0f };
     float faintestPlanetMag{ 0.0f };
     float starAtmosphereBrightness{ 1.0f };
+    bool m_insideAtmosphere{ false };
     float saturationMagNight{ 1.0f };
     float saturationMag{ 1.0f };
     StarStyle starStyle{ StarStyle::FuzzyPointStars };
@@ -865,6 +869,7 @@ class Renderer
     std::unique_ptr<celestia::render::ReferenceMarkRenderer> m_referenceMarkRenderer;
     std::unique_ptr<celestia::render::RingRenderer> m_ringRenderer;
     std::unique_ptr<celestia::render::SkyGridRenderer> m_skyGridRenderer;
+    std::unique_ptr<celestia::engine::SkyLuminanceFeedback> m_skyLuminanceFeedback;
 
     std::shared_ptr<celestia::engine::ResourceSystem> m_resourceSystem;
     std::unique_ptr<celestia::engine::RenderGeometryManager> m_geometryManager;

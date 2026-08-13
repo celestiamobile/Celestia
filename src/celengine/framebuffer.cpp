@@ -399,6 +399,16 @@ FramebufferObject::bind()
 }
 
 bool
+FramebufferObject::bindResolveTarget()
+{
+    if (!isValid() || !m_owned)
+        return false;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_fboId);
+    return true;
+}
+
+bool
 FramebufferObject::unbind(GLint oldfboId)
 {
     glBindFramebuffer(GL_FRAMEBUFFER, oldfboId);
