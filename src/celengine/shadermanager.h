@@ -192,6 +192,7 @@ struct ShaderProperties
     ShadowMask shadowCounts{ ShadowMask::None };
 
     FisheyeOverrideMode fishEyeOverride { FisheyeOverrideMode::None };
+    bool separateRayleighMieScaleHeights{ false };
 };
 
 bool
@@ -372,6 +373,7 @@ public:
 
 private:
     void initCommonParameters();
+    void initAtmosphereParameters();
     void initParameters();
     void initSamplers();
 

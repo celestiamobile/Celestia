@@ -356,6 +356,7 @@ AtmosphereRenderer::render(
 
     shadprop.texUsage |= TexUsage::Scattering;
     shadprop.lightModel = LightingModel::AtmosphereModel;
+    shadprop.separateRayleighMieScaleHeights = m_renderer.getSeparateRayleighMieScaleHeights(atmosphere);
 
     ShaderProperties transmissionProps = shadprop;
     transmissionProps.nLights = 0;
@@ -399,7 +400,7 @@ AtmosphereRenderer::render(
 
     float extinctionThreshold = m_renderer.getAtmosphereExtinctionThreshold();
     float atmosphereRadius = radius +
-                             m_renderer.getAtmosphereShellHeight(atmosphere.mieScaleHeight);
+                             m_renderer.getAtmosphereShellHeight(atmosphere);
     float atmScale = atmosphereRadius / radius;
 
     auto setupAtmosphereProgram = [&](CelestiaGLProgram* prog)
