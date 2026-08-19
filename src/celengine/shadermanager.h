@@ -33,7 +33,6 @@ enum class StaticShader
     Crosshair,
     Depth,
     Galaxy,
-    Galaxy150,
     Globular,
     LargeStar,
     PsfStarGlow,
@@ -193,6 +192,7 @@ struct ShaderProperties
     ShadowMask shadowCounts{ ShadowMask::None };
 
     FisheyeOverrideMode fishEyeOverride { FisheyeOverrideMode::None };
+    bool separateRayleighMieScaleHeights{ false };
 };
 
 bool
@@ -373,6 +373,7 @@ public:
 
 private:
     void initCommonParameters();
+    void initAtmosphereParameters();
     void initParameters();
     void initSamplers();
 
@@ -383,24 +384,16 @@ private:
 class ShaderManager
 {
 public:
-    struct GeomShaderParams
-    {
-        int inputType;
-        int outType;
-        int nOutVertices;
-    };
-
     ShaderManager();
     ~ShaderManager() = default;
 
     CelestiaGLProgram* getShader(const ShaderProperties&);
-    CelestiaGLProgram* getShader(StaticShader, const GeomShaderParams* = nullptr);
-    CelestiaGLProgram* getShader(StaticShader, StaticShaderOptions, const GeomShaderParams* = nullptr);
+    CelestiaGLProgram* getShader(StaticShader, StaticShaderOptions = StaticShaderOptions::None);
 
     void setFisheyeEnabled(bool enabled);
 
 private:
-    std::shared_ptr<CelestiaGLProgram> loadShader(StaticShaderProperties, const GeomShaderParams*);
+    std::shared_ptr<CelestiaGLProgram> loadShader(StaticShaderProperties);
     std::shared_ptr<CelestiaGLProgram> getErrorProgram();
 
     std::unordered_map<ShaderProperties, std::shared_ptr<CelestiaGLProgram>> m_dynamicShaders;
