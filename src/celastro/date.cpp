@@ -24,7 +24,12 @@
 #include "astro.h"
 
 #if defined(__GNUC__) && !defined(_WIN32)
+#if defined(__clang__) && FMT_VERSION < 110100
+#include <iomanip>
+#include <fmt/ostream.h>
+#else
 #include <fmt/chrono.h>
+#endif
 #else
 #include <iomanip>
 #include <sstream>
@@ -208,14 +213,29 @@ Date::toString(const std::locale& loc, Format format) const
     cal_time.tm_zone = tzname.c_str();
 #endif
 
+#define CEL_LOCALE_TM_FORMAT  "%c"
+#define CEL_TZNAME_TM_FORMAT  "%Y %b %d %H:%M:%S %Z"
+#define CEL_DEFAULT_TM_FORMAT "%Y %b %d %H:%M:%S %z"
+
     switch(format)
     {
+#if defined(__clang__) && FMT_VERSION < 110100
+    // Workaround for a compile bug that occurs with Clang when formatting
+    // std::tm in C++20 mode with fmt versions before 11.1
     case Locale:
-        return fmt::format(loc, "{:%c}"sv, cal_time);
+        return fmt::format(loc, "{}", fmt::streamed(std::put_time(&cal_time, CEL_LOCALE_TM_FORMAT)));
     case TZName:
-        return fmt::format(loc, "{:%Y %b %d %H:%M:%S %Z}"sv, cal_time);
+        return fmt::format(loc, "{}", fmt::streamed(std::put_time(&cal_time, CEL_TZNAME_TM_FORMAT)));
     default:
-        return fmt::format(loc, "{:%Y %b %d %H:%M:%S %z}"sv, cal_time);
+        return fmt::format(loc, "{}", fmt::streamed(std::put_time(&cal_time, CEL_DEFAULT_TM_FORMAT)));
+#else
+    case Locale:
+        return fmt::format(loc, "{:" CEL_LOCALE_TM_FORMAT "}", cal_time);
+    case TZName:
+        return fmt::format(loc, "{:" CEL_TZNAME_TM_FORMAT "}", cal_time);
+    default:
+        return fmt::format(loc, "{:" CEL_DEFAULT_TM_FORMAT "}", cal_time);
+#endif
     }
 #else
     static const MonthAbbreviations* monthAbbreviations = nullptr;
