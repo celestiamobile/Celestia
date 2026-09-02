@@ -3239,7 +3239,7 @@ CelestiaGLProgram::setEclipseShadowParameters(const LightingState& ls,
 
             for (unsigned int i = 0; i < nShadows; i++)
             {
-                EclipseShadow& shadow = ls.shadows[li]->at(i);
+                const EclipseShadow& shadow = (*ls.shadows[li])[i];
                 CelestiaGLProgramShadow& shadowParams = shadows[li][i];
 
                 // Compute shadow parameters: max depth of at the center of the shadow

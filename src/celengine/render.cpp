@@ -84,6 +84,7 @@
 #include <cstring>
 #include <cassert>
 #include <cmath>
+#include <optional>
 #include <sstream>
 #include <iomanip>
 #include <numeric>
@@ -2292,8 +2293,8 @@ setupObjectLighting(const vector<LightSource>& suns,
     }
     else if (nLights > 2)
     {
-        sort(ls.lights, ls.lights + nLights,
-             [](const auto &l0, const auto &l1) { return l0.irradiance > l1.irradiance; });
+        std::sort(ls.lights.begin(), ls.lights.begin() + nLights,
+                  [](const auto &l0, const auto &l1) { return l0.irradiance > l1.irradiance; });
     }
 
     // Compute the total irradiance
@@ -2760,7 +2761,8 @@ void Renderer::renderPlanetAtmosphere(Body& body,
     float discSizeInPixels = radius / (max(nearPlaneDistance, altitude) * pixelSize);
 
     RenderProperties rp;
-    LightingState ls;
+    // Use optional to avoid unnecessary initialization if we load from the cache
+    std::optional<LightingState> lsOpt;
     Quaterniond q;
     // Reuse the surface pass's lighting if it ran this frame; otherwise compute
     // it (the body disc may have been too small for renderPlanet to draw, e.g.
@@ -2768,13 +2770,16 @@ void Renderer::renderPlanetAtmosphere(Body& body,
     if (auto it = planetLightingCache.find(&body); it != planetLightingCache.end())
     {
         rp = it->second.rp;
-        ls = it->second.lights;
+        lsOpt = it->second.lights;
         q = it->second.q;
     }
     else
     {
-        setupPlanetLighting(body, pos, now, nearPlaneDistance, altitude, rp, ls, q);
+        setupPlanetLighting(body, pos, now, nearPlaneDistance, altitude, rp, lsOpt.emplace(), q);
     }
+
+    // At this point we know the optional is initialized, so the following is safe
+    LightingState& ls = *lsOpt;
 
     RenderInfo ri;
     ri.sunDir_eye = Vector3f::UnitY();
@@ -3181,7 +3186,7 @@ void Renderer::setupPlanetLighting(Body& body, // NOSONAR(cpp:S107,cpp:S3776)
         // that exotic cases with shadows from two ring different ring systems aren't handled.
         for (unsigned int li = 0; li < lights.nLights; li++)
         {
-            RingSystem* rings = lights.ringShadows[li].ringSystem;
+            const RingSystem* rings = lights.ringShadows[li].ringSystem;
             if (!rings)
                 continue;
 

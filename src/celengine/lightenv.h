@@ -12,51 +12,50 @@
 
 #pragma once
 
+#include <array>
+#include <vector>
+
 #include <celutil/color.h>
 #include <Eigen/Core>
 #include <Eigen/Geometry>
-#include <vector>
 
-constexpr unsigned int MaxLights = 8;
+constexpr inline unsigned int MaxLights = 8;
 
 class Body;
 struct RingSystem;
 
-class DirectionalLight
+struct DirectionalLight
 {
-public:
     Color color;
-    float irradiance;
-    Eigen::Vector3f direction_eye;
-    Eigen::Vector3f direction_obj;
+    float irradiance{ 0.0f };
+    Eigen::Vector3f direction_eye{ Eigen::Vector3f::UnitZ() };
+    Eigen::Vector3f direction_obj{ Eigen::Vector3f::UnitZ() };
 
     // Required for eclipse shadows only--may be able to use
     // distance instead of position.
-    Eigen::Vector3d position;  // position relative to the lit object
-    float apparentSize;
-    bool castsShadows;
+    Eigen::Vector3d position{ Eigen::Vector3d::Zero() };  // position relative to the lit object
+    float apparentSize{ 0.0f };
+    bool castsShadows{ false };
 };
 
-class EclipseShadow
+struct EclipseShadow
 {
-public:
-    const Body* caster;
-    Eigen::Quaternionf casterOrientation;
-    Eigen::Vector3f origin;
-    Eigen::Vector3f direction;
-    float penumbraRadius;
-    float umbraRadius;
-    float maxDepth;
+    const Body* caster{ nullptr };
+    Eigen::Quaternionf casterOrientation{ Eigen::Quaternionf::Identity() };
+    Eigen::Vector3f origin{ Eigen::Vector3f::Zero() };
+    Eigen::Vector3f direction{ Eigen::Vector3f::UnitZ() };
+    float penumbraRadius{ 0.0f };
+    float umbraRadius{ 0.0f };
+    float maxDepth{ 0.0f };
 };
 
-class RingShadow
+struct RingShadow
 {
-public:
-    RingSystem* ringSystem;
-    Eigen::Quaternionf casterOrientation;
-    Eigen::Vector3f origin;
-    Eigen::Vector3f direction;
-    float texLod;
+    const RingSystem* ringSystem{ nullptr };
+    Eigen::Quaternionf casterOrientation{ Eigen::Quaternionf::Identity() };
+    Eigen::Vector3f origin{ Eigen::Vector3f::Zero() };
+    Eigen::Vector3f direction{ Eigen::Vector3f::UnitZ() };
+    float texLod{ 0.0f };
 };
 
 class LightingState
@@ -64,29 +63,21 @@ class LightingState
 public:
     using EclipseShadowVector = std::vector<EclipseShadow>;
 
-    LightingState() :
-        nLights(0),
-        shadowingRingSystem(nullptr),
-        eyeDir_obj(-Eigen::Vector3f::UnitZ()),
-        eyePos_obj(-Eigen::Vector3f::UnitZ())
+    LightingState()
     {
-        shadows[0] = nullptr;
-        for (auto &ringShadow : ringShadows)
-        {
-            ringShadow.ringSystem = nullptr;
-        }
+        shadows.fill(nullptr);
     };
 
-    unsigned int nLights;
-    DirectionalLight lights[MaxLights];
-    EclipseShadowVector* shadows[MaxLights];
-    RingShadow ringShadows[MaxLights];
-    RingSystem* shadowingRingSystem; // nullptr when there are no ring shadows
-    Eigen::Vector3f ringPlaneNormal;
-    Eigen::Vector3f ringCenter;
+    unsigned int nLights{ 0 };
+    std::array<DirectionalLight, MaxLights> lights;
+    std::array<EclipseShadowVector*, MaxLights> shadows;
+    std::array<RingShadow, MaxLights> ringShadows;
+    const RingSystem* shadowingRingSystem{ nullptr }; // nullptr when there are no ring shadows
+    Eigen::Vector3f ringPlaneNormal{ Eigen::Vector3f::UnitZ() };
+    Eigen::Vector3f ringCenter{ Eigen::Vector3f::Zero() };
 
-    Eigen::Vector3f eyeDir_obj;
-    Eigen::Vector3f eyePos_obj;
+    Eigen::Vector3f eyeDir_obj{ -Eigen::Vector3f::UnitZ() };
+    Eigen::Vector3f eyePos_obj{ -Eigen::Vector3f::UnitZ() };
 
-    Eigen::Vector3f ambientColor;
+    Eigen::Vector3f ambientColor{ Eigen::Vector3f::Zero() };
 };
