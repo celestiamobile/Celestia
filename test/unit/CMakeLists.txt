@@ -10,6 +10,7 @@ set(UNIT_TEST_SOURCES
   logger_test.cpp
   ranges_test.cpp
   resourcesystem_test.cpp
+  ringscattering_test.cpp
   stellarclass_test.cpp
   strnatcmp_test.cpp
   tokenizer_test.cpp

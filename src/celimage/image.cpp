@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <limits>
 #include <tuple>
 
 #include <celutil/filetype.h>
@@ -23,6 +24,8 @@ namespace celestia::engine
 {
 namespace
 {
+
+static_assert(sizeof(float) == 4 && std::numeric_limits<float>::is_iec559);
 
 // All rows are padded to a size that's a multiple of 4 bytes
 std::int32_t
@@ -37,6 +40,7 @@ formatComponents(PixelFormat fmt)
     switch (fmt)
     {
     case PixelFormat::RGBA:
+    case PixelFormat::RGBA32F:
     case PixelFormat::BGRA:
     case PixelFormat::sRGBA:
         return 4;
@@ -70,7 +74,7 @@ formatComponents(PixelFormat fmt)
     }
 }
 
-int
+std::int64_t
 calcMipLevelSize(PixelFormat fmt, std::int32_t w, std::int32_t h, std::int32_t mip)
 {
     w = std::max(w >> mip, INT32_C(1));
@@ -78,6 +82,8 @@ calcMipLevelSize(PixelFormat fmt, std::int32_t w, std::int32_t h, std::int32_t m
 
     switch (fmt)
     {
+    case PixelFormat::RGBA32F:
+        return static_cast<std::int64_t>(w) * h * 16;
     case PixelFormat::DXT1:
     case PixelFormat::DXT1_sRGBA:
         // 4x4 blocks, 8 bytes per block
@@ -96,10 +102,10 @@ calcMipLevelSize(PixelFormat fmt, std::int32_t w, std::int32_t h, std::int32_t m
     }
 }
 
-int
+std::int64_t
 calcTotalMipSize(PixelFormat fmt, std::int32_t w, std::int32_t h, std::int32_t mipLevels)
 {
-    std::int32_t size = 1;
+    std::int64_t size = 1;
     for (std::int32_t i = 0; i < mipLevels; i++)
         size += calcMipLevelSize(fmt, w, h, i);
     return size;
@@ -154,13 +160,23 @@ Image::Image(PixelFormat fmt, std::int32_t w, std::int32_t h, std::int32_t mip) 
     mipLevels(mip),
     components(formatComponents(fmt)),
     format(fmt),
-    size(calcTotalMipSize(fmt, w, h, mip))
+    size(0)
 {
-    assert(components != 0);
-    assert(width > 0 && width <= MAX_DIMENSION);
-    assert(height > 0 && height <= MAX_DIMENSION);
-
-    pitch = pad(w * components);
+    pitch = 0;
+    if (components == 0 || w <= 0 || w > MAX_DIMENSION ||
+        h <= 0 || h > MAX_DIMENSION || mip <= 0 || mip > 15)
+    {
+        util::GetLogger()->error("Invalid image format, dimensions, or mip count.\n");
+        return;
+    }
+    auto totalSize = calcTotalMipSize(fmt, w, h, mip);
+    if (totalSize > std::numeric_limits<std::int32_t>::max())
+    {
+        util::GetLogger()->error("Image exceeds supported storage size.\n");
+        return;
+    }
+    size = static_cast<std::int32_t>(totalSize);
+    pitch = pad(w * getBytesPerPixel());
     pixels = std::make_unique<std::uint8_t[]>(size);
 }
 
@@ -212,6 +228,18 @@ Image::getComponents() const
     return components;
 }
 
+std::int32_t
+Image::getBytesPerPixel() const
+{
+    return components * (isFloatingPoint() ? 4 : 1);
+}
+
+bool
+Image::isFloatingPoint() const
+{
+    return format == PixelFormat::RGBA32F;
+}
+
 std::uint8_t*
 Image::getPixels()
 {
@@ -227,14 +255,15 @@ Image::getPixels() const
 std::uint8_t*
 Image::getPixelRow(std::int32_t mip, std::int32_t row)
 {
-    if (mip >= mipLevels || row >= std::max(height >> mip, 1))
+    if (!isValid() || mip < 0 || mip >= mipLevels ||
+        row < 0 || row >= std::max(height >> mip, 1))
         return nullptr;
 
     // Row addressing of compressed textures is not allowed
     if (isCompressed())
         return nullptr;
 
-    return getMipLevel(mip) + row * pitch;
+    return getMipLevel(mip) + row * pad(std::max(width >> mip, 1) * getBytesPerPixel());
 }
 
 std::uint8_t*
@@ -246,12 +275,12 @@ Image::getPixelRow(std::int32_t row)
 std::uint8_t*
 Image::getMipLevel(std::int32_t mip)
 {
-    if (mip >= mipLevels)
+    if (!isValid() || mip < 0 || mip >= mipLevels)
         return nullptr;
 
     std::int32_t offset = 0;
     for (std::int32_t i = 0; i < mip; i++)
-        offset += calcMipLevelSize(format, width, height, i);
+        offset += static_cast<std::int32_t>(calcMipLevelSize(format, width, height, i));
 
     return pixels.get() + offset;
 }
@@ -259,12 +288,12 @@ Image::getMipLevel(std::int32_t mip)
 const std::uint8_t*
 Image::getMipLevel(int mip) const
 {
-    if (mip >= mipLevels)
+    if (!isValid() || mip < 0 || mip >= mipLevels)
         return nullptr;
 
     std::int32_t offset = 0;
     for (std::int32_t i = 0; i < mip; ++i)
-        offset += calcMipLevelSize(format, width, height, i);
+        offset += static_cast<std::int32_t>(calcMipLevelSize(format, width, height, i));
 
     return pixels.get() + offset;
 }
@@ -272,10 +301,10 @@ Image::getMipLevel(int mip) const
 std::int32_t
 Image::getMipLevelSize(std::int32_t mip) const
 {
-    if (mip >= mipLevels)
+    if (!isValid() || mip < 0 || mip >= mipLevels)
         return 0;
 
-    return calcMipLevelSize(format, width, height, mip);
+    return static_cast<std::int32_t>(calcMipLevelSize(format, width, height, mip));
 }
 
 bool
@@ -309,6 +338,7 @@ Image::hasAlpha() const
     case PixelFormat::BC7:
     case PixelFormat::BC7_sRGBA:
     case PixelFormat::RGBA:
+    case PixelFormat::RGBA32F:
     case PixelFormat::BGRA:
     case PixelFormat::sRGBA:
     case PixelFormat::sRGBA8:
@@ -330,10 +360,13 @@ Image::hasAlpha() const
 std::unique_ptr<Image>
 Image::computeNormalMap(float scale, bool wrap) const
 {
-    // Can't do anything with compressed input; there are probably some other
-    // formats that should be rejected as well . . .
-    if (isCompressed())
+    if (!isValid() || isCompressed())
         return nullptr;
+    if (isFloatingPoint())
+    {
+        util::GetLogger()->error("Normal map conversion does not support floating-point images.\n");
+        return nullptr;
+    }
 
     auto normalMap = std::make_unique<Image>(PixelFormat::RGBA, width, height);
 

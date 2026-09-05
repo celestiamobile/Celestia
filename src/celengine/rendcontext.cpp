@@ -21,6 +21,7 @@
 #include "lightenv.h"
 #include "rendcontext.h"
 #include "render.h"
+#include "renderglsl.h"
 #include "texmanager.h"
 #include "texture.h"
 
@@ -327,49 +328,31 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
         }
     }
 
-    if (lightingState.shadowingRingSystem)
+    if (Texture* ringsTex = setupRingShadowTexture(lightingState, shaderProps, renderer);
+        ringsTex != nullptr)
     {
-        Texture* ringsTex = renderer->getTextureManager()->findShadow(lightingState.shadowingRingSystem->texture);
-        if (ringsTex != nullptr)
+        glActiveTexture(GL_TEXTURE0 + nTextures);
+        ringsTex->bind();
+        textures[nTextures++] = ringsTex;
+
+#ifdef GL_ES
+        if (celestia::gl::OES_texture_border_clamp)
         {
-            glActiveTexture(GL_TEXTURE0 + nTextures);
-            ringsTex->bind();
-            textures[nTextures++] = ringsTex;
-
-#ifdef GL_ES
-            if (celestia::gl::OES_texture_border_clamp)
-            {
 #endif
-                // Tweak the texture--set clamp to border and a border color with
-                // a zero alpha.
-                float bc[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+            // Zero outside the radial range, for both legacy opacity and depth.
+            float bc[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 #ifndef GL_ES
-                glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, bc);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+            glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, bc);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
 #else
-                glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR_OES, bc);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER_OES);
+            glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR_OES, bc);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER_OES);
 #endif
 
 #ifdef GL_ES
-            }
-#endif
-            glActiveTexture(GL_TEXTURE0);
-
-            shaderProps.texUsage |= TexUsage::RingShadowTexture;
-            for (unsigned int lightIndex = 0; lightIndex < lightingState.nLights; lightIndex++)
-            {
-                if (lightingState.lights[lightIndex].castsShadows &&
-                    lightingState.shadowingRingSystem == lightingState.ringShadows[lightIndex].ringSystem)
-                {
-                    shaderProps.setRingShadowForLight(lightIndex, true);
-                }
-                else
-                {
-                    shaderProps.setRingShadowForLight(lightIndex, false);
-                }
-            }
         }
+#endif
+        glActiveTexture(GL_TEXTURE0);
     }
 
     if (usePointSize)
@@ -467,7 +450,7 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
     }
 
     // Ring shadow parameters
-    if (util::is_set(shaderProps.texUsage, TexUsage::RingShadowTexture))
+    if (shaderProps.hasRingShadows())
         prog->setRingShadowParameters(
             lightingState,
             Eigen::Vector3f::Constant(objRadius));

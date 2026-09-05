@@ -13,6 +13,8 @@
 
 #include <celutil/filetype.h>
 #include <celutil/flag.h>
+#include <celutil/logger.h>
+#include "glsupport.h"
 
 namespace celestia::engine
 {
@@ -58,6 +60,11 @@ TextureTraits::decode(const Info& info) const
     // parsing only (no GL), so run it here on the worker.
     if (DetermineFileType(info.path) == ContentType::CelestiaTexture)
     {
+        if (util::is_set(info.flags, TextureFlags::SingleTexture))
+        {
+            util::GetLogger()->error("Texture {} requires an ordinary, non-virtual image.\n", info.path);
+            return std::nullopt;
+        }
         auto vtex = LoadVirtualTexture(info.path, colorspace);
         if (vtex == nullptr)
             return std::nullopt;
@@ -85,6 +92,7 @@ TextureTraits::decode(const Info& info) const
         out.addressMode  = addressMode;
         out.mipMode      = Texture::DefaultMipMaps;
         out.dxt5NormalMap = false;
+        out.singleTexture = util::is_set(info.flags, TextureFlags::SingleTexture);
         return out;
     }
 
@@ -103,6 +111,7 @@ TextureTraits::decode(const Info& info) const
     out.image        = std::move(img);
     out.addressMode  = addressMode;
     out.mipMode      = mipMode;
+    out.singleTexture = util::is_set(info.flags, TextureFlags::SingleTexture);
     return out;
 }
 
@@ -124,6 +133,12 @@ TextureTraits::upload(CpuData&& cpu) const
 
     if (cpu.image == nullptr)
         return nullptr;
+    if (cpu.singleTexture &&
+        (cpu.image->getWidth() > gl::maxTextureSize || cpu.image->getHeight() > gl::maxTextureSize))
+    {
+        util::GetLogger()->error("Single-image optical texture exceeds the hardware texture-size limit.\n");
+        return nullptr;
+    }
 
     // CreateTextureFromImage does the GL allocation — the only step that
     // must run on the render thread.

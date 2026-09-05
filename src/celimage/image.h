@@ -41,6 +41,8 @@ public:
     std::int32_t getMipLevelCount() const;
     PixelFormat getFormat() const;
     std::int32_t getComponents() const;
+    // Storage stride for an uncompressed pixel, not the channel count.
+    std::int32_t getBytesPerPixel() const;
     std::uint8_t* getPixels();
     const std::uint8_t* getPixels() const;
     std::uint8_t* getPixelRow(std::int32_t row);
@@ -51,6 +53,7 @@ public:
     std::int32_t getMipLevelSize(std::int32_t mip) const;
 
     bool isCompressed() const;
+    bool isFloatingPoint() const;
     bool hasAlpha() const;
 
     std::unique_ptr<Image> computeNormalMap(float scale, bool wrap) const;

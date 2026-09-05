@@ -22,6 +22,7 @@
 #include <celutil/array_view.h>
 #include <celutil/classops.h>
 #include <celutil/color.h>
+#include <celutil/logger.h>
 
 typedef void (*ProceduralTexEval)(float, float, float, std::uint8_t*);
 
@@ -151,6 +152,14 @@ ImageTexture::createProcedural(int width, int height,
                                Texture::MipMapMode mipMode)
 {
     celestia::engine::Image img(format, width, height);
+    // Procedural evaluators write byte channels, not floating-point samples.
+    if (!img.isValid())
+        return nullptr;
+    if (img.isFloatingPoint())
+    {
+        celestia::util::GetLogger()->error("Procedural texture evaluators require byte image channels.\n");
+        return nullptr;
+    }
     const auto fwidth = static_cast<float>(width);
     const auto fheight = static_cast<float>(height);
     for (int y = 0; y < height; ++y)
@@ -212,12 +221,19 @@ template<typename F>
 std::unique_ptr<CubeMap>
 CubeMap::createProcedural(int size, celestia::engine::PixelFormat format, F func)
 {
+    if (format == celestia::engine::PixelFormat::RGBA32F)
+    {
+        celestia::util::GetLogger()->error("Procedural cube map evaluators require byte image channels.\n");
+        return nullptr;
+    }
     using celestia::engine::Image;
     std::array<Image, 6> faces
     {
         Image(format, size, size), Image(format, size, size), Image(format, size, size),
         Image(format, size, size), Image(format, size, size), Image(format, size, size),
     };
+    if (!faces[0].isValid())
+        return nullptr;
 
     const auto fsize = static_cast<float>(size);
     for (int i = 0; i < 6; ++i)

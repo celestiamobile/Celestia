@@ -73,6 +73,7 @@ bool PassthroughViewportEffect::render(Renderer* renderer, FramebufferObject* fb
 
     prog->use();
     prog->samplerParam("tex") = 0;
+    prog->floatParam("sceneExposure") = renderer->getSceneExposure();
     if (toneMap)
         prog->floatParam("exposure") = renderer->getToneMappingExposure();
     glBindTexture(GL_TEXTURE_2D, fbo->colorTexture());

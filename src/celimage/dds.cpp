@@ -15,6 +15,7 @@
 #include <fstream>
 #include <algorithm>
 #include <memory>
+#include <limits>
 #include <celengine/glsupport.h>
 #include <celutil/logger.h>
 #include <celutil/bytes.h>
@@ -89,6 +90,7 @@ struct DDSHeaderDXT10
 // Subset of DXGI_FORMAT values relevant to Celestia.
 enum class DXGIFormat : std::uint32_t
 {
+    R32G32B32A32_FLOAT = 2,
     BC1_UNORM      = 71,
     BC1_UNORM_SRGB = 72,
     BC2_UNORM      = 74,
@@ -194,6 +196,7 @@ GetDXT10Format(const DDSHeaderDXT10& dx10)
 {
     switch (static_cast<DXGIFormat>(dx10.dxgiFormat))
     {
+    case DXGIFormat::R32G32B32A32_FLOAT: return PixelFormat::RGBA32F;
     case DXGIFormat::BC1_UNORM:           return PixelFormat::DXT1;
     case DXGIFormat::BC1_UNORM_SRGB:      return PixelFormat::DXT1_sRGBA;
     case DXGIFormat::BC2_UNORM:           return PixelFormat::DXT3;
@@ -373,6 +376,10 @@ Image* LoadDDSImage(const std::filesystem::path& filename)
         return nullptr;
     }
     LE_TO_CPU_INT32(ddsd.size, ddsd.size);
+    LE_TO_CPU_INT32(ddsd.flags, ddsd.flags);
+    LE_TO_CPU_INT32(ddsd.depth, ddsd.depth);
+    LE_TO_CPU_INT32(ddsd.format.size, ddsd.format.size);
+    LE_TO_CPU_INT32(ddsd.caps.caps2, ddsd.caps.caps2);
     LE_TO_CPU_INT32(ddsd.pitch, ddsd.pitch);
     LE_TO_CPU_INT32(ddsd.width, ddsd.width);
     LE_TO_CPU_INT32(ddsd.height, ddsd.height);
@@ -415,6 +422,24 @@ Image* LoadDDSImage(const std::filesystem::path& filename)
         std::memcpy(&dx10, dx10Bytes.data(), sizeof dx10);
         LE_TO_CPU_INT32(dx10.dxgiFormat, dx10.dxgiFormat);
         format = GetDXT10Format(dx10);
+        if (format == PixelFormat::RGBA32F)
+        {
+            LE_TO_CPU_INT32(dx10.resourceDimension, dx10.resourceDimension);
+            LE_TO_CPU_INT32(dx10.miscFlag, dx10.miscFlag);
+            LE_TO_CPU_INT32(dx10.arraySize, dx10.arraySize);
+            // Only tightly packed ordinary 2D images, with optional mip levels.
+            // Arrays, cube faces and volumes cannot be represented by Image.
+            if (ddsd.size != 124 || ddsd.format.size != 32 ||
+                (ddsd.format.flags & 4) == 0 ||
+                dx10.resourceDimension != 3 || dx10.arraySize != 1 ||
+                (dx10.miscFlag & 4) != 0 || (ddsd.caps.caps2 & 0x20fe00) != 0 ||
+                (ddsd.flags & 0x800000) != 0 || ddsd.depth > 1 ||
+                (((ddsd.flags & 8) != 0 || ddsd.pitch != 0) && ddsd.pitch != ddsd.width * 16))
+            {
+                util::GetLogger()->error("DDS float texture {} requires a tightly packed, non-array 2D RGBA32F layout.\n", filename);
+                return nullptr;
+            }
+        }
     }
     else
     {
@@ -440,12 +465,33 @@ Image* LoadDDSImage(const std::filesystem::path& filename)
             || (IsSRGBS3TCFormat(format) && !gl::EXT_texture_compression_s3tc_srgb)))
         return CreateDecompressedImage(ddsd, format, in, filename).release();
 
-    // TODO: Verify that the reported texture size matches the amount of
-    // data expected.
+    if (format == PixelFormat::RGBA32F)
+    {
+        std::uint64_t expectedSize = 0;
+        for (std::uint32_t mip = 0; mip < mipMapLevels; ++mip)
+            expectedSize += static_cast<std::uint64_t>(std::max(ddsd.width >> mip, 1u)) *
+                            std::max(ddsd.height >> mip, 1u) * 16;
+        const auto start = in.tellg();
+        in.seekg(0, std::ios::end);
+        const auto end = in.tellg();
+        if (expectedSize >= static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max()) ||
+            start < 0 || end < start || static_cast<std::uint64_t>(end - start) < expectedSize)
+        {
+            util::GetLogger()->error("DDS float texture {} has an oversized or truncated payload.\n", filename);
+            return nullptr;
+        }
+        in.seekg(start);
+    }
+
     auto img = std::make_unique<Image>(format,
                                        static_cast<std::int32_t>(ddsd.width),
                                        static_cast<std::int32_t>(ddsd.height),
                                        static_cast<std::int32_t>(mipMapLevels));
+    if (!img->isValid())
+    {
+        util::GetLogger()->error("DDS texture {} exceeds image storage limits.\n", filename);
+        return nullptr;
+    }
     std::int32_t dataSize = 0;
     for (std::int32_t mip = 0; mip < img->getMipLevelCount(); ++mip)
         dataSize += img->getMipLevelSize(mip);
@@ -453,6 +499,17 @@ Image* LoadDDSImage(const std::filesystem::path& filename)
     {
         util::GetLogger()->error("Failed reading data from DDS texture file {}.\n", filename);
         return nullptr;
+    }
+
+    if (img->isFloatingPoint())
+    {
+        for (std::int32_t offset = 0; offset < dataSize; offset += 4)
+        {
+            std::uint32_t bits;
+            std::memcpy(&bits, img->getPixels() + offset, sizeof bits);
+            LE_TO_CPU_INT32(bits, bits);
+            std::memcpy(img->getPixels() + offset, &bits, sizeof bits);
+        }
     }
 
     return img.release();

@@ -16,6 +16,7 @@
 
 #include <celimage/image.h>
 #include <celutil/gettext.h>
+#include <celutil/logger.h>
 #include "res/resource.h"
 #include "winuiutils.h"
 #include "wstringutils.h"
@@ -120,6 +121,11 @@ SplashWindow::init()
     versionString = UTF8ToWideString(fmt::format(fmt::runtime(_("Version: {}")), VERSION_STRING));
     message = versionString + L'\n';
     image = engine::Image::load(imageFileName);
+    if (image != nullptr && image->isFloatingPoint())
+    {
+        util::GetLogger()->error("Splash image {} requires byte image channels.\n", imageFileName);
+        image.reset();
+    }
 }
 
 void

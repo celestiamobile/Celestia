@@ -3205,8 +3205,8 @@ void Renderer::setupPlanetLighting(Body& body, // NOSONAR(cpp:S107,cpp:S3776)
             float ringWidth = rings->outerRadius - rings->innerRadius;
             float projectedRingSize = std::abs(lights.lights[li].direction_obj.dot(lights.ringPlaneNormal)) * ringWidth;
             float projectedRingSizeInPixels = projectedRingSize / (max(nearPlaneDistance, altitude) * pixelSize);
-            const Texture* ringsTex = m_textureManager->find(rings->texture);
-            if (!ringsTex)
+            const Texture* ringsTex = m_textureManager->find(rings->opacityTexture());
+            if (!ringsTex || rings->scattering.has_value())
             {
                 lights.ringShadows[li].texLod = 0.0f;
                 continue;
@@ -5044,6 +5044,24 @@ float Renderer::getStarExposure() const
 }
 
 
+void Renderer::setSceneExposure(float exposure)
+{
+    if (!std::isfinite(exposure) || exposure <= 0.0f)
+    {
+        GetLogger()->error("Scene exposure must be finite and positive.\n");
+        return;
+    }
+    sceneExposure = std::clamp(exposure, 1.0e-6f, 1.0e6f);
+    markSettingsChanged();
+}
+
+
+float Renderer::getSceneExposure() const
+{
+    return sceneExposure;
+}
+
+
 void Renderer::setToneMappingExposure(float e)
 {
     toneMappingExposure = std::clamp(e, 1.0e-3f, 1.0e6f);
@@ -5108,9 +5126,18 @@ void Renderer::loadTextures(Body* body)
     }
 
     if (auto rings = bodyFeaturesManager->getRings(body);
-        rings != nullptr && rings->texture != util::TextureHandle::Invalid)
+        rings != nullptr)
     {
-        m_textureManager->find(rings->texture);
+        if (rings->scattering.has_value())
+        {
+            m_textureManager->find(rings->scattering->opticalDepthTexture);
+            m_textureManager->find(rings->scattering->phaseTexture);
+        }
+        else
+        {
+            m_textureManager->find(rings->texture);
+            m_textureManager->find(rings->phaseTexture);
+        }
     }
 }
 

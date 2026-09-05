@@ -45,6 +45,9 @@ ShaderProperties
 createShaderProperties(const LightingState& ls,
                        const Texture* ringsTex,
                        const Texture* phaseTex,
+                       const Texture* opticalDepthTex,
+                       const Texture* albedoTex,
+                       bool physical,
                        bool renderShadow)
 {
     // Set up the shader properties for ring rendering
@@ -63,6 +66,11 @@ createShaderProperties(const LightingState& ls,
         shadprop.texUsage |= TexUsage::DiffuseTexture;
     if (phaseTex != nullptr)
         shadprop.texUsage |= TexUsage::RingPhaseTexture;
+    if (opticalDepthTex != nullptr)
+        shadprop.texUsage |= TexUsage::RingOpticalDepthTexture;
+    if (albedoTex != nullptr)
+        shadprop.texUsage |= TexUsage::RingAlbedoTexture;
+    shadprop.physicalRings = physical;
 
     return shadprop;
 }
@@ -162,10 +170,25 @@ RingRenderer::renderRings(const RingSystem& rings,
 {
     float inner = rings.innerRadius / planetRadius;
     float outer = rings.outerRadius / planetRadius;
-    Texture* ringsTex = renderer.getTextureManager()->find(rings.texture);
-    Texture* phaseTex = renderer.getTextureManager()->find(rings.phaseTexture);
+    const bool physical = rings.scattering.has_value();
+    Texture* ringsTex = physical ? nullptr : renderer.getTextureManager()->find(rings.texture);
+    Texture* phaseTex = renderer.getTextureManager()->find(
+        physical ? rings.scattering->phaseTexture : rings.phaseTexture);
+    Texture* opticalDepthTex = physical
+        ? renderer.getTextureManager()->find(rings.scattering->opticalDepthTexture)
+        : nullptr;
+    Texture* albedoTex = physical
+        ? renderer.getTextureManager()->find(rings.scattering->albedoTexture)
+        : nullptr;
+    // Do not substitute a uniform slab or a different phase model while data loads.
+    if (physical &&
+        ((rings.scattering->opticalDepthTexture != util::TextureHandle::Invalid && opticalDepthTex == nullptr) ||
+         (rings.scattering->phaseTexture != util::TextureHandle::Invalid && phaseTex == nullptr) ||
+         (rings.scattering->albedoTexture != util::TextureHandle::Invalid && albedoTex == nullptr)))
+        return;
 
-    ShaderProperties shadprop = createShaderProperties(ls, ringsTex, phaseTex, renderShadow);
+    ShaderProperties shadprop = createShaderProperties(ls, ringsTex, phaseTex, opticalDepthTex,
+                                                      albedoTex, physical, renderShadow);
 
     // Get a shader for the current rendering configuration
     auto* prog = renderer.getShaderManager().getShader(shadprop);
@@ -177,7 +200,7 @@ RingRenderer::renderRings(const RingSystem& rings,
 
     prog->eyePosition = ls.eyePos_obj;
     prog->ambientColor = ri.ambientColor.toVector3();
-    prog->setLightParameters(ls, ri.color, ri.specularColor, Color::Black);
+    prog->setLightParameters(ls, physical ? Color::White : ri.color, ri.specularColor, Color::Black);
 
     prog->ringRadius = inner;
     prog->ringWidth = outer - inner;
@@ -197,6 +220,14 @@ RingRenderer::renderRings(const RingSystem& rings,
     prog->ringHalf = ringHalf;
     prog->ringAtmosphereRadius = atmosphereRadius;
     prog->ringColor = rings.color.linearize(gl::sRGBRendering).toVector3();
+    if (physical)
+    {
+        prog->ringOpticalDepth = rings.scattering->opticalDepth;
+        prog->ringAlbedo = rings.scattering->albedo;
+        prog->ringPhaseAsymmetry = rings.scattering->asymmetry;
+        if (phaseTex != nullptr)
+            prog->ringPhaseTextureWidth = static_cast<float>(phaseTex->getWidth());
+    }
 
     setUpShadowParameters(prog, ls, planetOblateness);
 
@@ -208,8 +239,18 @@ RingRenderer::renderRings(const RingSystem& rings,
     }
     if (phaseTex != nullptr)
     {
-        glActiveTexture(GL_TEXTURE0 + textureUnit);
+        glActiveTexture(GL_TEXTURE0 + textureUnit++);
         phaseTex->bind();
+    }
+    if (opticalDepthTex != nullptr)
+    {
+        glActiveTexture(GL_TEXTURE0 + textureUnit++);
+        opticalDepthTex->bind();
+    }
+    if (albedoTex != nullptr)
+    {
+        glActiveTexture(GL_TEXTURE0 + textureUnit);
+        albedoTex->bind();
     }
     glActiveTexture(GL_TEXTURE0);
 
@@ -226,7 +267,7 @@ RingRenderer::renderRings(const RingSystem& rings,
 
     Renderer::PipelineState ps;
     ps.blending = true;
-    if (phaseTex != nullptr)
+    if (physical || phaseTex != nullptr)
         ps.blendFunc = {GL_ONE, GL_ONE_MINUS_SRC_ALPHA};
     else
         ps.blendFunc = {GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA};

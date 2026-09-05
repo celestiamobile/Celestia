@@ -802,6 +802,30 @@ void ReadRings(Body* body,
     if (disposition == DataDisposition::Modify)
         rings = bodyFeaturesManager->getRings(body);
 
+    auto scattering = rings != nullptr ? rings->scattering
+                                      : std::optional<engine::RingScattering>{};
+    if (const auto* value = ringsData.getValue("Scattering"); value != nullptr)
+    {
+        const auto* data = value->getHash();
+        if (data == nullptr)
+        {
+            if (ringsData.getBoolean("Scattering") == false)
+                scattering.reset();
+            else
+            {
+                GetLogger()->error("Ring Scattering must be a property block or false.\n");
+                return;
+            }
+        }
+        else
+        {
+            auto candidate = scattering.value_or(engine::RingScattering{});
+            if (!engine::ReadRingScattering(*data, path, texturePaths, candidate))
+                return;
+            scattering = candidate;
+        }
+    }
+
     if (rings == nullptr)
     {
         if (!inner.has_value() || !outer.has_value())
@@ -823,6 +847,8 @@ void ReadRings(Body* body,
 
     if (auto color = ringsData.getColor("Color"); color.has_value())
         rings->color = *color;
+
+    rings->scattering = scattering;
 
     if (auto textureName = GetFilename(ringsData, "Texture"sv, "Invalid filename in rings Texture\n");
         textureName.has_value())

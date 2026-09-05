@@ -75,6 +75,74 @@ GetTextureCaps()
 }
 
 bool
+supportsImage(const Image& img, Texture::MipMapMode mipMode)
+{
+    if (!img.isValid())
+        return false;
+    if (!img.isFloatingPoint())
+        return true;
+    if (!gl::textureFloat || !gl::textureFloatLinear)
+    {
+        GetLogger()->error("RGBA32F texture requires floating-point storage and linear filtering support.\n");
+        return false;
+    }
+    int completeMipCount = 1;
+    for (int size = std::max(img.getWidth(), img.getHeight()); size > 1; size >>= 1)
+        ++completeMipCount;
+    if (mipMode != Texture::NoMipMaps &&
+        img.getMipLevelCount() != completeMipCount && !gl::textureFloatAutoMipmap)
+    {
+        GetLogger()->error("RGBA32F texture requires precomputed mipmaps or NoMipMaps on this hardware.\n");
+        return false;
+    }
+    return true;
+}
+
+bool
+floatUploadSucceeded(const Image& img, bool mipmaps)
+{
+    if (!img.isFloatingPoint())
+        return true;
+#ifndef GL_ES
+    // ARB_texture_float permits reduced precision on older desktop hardware.
+    // Optical data must never silently become half-float or normalized bytes.
+    constexpr std::array<GLenum, 4> sizes{
+        GL_TEXTURE_RED_SIZE, GL_TEXTURE_GREEN_SIZE, GL_TEXTURE_BLUE_SIZE, GL_TEXTURE_ALPHA_SIZE
+    };
+    constexpr std::array<GLenum, 4> types{
+        GL_TEXTURE_RED_TYPE, GL_TEXTURE_GREEN_TYPE, GL_TEXTURE_BLUE_TYPE, GL_TEXTURE_ALPHA_TYPE
+    };
+    int levels = 1;
+    if (mipmaps)
+        for (int size = std::max(img.getWidth(), img.getHeight()); size > 1; size >>= 1)
+            ++levels;
+    for (int mip = 0; mip < levels; ++mip)
+    {
+        for (std::size_t channel = 0; channel < sizes.size(); ++channel)
+        {
+            GLint bits = 0;
+            GLint type = 0;
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, mip, sizes[channel], &bits);
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, mip, types[channel], &type);
+            if (bits < 32 || type != GL_FLOAT)
+            {
+                GetLogger()->error("RGBA32F texture upload did not preserve 32-bit floating-point channels.\n");
+                return false;
+            }
+        }
+    }
+#else
+    (void)mipmaps;
+#endif
+    if (auto error = glGetError(); error != GL_NO_ERROR)
+    {
+        GetLogger()->error("RGBA32F texture upload failed (OpenGL error {:x}).\n", error);
+        return false;
+    }
+    return true;
+}
+
+bool
 needsRGBAExpansion(PixelFormat format, [[maybe_unused]] bool needsMipmap)
 {
     format = effectiveFormat(format);
@@ -123,6 +191,15 @@ GLenum
 getInternalFormat(PixelFormat format, bool needsMipmap)
 {
     format = effectiveFormat(format);
+    if (format == PixelFormat::RGBA32F)
+    {
+#ifdef GL_ES
+        // OES_texture_float on ES 2 requires the unsized external format.
+        if (!gl::checkVersion(gl::GLES_3_0))
+            return GL_RGBA;
+#endif
+        return static_cast<GLenum>(PixelFormat::RGBA32F);
+    }
 #ifdef GL_ES
     switch (format)
     {
@@ -201,6 +278,8 @@ GLenum
 getExternalFormat(PixelFormat format, bool needsMipmap)
 {
     format = effectiveFormat(format);
+    if (format == PixelFormat::RGBA32F)
+        return GL_RGBA;
 #ifdef GL_ES
     switch (format)
     {
@@ -424,7 +503,8 @@ LoadMipmapSet(const Image& img, GLenum target, bool needsMipmap)
         else
         {
             glTexImage2D(target, mip, internalFormat, mipWidth, mipHeight, 0,
-                         getExternalFormat(img.getFormat(), needsMipmap), GL_UNSIGNED_BYTE, img.getMipLevel(mip));
+                         getExternalFormat(img.getFormat(), needsMipmap),
+                         img.isFloatingPoint() ? GL_FLOAT : GL_UNSIGNED_BYTE, img.getMipLevel(mip));
         }
     }
 }
@@ -455,7 +535,8 @@ LoadMiplessTexture(const Image& img, GLenum target, bool needsMipmap)
     else
     {
         glTexImage2D(target, 0, internalFormat, img.getWidth(), img.getHeight(), 0,
-                     getExternalFormat(img.getFormat(), needsMipmap), GL_UNSIGNED_BYTE, img.getMipLevel(0));
+                     getExternalFormat(img.getFormat(), needsMipmap),
+                     img.isFloatingPoint() ? GL_FLOAT : GL_UNSIGNED_BYTE, img.getMipLevel(0));
     }
 }
 
@@ -486,6 +567,13 @@ CreateTextureFromImage(const Image& img,
                        Texture::AddressMode addressMode,
                        Texture::MipMapMode mipMode)
 {
+    if (!supportsImage(img, mipMode))
+        return nullptr;
+    if (gl::maxTextureSize <= 0)
+    {
+        GetLogger()->error("Texture upload requires initialized texture capabilities.\n");
+        return nullptr;
+    }
     std::unique_ptr<Texture> tex = nullptr;
 
     const int maxDim = gl::maxTextureSize;
@@ -505,6 +593,8 @@ CreateTextureFromImage(const Image& img,
         tex = std::make_unique<ImageTexture>(img, addressMode, mipMode);
     }
 
+    if (tex->getTile(0, 0, 0).texID == 0)
+        return nullptr;
     return tex;
 }
 
@@ -545,7 +635,20 @@ LoadPrecomputedTileMipMaps(const Image& img, Image& tile,
     }
     else
     {
-        // TODO: Handle uncompressed textures with prebuilt mipmaps
+        for (int mip = 0; mip < tileMipLevelCount; ++mip)
+        {
+            const int mipWidth = std::max(img.getWidth() >> mip, 1);
+            const int tileMipWidth = std::max(tile.getWidth() >> mip, 1);
+            const int tileMipHeight = std::max(tile.getHeight() >> mip, 1);
+            const int bytesPerPixel = img.getBytesPerPixel();
+            const int srcPitch = (mipWidth * bytesPerPixel + 3) & ~3;
+            const auto* src = img.getMipLevel(mip) +
+                              ((v * tile.getHeight()) >> mip) * srcPitch +
+                              ((u * tile.getWidth()) >> mip) * bytesPerPixel;
+            for (int y = 0; y < tileMipHeight; ++y)
+                std::memcpy(tile.getPixelRow(mip, y), src + y * srcPitch,
+                            tileMipWidth * bytesPerPixel);
+        }
     }
 
     LoadMipmapSet(tile, GL_TEXTURE_2D, false);
@@ -553,7 +656,6 @@ LoadPrecomputedTileMipMaps(const Image& img, Image& tile,
 
 void
 ComputeTileMipMaps(const Image& img, Image& tile,
-                   int components,
                    int u, int v, bool mipmap)
 {
     const auto tileWidth = tile.getWidth();
@@ -579,12 +681,12 @@ ComputeTileMipMaps(const Image& img, Image& tile,
     else
     {
         const std::uint8_t* tilePixels = img.getPixels() +
-            (v * tileHeight * img.getWidth() + u * tileWidth) * components;
+            v * tileHeight * img.getPitch() + u * tileWidth * img.getBytesPerPixel();
         for (int y = 0; y < tileHeight; y++)
         {
-            std::memcpy(tile.getPixels() + y * tileWidth * components,
-                        tilePixels + y * img.getWidth() * components,
-                        tileWidth * components);
+            std::memcpy(tile.getPixelRow(y),
+                        tilePixels + y * img.getPitch(),
+                        tileWidth * img.getBytesPerPixel());
         }
     }
 
@@ -671,6 +773,8 @@ ImageTexture::ImageTexture(const Image& img,
     Texture(img.getWidth(), img.getHeight(), img.hasAlpha()),
     glName(0)
 {
+    if (!supportsImage(img, mipMapMode))
+        return;
     glGenTextures(1, &glName);
     glBindTexture(GL_TEXTURE_2D, glName);
 
@@ -729,6 +833,11 @@ ImageTexture::ImageTexture(const Image& img,
     }
     if (genMipmaps)
         glGenerateMipmap(GL_TEXTURE_2D);
+    if (!floatUploadSucceeded(img, mipmap))
+    {
+        glDeleteTextures(1, &glName);
+        glName = 0;
+    }
 }
 
 ImageTexture::~ImageTexture()
@@ -773,6 +882,16 @@ TiledTexture::TiledTexture(const Image& img,
 {
     // make_unique performs value-initialization -> sets to 0
     glNames = std::make_unique<unsigned int[]>(uSplit * vSplit);
+    if (!supportsImage(img, mipMapMode))
+        return;
+    if (img.isFloatingPoint() &&
+        (img.getWidth() % uSplit != 0 || img.getHeight() % vSplit != 0 ||
+         img.getWidth() / uSplit > gl::maxTextureSize ||
+         img.getHeight() / vSplit > gl::maxTextureSize))
+    {
+        GetLogger()->error("RGBA32F texture cannot be split into equal hardware-sized tiles.\n");
+        return;
+    }
 
     bool mipmap = mipMapMode != NoMipMaps;
     bool precomputedMipMaps = false;
@@ -783,7 +902,8 @@ TiledTexture::TiledTexture(const Image& img,
     // Allow a bit of slack here--it turns out that some tools don't want to
     // calculate the 1x1 mip level.  Rather than turn off mipmaps, we'll just
     // point the 1x1 mip to the 2x1.
-    if (mipmap && mipLevelCount >= completeMipCount - 1)
+    if (mipmap && (img.isCompressed() ? mipLevelCount >= completeMipCount - 1
+                                      : mipLevelCount == completeMipCount))
         precomputedMipMaps = true;
 
     // We can't automatically generate mipmaps for compressed textures.
@@ -792,7 +912,6 @@ TiledTexture::TiledTexture(const Image& img,
         mipmap = false;
 
     GLenum texAddress = GetGLTexAddressMode(EdgeClamp);
-    int components = img.getComponents();
 
     // Create a temporary image which we'll use for the tile texels
     int tileWidth = img.getWidth() / uSplit;
@@ -825,7 +944,13 @@ TiledTexture::TiledTexture(const Image& img,
             if (precomputedMipMaps)
                 LoadPrecomputedTileMipMaps(img, tile, u, v, mipLevelCount, tileMipLevelCount);
             else
-                ComputeTileMipMaps(img, tile, components, u, v, mipmap);
+                ComputeTileMipMaps(img, tile, u, v, mipmap);
+            if (!floatUploadSucceeded(tile, mipmap))
+            {
+                glDeleteTextures(uSplit * vSplit, glNames.get());
+                std::fill_n(glNames.get(), uSplit * vSplit, 0);
+                return;
+            }
         }
     }
 }
@@ -883,6 +1008,13 @@ CubeMap::CubeMap(celestia::util::array_view<Image> faces) :
     // Verify that all the faces are square and have the same size
     assert(faces.size() == 6);
     const Image& firstFace = faces[0];
+    if (firstFace.isFloatingPoint())
+    {
+        GetLogger()->error("Floating-point cube maps are not supported.\n");
+        return;
+    }
+    if (!supportsImage(firstFace, DefaultMipMaps))
+        return;
     std::int32_t width = firstFace.getWidth();
     if (firstFace.getHeight() != width ||
         std::any_of(faces.begin() + 1, faces.end(),
@@ -1019,6 +1151,8 @@ LoadTextureFromFile(const std::filesystem::path& filename,
         img->forceLinear();
 
     std::unique_ptr<Texture> tex = CreateTextureFromImage(*img, addressMode, mipMode);
+    if (tex == nullptr)
+        return nullptr;
 
     if (contentType == ContentType::DXT5NormalMap)
     {

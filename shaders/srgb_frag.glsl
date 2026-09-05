@@ -1,6 +1,7 @@
 in vec2 texCoord;
 
 uniform sampler2D tex;
+uniform float sceneExposure;
 
 #ifdef TONE_MAP
 // Exposure for tone mapping.
@@ -22,6 +23,7 @@ vec3 linearToSRGB(vec3 c)
 void main(void)
 {
     vec4 color = texture(tex, texCoord);
+    color.rgb *= sceneExposure;
 #ifdef TONE_MAP
     // Exponential tone mapping to roll off HDR highlights.
     vec3 mapped = vec3(1.0) - exp(-exposure * color.rgb);

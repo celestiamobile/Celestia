@@ -269,6 +269,11 @@ Image* LoadJPEGImage(const std::filesystem::path& filename)
 
 bool SaveJPEGImage(const std::filesystem::path& filename, const Image& image)
 {
+    if (image.isFloatingPoint())
+    {
+        util::GetLogger()->error("JPEG export does not support floating-point images.\n");
+        return false;
+    }
     return SaveJPEGImage(filename,
                          image.getWidth(),
                          image.getHeight(),

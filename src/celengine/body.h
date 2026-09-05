@@ -28,6 +28,7 @@
 #include <celutil/texhandle.h>
 #include <celutil/utf8.h>
 #include "meshmanager.h"
+#include "ringscattering.h"
 #include "surface.h"
 
 struct Atmosphere;
@@ -104,6 +105,12 @@ struct RingSystem
     Color color{ 1.0f, 1.0f, 1.0f };
     celestia::util::TextureHandle texture{ celestia::util::TextureHandle::Invalid };
     celestia::util::TextureHandle phaseTexture{ celestia::util::TextureHandle::Invalid };
+    std::optional<celestia::engine::RingScattering> scattering;
+
+    celestia::util::TextureHandle opacityTexture() const
+    {
+        return scattering.has_value() ? scattering->opticalDepthTexture : texture;
+    }
 };
 
 // Object class enumeration:

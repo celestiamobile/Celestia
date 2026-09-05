@@ -110,6 +110,8 @@ set(CELENGINE_SOURCES
   renderlistentry.h
   resourcesystem.cpp
   resourcesystem.h
+  ringscattering.cpp
+  ringscattering.h
   rotationmanager.cpp
   rotationmanager.h
   selection.cpp

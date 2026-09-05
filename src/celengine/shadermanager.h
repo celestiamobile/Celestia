@@ -94,6 +94,8 @@ enum class TexUsage : std::uint32_t
     LineAsTriangles         = 0x20000,
     TextureCoordTransform   = 0x40000,
     RingPhaseTexture        = 0x80000,
+    RingOpticalDepthTexture  = 0x100000,
+    RingAlbedoTexture       = 0x200000,
 };
 
 ENUM_CLASS_BITWISE_OPS(TexUsage);
@@ -194,6 +196,7 @@ struct ShaderProperties
 
     FisheyeOverrideMode fishEyeOverride { FisheyeOverrideMode::None };
     bool separateRayleighMieScaleHeights{ false };
+    bool physicalRings{ false };
 };
 
 bool
@@ -293,6 +296,10 @@ public:
     FloatShaderParameter ringHalf;
     FloatShaderParameter ringAtmosphereRadius;
     Vec3ShaderParameter ringColor;
+    FloatShaderParameter ringOpticalDepth;
+    Vec3ShaderParameter ringAlbedo;
+    FloatShaderParameter ringPhaseTextureWidth;
+    FloatShaderParameter ringPhaseAsymmetry;
     Vec4ShaderParameter ringPlane;
     Vec3ShaderParameter ringCenter;
     Vec3ShaderParameter ringScale;

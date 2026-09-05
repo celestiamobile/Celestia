@@ -545,6 +545,10 @@ StarTextures
 # available the setting is ignored.
 # The default value is false.
 #
+# SceneExposure multiplies the composited linear HDR scene before output
+# conversion, including when tone mapping is Off. Requires SRGBRendering.
+# The default value is 1.0 (no change).
+#
 # ToneMappingExposure controls the exponential tone-mapping operator
 # (1 - exp(-ToneMappingExposure * L)) applied to the linear HDR scene
 # during the sRGB output post-process.  It softly rolls off highlights
@@ -560,6 +564,7 @@ StarTextures
 # Only takes effect when SRGBRendering is enabled. The default is Off.
 #------------------------------------------------------------------------
 # SRGBRendering       true
+# SceneExposure       1.0
 # ToneMappingExposure 1.0
 # ToneMappingMode     "Manual"
 

@@ -113,7 +113,7 @@ void main(void)
 
 #ifdef GL_ES
 constexpr std::string_view VersionHeader = "#version 300 es\n"sv;
-constexpr std::string_view CommonHeader = "precision highp float;\nprecision highp sampler2DShadow;\n"sv;
+constexpr std::string_view CommonHeader = "precision highp float;\nprecision highp sampler2D;\nprecision highp sampler2DShadow;\n"sv;
 #else
 constexpr std::string_view VersionHeader = "#version 330\n"sv;
 constexpr std::string_view CommonHeader = "\n"sv;
@@ -619,6 +619,21 @@ AddDirectionalLightContrib(unsigned int i, const ShaderProperties& props)
 
 
 std::string
+RingTransmission(const ShaderProperties& props,
+                 const std::string& coordinate,
+                 const std::string& lod,
+                 const std::string& lightCosine)
+{
+    if (!props.physicalRings)
+        return "(1.0 - textureLod(ringTex, vec2(" + coordinate + ", 0.0), " + lod + ").a)";
+
+    std::string depth = "ringOpticalDepth";
+    if (util::is_set(props.texUsage, TexUsage::RingShadowTexture))
+        depth += " * clamp(textureLod(ringTex, vec2(" + coordinate + ", 0.5), 0.0).r, 0.0, 1.0)";
+    return "exp(-(" + depth + ") / max(abs(" + lightCosine + "), 1.0e-4))";
+}
+
+std::string
 BeginLightSourceShadows(const ShaderProperties& props, unsigned int light)
 {
     std::string source;
@@ -643,8 +658,9 @@ BeginLightSourceShadows(const ShaderProperties& props, unsigned int light)
         source += "if ((dot(position * ringScale, ringPlane.xyz) + ringPlane.w) * dot(" +
                   LightProperty(light, "direction") + ", ringPlane.xyz) <= 0.0 &&\n";
         source += "    " + ringShadowTexCoord + " >= 0.0 && " + ringShadowTexCoord + " <= 1.0)\n{\n";
-        source += "shadow *= 1.0 - textureLod(ringTex, vec2(" + ringShadowTexCoord + ", 0.0), " +
-                  IndexedParameter("ringShadowLOD", light) + ").a;\n";
+        source += "shadow *= " + RingTransmission(props, ringShadowTexCoord,
+                  IndexedParameter("ringShadowLOD", light),
+                  "dot(" + LightProperty(light, "direction") + ", ringPlane.xyz)") + ";\n";
         source += "}\n";
     }
 
@@ -947,7 +963,9 @@ AtmosphericEffects(const ShaderProperties& props, unsigned int lightIndex)
                   + LightProperty(lightIndex, "direction") + " * atmosphereRingShadowDistance;\n";
         source += "            atmosphereRingShadowTexCoord = (length(atmosphereRingShadowProjection - ringCenter) - ringRadius) * ringWidth;\n";
         source += "            if (atmosphereRingShadowTexCoord >= 0.0 && atmosphereRingShadowTexCoord <= 1.0)\n";
-        source += "                sunVisibility *= 1.0 - textureLod(ringTex, vec2(atmosphereRingShadowTexCoord, 0.0), ringShadowLOD0).a;\n";
+        source += "                sunVisibility *= " + RingTransmission(props,
+                  "atmosphereRingShadowTexCoord", "ringShadowLOD0",
+                  "dot(" + LightProperty(lightIndex, "direction") + ", ringPlane.xyz)") + ";\n";
         source += "        }\n";
     }
     source += "        if (sunVisibility > 0.0)\n";
@@ -1661,7 +1679,10 @@ buildFragmentShader(const ShaderProperties& props)
 
     if (props.hasRingShadows())
     {
-        source += DeclareUniform("ringTex", Shader_Sampler2D);
+        if (util::is_set(props.texUsage, TexUsage::RingShadowTexture))
+            source += DeclareUniform("ringTex", Shader_Sampler2D);
+        if (props.physicalRings)
+            source += DeclareUniform("ringOpticalDepth", Shader_Float);
         source += DeclareUniform("ringPlane", Shader_Vector4);
         source += DeclareUniform("ringCenter", Shader_Vector3);
         source += DeclareUniform("ringRadius", Shader_Float);
@@ -2001,14 +2022,16 @@ buildRingsVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
         source += DeclareOutput("shadowDepths", Shader_Vector4);
     }
 
-    if (util::is_set(props.texUsage, TexUsage::DiffuseTexture | TexUsage::RingPhaseTexture))
+    if (util::is_set(props.texUsage, TexUsage::DiffuseTexture | TexUsage::RingPhaseTexture |
+                                    TexUsage::RingOpticalDepthTexture | TexUsage::RingAlbedoTexture))
         source += DeclareOutput("ringTexCoord", Shader_Vector2);
 
     source += VPFunction(props.fishEyeOverride != FisheyeOverrideMode::Disabled && fisheyeEnabled);
 
     source += "\nvoid main(void)\n{\n";
 
-    if (util::is_set(props.texUsage, TexUsage::DiffuseTexture | TexUsage::RingPhaseTexture))
+    if (util::is_set(props.texUsage, TexUsage::DiffuseTexture | TexUsage::RingPhaseTexture |
+                                    TexUsage::RingOpticalDepthTexture | TexUsage::RingAlbedoTexture))
         source += "ringTexCoord = " + TexCoord2D(0, false) + ";\n";
 
     source += "position = in_Position.xyz * (ringRadius + ringWidth * in_TexCoord0.s);\n";
@@ -2046,37 +2069,73 @@ RingShadowDeclarations(const ShaderProperties& props)
 void
 AddRingLightSource(std::string& source, const ShaderProperties& props, unsigned int lightIndex)
 {
-    if (util::is_set(props.texUsage, TexUsage::RingPhaseTexture))
+    source += "{\n";
+    const bool scattering = props.physicalRings || util::is_set(props.texUsage, TexUsage::RingPhaseTexture);
+    if (scattering)
     {
         source += "lightCosine = max(abs(" + LightProperty(lightIndex, "direction") + ".y), 1.0e-4);\n";
         source += "cosPhaseAngle = clamp(dot(" + LightProperty(lightIndex, "direction") +
                   ", eyeDir), -1.0, 1.0);\n";
-        // The LUT stores log2(omega * P) over radius and scattering angle.
-        // Its fourth-root angle coordinate resolves the narrow diffraction
-        // lobe without embedding a planet-specific minimum angle.
-        source += "scatteringAngle = max(acos(-cosPhaseAngle), " +
-                  LightProperty(lightIndex, "angularRadius") + ");\n";
-        source += "phaseCoord = 1.0 - pow(clamp(scatteringAngle / 3.141592653589793,"
-                  " 0.0, 1.0), 0.25);\n";
-        source += "scatteringSource = exp2(mix(vec3(-24.0), vec3(16.0),"
-                  " texture(ringPhaseTex, vec2(ringTexCoord.s, phaseCoord)).rgb));\n";
-        source += "scatteringSource *= ringColor;\n";
+        if (util::is_set(props.texUsage, TexUsage::RingPhaseTexture))
+        {
+            // Legacy LUTs contain omega * P; Scattering block LUTs contain P.
+            // Both use a fourth-root scattering-angle coordinate and log2 encoding.
+            source += "scatteringAngle = max(acos(-cosPhaseAngle), " +
+                      LightProperty(lightIndex, "angularRadius") + ");\n";
+            source += "phaseCoord = 1.0 - pow(clamp(scatteringAngle / 3.141592653589793,"
+                      " 0.0, 1.0), 0.25);\n";
+            if (props.physicalRings)
+                source += "scatteringSource = sampleRingPhase(ringSampleU, phaseCoord);\n";
+            else
+                source += "scatteringSource = exp2(mix(vec3(-24.0), vec3(16.0),"
+                          " texture(ringPhaseTex, vec2(ringTexCoord.s, phaseCoord)).rgb));\n";
+            source += props.physicalRings ? "scatteringSource *= particleAlbedo;\n"
+                                         : "scatteringSource *= ringColor;\n";
+        }
+        else
+        {
+            // g > 0 means forward scattering (cosPhaseAngle = -1).
+            source += "float g = ringPhaseAsymmetry;\n";
+            source += "float hgDenominator = (1.0 - abs(g)) * (1.0 - abs(g))"
+                      " + 2.0 * abs(g) * (1.0 + sign(g) * cosPhaseAngle);\n";
+            source += "scatteringSource = particleAlbedo * ((1.0 - g * g)"
+                      " / pow(hgDenominator, 1.5));\n";
+        }
 
         // Classical single scattering for a plane-parallel particulate
         // layer: Salo & Karjalainen (2003), Icarus 164, Eq. 33.
-        source += "if (" + LightProperty(lightIndex, "direction") + ".y * eyeDir.y > 0.0)\n{\n";
-        source += "    intensity = lightCosine / (4.0 * (viewCosine + lightCosine))"
-                  " * (1.0 - exp(-opticalDepth"
-                  " * (1.0 / viewCosine + 1.0 / lightCosine)));\n";
-        source += "}\nelse\n{\n";
-        source += "    float cosineDifference = viewCosine - lightCosine;\n";
-        source += "    if (abs(cosineDifference) > 1.0e-4)\n";
-        source += "        intensity = lightCosine / (4.0 * cosineDifference)"
-                  " * (exp(-opticalDepth / viewCosine) - exp(-opticalDepth / lightCosine));\n";
-        source += "    else\n";
-        source += "        intensity = opticalDepth / (4.0 * lightCosine)"
-                  " * exp(-opticalDepth / lightCosine);\n";
-        source += "}\n";
+        if (props.physicalRings)
+        {
+            source += "if (" + LightProperty(lightIndex, "direction") + ".y * eyeDir.y > 0.0)\n";
+            source += "    intensity = lightCosine / (4.0 * (viewCosine + lightCosine))"
+                      " * ringOneMinusExp(opticalDepth * (1.0 / viewCosine + 1.0 / lightCosine));\n";
+            source += "else\n{\n";
+            // Factor the difference of exponentials to retain small optical depths
+            // and the equal-elevation limit without subtractive cancellation.
+            source += "    float path = opticalDepth / max(viewCosine, lightCosine);\n";
+            source += "    float delta = path * (abs(viewCosine - lightCosine) / min(viewCosine, lightCosine));\n";
+            source += "    float ratio = delta < 1.0e-2 ? 1.0 - 0.5 * delta + delta * delta / 6.0"
+                      " : ringOneMinusExp(delta) / delta;\n";
+            source += "    intensity = path > 80.0 ? 0.0"
+                      " : (opticalDepth / viewCosine) * 0.25 * exp(-path) * ratio;\n";
+            source += "}\n";
+        }
+        else
+        {
+            source += "if (" + LightProperty(lightIndex, "direction") + ".y * eyeDir.y > 0.0)\n{\n";
+            source += "    intensity = lightCosine / (4.0 * (viewCosine + lightCosine))"
+                      " * (1.0 - exp(-opticalDepth"
+                      " * (1.0 / viewCosine + 1.0 / lightCosine)));\n";
+            source += "}\nelse\n{\n";
+            source += "    float cosineDifference = viewCosine - lightCosine;\n";
+            source += "    if (abs(cosineDifference) > 1.0e-4)\n";
+            source += "        intensity = lightCosine / (4.0 * cosineDifference)"
+                      " * (exp(-opticalDepth / viewCosine) - exp(-opticalDepth / lightCosine));\n";
+            source += "    else\n";
+            source += "        intensity = opticalDepth / (4.0 * lightCosine)"
+                      " * exp(-opticalDepth / lightCosine);\n";
+            source += "}\n";
+        }
     }
     else
     {
@@ -2092,7 +2151,7 @@ AddRingLightSource(std::string& source, const ShaderProperties& props, unsigned 
         source += "shadow = 1.0;\n";
         source += Shadow(lightIndex, 0);
         source += "shadow = min(1.0, shadow + step(0.0, " + ShadowDepth(lightIndex) + "));\n";
-        if (util::is_set(props.texUsage, TexUsage::RingPhaseTexture))
+        if (scattering)
         {
             source += "litColor += (shadow * intensity) * " +
                       LightProperty(lightIndex, "diffuse") + " * scatteringSource;\n";
@@ -2103,7 +2162,7 @@ AddRingLightSource(std::string& source, const ShaderProperties& props, unsigned 
                       LightProperty(lightIndex, "diffuse") + ";\n";
         }
     }
-    else if (util::is_set(props.texUsage, TexUsage::RingPhaseTexture))
+    else if (scattering)
     {
         source += "litColor += intensity * " + LightProperty(lightIndex, "diffuse") +
                   " * scatteringSource;\n";
@@ -2112,11 +2171,16 @@ AddRingLightSource(std::string& source, const ShaderProperties& props, unsigned 
     {
         source += "diff.rgb += intensity * " + LightProperty(lightIndex, "diffuse") + ";\n";
     }
+    source += "}\n";
 }
 
 GLFragmentShader
 buildRingsFragmentShader(const ShaderProperties& props)
 {
+    const bool scattering = props.physicalRings || util::is_set(props.texUsage, TexUsage::RingPhaseTexture);
+    const bool filterOptics = props.physicalRings &&
+        util::is_set(props.texUsage, TexUsage::RingOpticalDepthTexture |
+                                    TexUsage::RingAlbedoTexture | TexUsage::RingPhaseTexture);
     std::string source(VersionHeader);
     source += CommonHeader;
     source += FragmentHeader;
@@ -2131,16 +2195,51 @@ buildRingsFragmentShader(const ShaderProperties& props)
     source += DeclareUniform("eyePosition", Shader_Vector3);
     source += DeclareInput("position", Shader_Vector3);
 
-    if (util::is_set(props.texUsage, TexUsage::DiffuseTexture | TexUsage::RingPhaseTexture))
+    if (util::is_set(props.texUsage, TexUsage::DiffuseTexture | TexUsage::RingPhaseTexture |
+                                    TexUsage::RingOpticalDepthTexture | TexUsage::RingAlbedoTexture))
         source += DeclareInput("ringTexCoord", Shader_Vector2);
 
     if (util::is_set(props.texUsage, TexUsage::DiffuseTexture))
         source += DeclareUniform("diffTex", Shader_Sampler2D);
 
     if (util::is_set(props.texUsage, TexUsage::RingPhaseTexture))
+    {
         source += DeclareUniform("ringPhaseTex", Shader_Sampler2D);
+        if (props.physicalRings)
+            source += DeclareUniform("ringPhaseTextureWidth", Shader_Float);
+    }
+
+    if (props.physicalRings)
+    {
+        source += DeclareUniform("ringOpticalDepth", Shader_Float);
+        source += DeclareUniform("ringAlbedo", Shader_Vector3);
+        source += DeclareUniform("ringPhaseAsymmetry", Shader_Float);
+    }
+    if (util::is_set(props.texUsage, TexUsage::RingOpticalDepthTexture))
+        source += DeclareUniform("ringOpticalDepthTex", Shader_Sampler2D);
+    if (util::is_set(props.texUsage, TexUsage::RingAlbedoTexture))
+        source += DeclareUniform("ringAlbedoTex", Shader_Sampler2D);
 
     source += RingShadowDeclarations(props);
+
+    if (props.physicalRings && util::is_set(props.texUsage, TexUsage::RingPhaseTexture))
+    {
+        // Interpolate decoded radial columns; mixing their logarithms loses
+        // phase normalization at transitions between particle populations.
+        source += "vec3 sampleRingPhase(float u, float v)\n{\n"
+                  "    float x = u * ringPhaseTextureWidth - 0.5;\n"
+                  "    float left = (floor(x) + 0.5) / ringPhaseTextureWidth;\n"
+                  "    vec3 p0 = exp2(-24.0 + 40.0 * texture(ringPhaseTex, vec2(left, v)).rgb);\n"
+                  "    vec3 p1 = exp2(-24.0 + 40.0 * texture(ringPhaseTex,"
+                  " vec2(left + 1.0 / ringPhaseTextureWidth, v)).rgb);\n"
+                  "    return mix(p0, p1, fract(x));\n"
+                  "}\n";
+    }
+
+    if (props.physicalRings)
+        source += "float ringOneMinusExp(float x)\n{\n"
+                  "    return x < 1.0e-2 ? x * (1.0 - 0.5 * x + x * x / 6.0) : 1.0 - exp(-x);\n"
+                  "}\n";
 
     source += "\nvoid main(void)\n{\n";
 
@@ -2161,7 +2260,7 @@ buildRingsFragmentShader(const ShaderProperties& props)
               "    bool behind = b < 0.0 && a + b > 0.0 && b * b >= a * c;\n"
               "    dropFragment = (ringHalf > 0.0 && behind) || (ringHalf < 0.0 && !behind);\n"
               "}\n";
-    if (util::is_set(props.texUsage, TexUsage::RingPhaseTexture))
+    if (scattering)
         source += "vec3 litColor;\n";
     else
         source += "vec4 diff = vec4(ambientColor, 1.0);\n";
@@ -2174,18 +2273,40 @@ buildRingsFragmentShader(const ShaderProperties& props)
         source += "color = texture(diffTex, ringTexCoord.st);\n";
     else
         source += "color = vec4(1.0);\n";
-    if (util::is_set(props.texUsage, TexUsage::RingPhaseTexture))
+    if (filterOptics)
     {
-        source += DeclareLocal("particleAlbedo", Shader_Vector3,
-                               "clamp(color.rgb * ringColor, 0.0, 1.0)");
-        // Existing ring assets store normal opacity. Beer-Lambert inversion
-        // gives the normal optical depth required by the slab equations.
-        source += DeclareLocal("normalOpacity", Shader_Float, "clamp(color.a, 0.0, 1.0)");
-        source += DeclareLocal("opticalDepth", Shader_Float,
-                               "-log(max(1.0 - normalOpacity, 1.0e-6))");
+        // Average radiance and transmission, never optical depth or log phase.
+        source += "float ringFootprint = fwidth(ringTexCoord.s);\n"
+                  "vec3 integratedRingColor = vec3(0.0);\n"
+                  "float integratedRingOpacity = 0.0;\n"
+                  "for (int ringSample = 0; ringSample < 8; ++ringSample)\n{\n"
+                  "float ringSampleU = clamp(ringTexCoord.s"
+                  " + ((float(ringSample) + 0.5) / 8.0 - 0.5) * ringFootprint, 0.0, 1.0);\n";
+    }
+    if (scattering)
+    {
+        if (props.physicalRings)
+        {
+            source += DeclareLocal("particleAlbedo", Shader_Vector3, "ringAlbedo");
+            if (util::is_set(props.texUsage, TexUsage::RingAlbedoTexture))
+                source += "particleAlbedo *= clamp(texture(ringAlbedoTex, vec2(ringSampleU, 0.5)).rgb, 0.0, 1.0);\n";
+            source += DeclareLocal("opticalDepth", Shader_Float, "ringOpticalDepth");
+            if (util::is_set(props.texUsage, TexUsage::RingOpticalDepthTexture))
+                source += "opticalDepth *= clamp(texture(ringOpticalDepthTex, vec2(ringSampleU, 0.5)).r, 0.0, 1.0);\n";
+        }
+        else
+        {
+            source += DeclareLocal("particleAlbedo", Shader_Vector3,
+                                   "clamp(color.rgb * ringColor, 0.0, 1.0)");
+            // Legacy phase-LUT assets infer normal optical depth from opacity.
+            source += DeclareLocal("normalOpacity", Shader_Float, "clamp(color.a, 0.0, 1.0)");
+            source += DeclareLocal("opticalDepth", Shader_Float,
+                                   "-log(max(1.0 - normalOpacity, 1.0e-6))");
+        }
         source += DeclareLocal("viewCosine", Shader_Float, "max(abs(eyeDir.y), 1.0e-4)");
         source += DeclareLocal("viewOpacity", Shader_Float,
-                               "1.0 - exp(-opticalDepth / viewCosine)");
+                               props.physicalRings ? "ringOneMinusExp(opticalDepth / viewCosine)"
+                                                   : "1.0 - exp(-opticalDepth / viewCosine)");
         source += "litColor = particleAlbedo * ambientColor * viewOpacity;\n";
     }
     else
@@ -2202,7 +2323,7 @@ buildRingsFragmentShader(const ShaderProperties& props)
 
     // Sum the contributions from each light source
     source += DeclareLocal("intensity", Shader_Float);
-    if (util::is_set(props.texUsage, TexUsage::RingPhaseTexture))
+    if (scattering)
     {
         source += DeclareLocal("lightCosine", Shader_Float);
         source += DeclareLocal("cosPhaseAngle", Shader_Float);
@@ -2218,7 +2339,14 @@ buildRingsFragmentShader(const ShaderProperties& props)
     for (unsigned int i = 0; i < props.nLights; ++i)
         AddRingLightSource(source, props, i);
 
-    if (util::is_set(props.texUsage, TexUsage::RingPhaseTexture))
+    if (filterOptics)
+        source += "integratedRingColor += litColor * 0.125;\n"
+                  "integratedRingOpacity += viewOpacity * 0.125;\n"
+                  "}\n"
+                  "litColor = integratedRingColor;\n"
+                  "float viewOpacity = integratedRingOpacity;\n";
+
+    if (scattering)
     {
         source += "if (dropFragment)\n{\n";
         source += "    litColor = vec3(0.0);\n";
@@ -2309,7 +2437,10 @@ buildAtmosphereFragmentShader(const ShaderProperties& props)
 
     if (props.hasRingShadowForLight(0))
     {
-        source += DeclareUniform("ringTex", Shader_Sampler2D);
+        if (util::is_set(props.texUsage, TexUsage::RingShadowTexture))
+            source += DeclareUniform("ringTex", Shader_Sampler2D);
+        if (props.physicalRings)
+            source += DeclareUniform("ringOpticalDepth", Shader_Float);
         source += DeclareUniform("ringPlane", Shader_Vector4);
         source += DeclareUniform("ringCenter", Shader_Vector3);
         source += DeclareUniform("ringRadius", Shader_Float);
@@ -2869,7 +3000,8 @@ bool operator==(const ShaderProperties& lhs, const ShaderProperties& rhs)
            lhs.effects == rhs.effects &&
            lhs.fishEyeOverride == rhs.fishEyeOverride &&
            lhs.lightModel == rhs.lightModel &&
-           lhs.separateRayleighMieScaleHeights == rhs.separateRayleighMieScaleHeights;
+           lhs.separateRayleighMieScaleHeights == rhs.separateRayleighMieScaleHeights &&
+           lhs.physicalRings == rhs.physicalRings;
 }
 
 std::size_t
@@ -2883,6 +3015,7 @@ std::hash<ShaderProperties>::operator()(const ShaderProperties& props) const
     boost::hash_combine(seed, props.fishEyeOverride);
     boost::hash_combine(seed, props.lightModel);
     boost::hash_combine(seed, props.separateRayleighMieScaleHeights);
+    boost::hash_combine(seed, props.physicalRings);
     return seed;
 }
 
@@ -3131,7 +3264,7 @@ CelestiaGLProgram::initParameters()
     opacity      = floatParam("opacity");
     ambientColor = vec3Param("ambientColor");
 
-    if (util::is_set(props.texUsage, TexUsage::RingShadowTexture))
+    if (props.hasRingShadows())
     {
         ringWidth            = floatParam("ringWidth");
         ringRadius           = floatParam("ringRadius");
@@ -3146,6 +3279,14 @@ CelestiaGLProgram::initParameters()
         ringHalf             = floatParam("ringHalf");
         ringAtmosphereRadius = floatParam("ringAtmosphereRadius");
         ringColor            = vec3Param("ringColor");
+    }
+
+    if (props.physicalRings)
+    {
+        ringOpticalDepth = floatParam("ringOpticalDepth");
+        ringAlbedo = vec3Param("ringAlbedo");
+        ringPhaseTextureWidth = floatParam("ringPhaseTextureWidth");
+        ringPhaseAsymmetry = floatParam("ringPhaseAsymmetry");
     }
 
     textureOffset = floatParam("texCoordOffset");
@@ -3202,6 +3343,20 @@ CelestiaGLProgram::initSamplers()
     if (util::is_set(props.texUsage, TexUsage::RingPhaseTexture))
     {
         if (GLint slot = glGetUniformLocation(program.getID(), "ringPhaseTex"); slot != -1)
+            glUniform1i(slot, nSamplers);
+        nSamplers++;
+    }
+
+    if (util::is_set(props.texUsage, TexUsage::RingOpticalDepthTexture))
+    {
+        if (GLint slot = glGetUniformLocation(program.getID(), "ringOpticalDepthTex"); slot != -1)
+            glUniform1i(slot, nSamplers);
+        nSamplers++;
+    }
+
+    if (util::is_set(props.texUsage, TexUsage::RingAlbedoTexture))
+    {
+        if (GLint slot = glGetUniformLocation(program.getID(), "ringAlbedoTex"); slot != -1)
             glUniform1i(slot, nSamplers);
         nSamplers++;
     }
@@ -3372,6 +3527,8 @@ CelestiaGLProgram::setRingShadowParameters(const LightingState& ls,
     ringPlane = Eigen::Hyperplane<float, 3>(ls.ringPlaneNormal, ls.ringCenter).coeffs();
     ringCenter = ls.ringCenter;
     ringScale = scale;
+    if (rings.scattering.has_value())
+        ringOpticalDepth = rings.scattering->opticalDepth;
 
     for (unsigned int lightIndex = 0; lightIndex < props.nLights; ++lightIndex)
     {

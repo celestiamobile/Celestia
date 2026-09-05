@@ -316,6 +316,8 @@ class Renderer
     float getStarDimClipFactor() const;
     void  setStarExposure(float e);
     float getStarExposure() const;
+    void setSceneExposure(float exposure);
+    float getSceneExposure() const;
     void  setToneMappingExposure(float e);
     float getToneMappingExposure() const;
     void  setToneMappingMode(ToneMappingMode mode);
@@ -745,6 +747,7 @@ class Renderer
     float starMaxIrradiance{ 100.0f };
     float starDimClipFactor{ 10.0f };
     float starExposure{ 10.0f };
+    float sceneExposure{ 1.0f };
     float toneMappingExposure{ 1.0f };
     ToneMappingMode toneMappingMode{ ToneMappingMode::None };
 

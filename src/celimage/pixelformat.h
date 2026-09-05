@@ -19,6 +19,7 @@ enum class PixelFormat
     RGB8        = 0x8051, // GL_RGB8
     RGBA        = 0x1908, // GL_RGBA
     RGBA8       = 0x8058, // GL_RGBA8
+    RGBA32F     = 0x8814, // GL_RGBA32F (linear, four IEEE-754 binary32 channels)
     BGR         = 0x80E0, // GL_BGR
     BGR8        = 0x80E0, // GL_BGR, no such BGR8 format in OpenGL actually
     BGRA        = 0x80E1, // GL_BGRA

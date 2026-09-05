@@ -63,6 +63,8 @@ Eigen::Matrix4f directionalLightMatrix(const Eigen::Vector3f& lightDirection)
     return m;
 }
 
+} // end unnamed namespace
+
 Texture* setupRingShadowTexture(const LightingState& ls,
                                 ShaderProperties& properties,
                                 const Renderer* renderer)
@@ -70,12 +72,15 @@ Texture* setupRingShadowTexture(const LightingState& ls,
     if (ls.shadowingRingSystem == nullptr)
         return nullptr;
 
-    Texture* ringsTexture =
-        renderer->getTextureManager()->findShadow(ls.shadowingRingSystem->texture);
-    if (ringsTexture == nullptr)
+    const auto& rings = *ls.shadowingRingSystem;
+    Texture* ringsTexture = renderer->getTextureManager()->findShadow(rings.opacityTexture());
+    if (ringsTexture == nullptr &&
+        (!rings.scattering.has_value() || rings.opacityTexture() != util::TextureHandle::Invalid))
         return nullptr;
 
-    properties.texUsage |= TexUsage::RingShadowTexture;
+    properties.physicalRings = rings.scattering.has_value();
+    if (ringsTexture != nullptr)
+        properties.texUsage |= TexUsage::RingShadowTexture;
     for (unsigned int lightIndex = 0; lightIndex < properties.nLights; ++lightIndex)
     {
         if (ls.lights[lightIndex].castsShadows &&
@@ -87,6 +92,9 @@ Texture* setupRingShadowTexture(const LightingState& ls,
 
     return ringsTexture;
 }
+
+namespace
+{
 
 void setEclipseShadowProperties(const LightingState& ls,
                                 ShaderProperties& properties)
@@ -342,7 +350,7 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
     if (util::is_set(shadprop.lightModel, LightingModel::LunarLambertModel))
         prog->lunarLambert = ri.lunarLambert;
 
-    if (util::is_set(shadprop.texUsage, TexUsage::RingShadowTexture))
+    if (shadprop.hasRingShadows())
         prog->setRingShadowParameters(ls, semiAxes);
 
     if (atmosphere != nullptr)
@@ -640,7 +648,7 @@ void renderClouds_GLSL(const RenderInfo& ri,
         }
     }
 
-    if (util::is_set(shadprop.texUsage, TexUsage::RingShadowTexture))
+    if (shadprop.hasRingShadows())
         prog->setRingShadowParameters(ls, semiAxes * (cloudRadius / radius));
 
     if (shadprop.hasEclipseShadows())

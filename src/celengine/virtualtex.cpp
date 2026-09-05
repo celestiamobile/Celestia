@@ -398,6 +398,14 @@ VirtualTexture::drainReady(std::size_t byteBudget)
         unsigned int diskLod = ready.lod - baseSplit;
         MipMapMode mipMapMode = diskLod == 0 ? DefaultMipMaps : NoMipMaps;
         tile->tex = std::make_unique<ImageTexture>(*ready.image, EdgeClamp, mipMapMode);
+        if (tile->tex->getName() == 0)
+        {
+            GetLogger()->error("Virtual texture tile upload failed at LOD {}, tile {}, {}.\n",
+                               ready.lod, ready.u, ready.v);
+            tile->tex.reset();
+            tile->state = TileState::Failed;
+            continue;
+        }
         tile->state = TileState::Loaded;
         tile->lastUsedFrame = m_system->currentFrame();
         bytes += static_cast<std::size_t>(ready.image->getSize());

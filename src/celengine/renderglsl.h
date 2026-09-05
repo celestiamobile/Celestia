@@ -27,12 +27,17 @@ struct Matrices;
 class Renderer;
 class RenderGeometry;
 struct RenderInfo;
+struct ShaderProperties;
 class Texture;
 
 namespace celestia::math
 {
 class Frustum;
 }
+
+Texture* setupRingShadowTexture(const LightingState&,
+                               ShaderProperties&,
+                               const Renderer*);
 
 void renderEllipsoid_GLSL(const RenderInfo& ri,
                           const LightingState& ls,

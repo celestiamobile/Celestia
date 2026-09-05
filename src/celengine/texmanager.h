@@ -42,6 +42,7 @@ enum class TextureFlags : unsigned int
     NoMipMaps        = 0x2,
     BorderClamp      = 0x4,
     LinearColorspace = 0x8,
+    SingleTexture    = 0x10,
 };
 
 ENUM_CLASS_BITWISE_OPS(TextureFlags)

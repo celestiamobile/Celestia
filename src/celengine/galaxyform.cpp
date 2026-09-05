@@ -40,6 +40,11 @@ buildGalacticForm(const std::filesystem::path& filename)
         celestia::util::GetLogger()->error("The galaxy template *** {} *** could not be loaded!\n", filename);
         return std::nullopt;
     }
+    if (img->isFloatingPoint())
+    {
+        celestia::util::GetLogger()->error("Galaxy template {} requires byte image channels.\n", filename);
+        return std::nullopt;
+    }
     int width  = img->getWidth();
     int height = img->getHeight();
     int rgb    = img->getComponents();

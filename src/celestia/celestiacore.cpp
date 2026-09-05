@@ -2819,6 +2819,9 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
 
     renderer->colors = renderer->colors.linearize(gl::sRGBRendering);
     m_scriptMaps.initColorMaps(renderer->colors);
+    renderer->setSceneExposure(config->renderDetails.output.sceneExposure);
+    if (!gl::sRGBRendering && renderer->getSceneExposure() != 1.0f)
+        GetLogger()->warn("SceneExposure requires SRGBRendering and will not be applied.\n");
     renderer->setToneMappingMode(config->renderDetails.output.toneMapping);
 
     if (util::is_set(renderer->getRenderFlags(), RenderFlags::ShowAutoMag))

@@ -25,6 +25,9 @@ CELAPI GLint maxTextureSize                   = 0; //NOSONAR
 CELAPI GLfloat maxLineWidth                   = 0.0f; //NOSONAR
 CELAPI GLint maxTextureAnisotropy             = 0; //NOSONAR
 CELAPI bool sRGBRendering                     = false; //NOSONAR
+CELAPI bool textureFloat                      = false; //NOSONAR
+CELAPI bool textureFloatLinear                = false; //NOSONAR
+CELAPI bool textureFloatAutoMipmap            = false; //NOSONAR
 
 namespace
 {
@@ -44,7 +47,13 @@ bool check_extension(util::array_view<std::string> list, const char *name) noexc
 
 bool init(util::array_view<std::string> ignore) noexcept
 {
+    const int version = epoxy_gl_version();
 #ifdef GL_ES
+    textureFloat = version >= 30 || check_extension(ignore, "GL_OES_texture_float");
+    // ES 3.x makes float storage core, but not 32-bit float linear filtering.
+    textureFloatLinear = textureFloat && check_extension(ignore, "GL_OES_texture_float_linear");
+    textureFloatAutoMipmap = textureFloatLinear && version >= 30 &&
+                            check_extension(ignore, "GL_EXT_color_buffer_float");
     OES_texture_border_clamp           = check_extension(ignore, "GL_OES_texture_border_clamp") || check_extension(ignore, "GL_EXT_texture_border_clamp");
     dualSourceBlending                 = check_extension(ignore, "GL_EXT_blend_func_extended");
     if (dualSourceBlending)
@@ -59,6 +68,10 @@ bool init(util::array_view<std::string> ignore) noexcept
     // upload paths.
     ARB_texture_compression_bptc   = check_extension(ignore, "GL_EXT_texture_compression_bptc");
 #else
+    textureFloat = version >= 30 || check_extension(ignore, "GL_ARB_texture_float");
+    textureFloatLinear = textureFloat;
+    textureFloatAutoMipmap = textureFloat &&
+                            (version >= 30 || check_extension(ignore, "GL_ARB_framebuffer_object"));
     ARB_invalidate_subdata         = check_extension(ignore, "GL_ARB_invalidate_subdata");
     ARB_texture_compression_bptc   = check_extension(ignore, "GL_ARB_texture_compression_bptc");
     dualSourceBlending             = true;

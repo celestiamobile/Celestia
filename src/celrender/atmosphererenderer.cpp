@@ -20,6 +20,7 @@
 #include <celengine/lightenv.h>
 #include <celengine/lodspheremesh.h>
 #include <celengine/render.h>
+#include <celengine/renderglsl.h>
 #include <celengine/renderinfo.h>
 #include <celengine/shadermanager.h>
 #include <celengine/texture.h>
@@ -365,15 +366,7 @@ AtmosphereRenderer::render(
     if (shadprop.nLights > 0 && ls.shadows[0] != nullptr && !ls.shadows[0]->empty())
         shadprop.setEclipseShadowCountForLight(0, std::min(MaxShaderEclipseShadows, static_cast<unsigned int>(ls.shadows[0]->size())));
 
-    if (shadprop.nLights > 0 &&
-        ls.lights[0].castsShadows &&
-        ls.shadowingRingSystem != nullptr &&
-        ls.shadowingRingSystem == ls.ringShadows[0].ringSystem &&
-        m_renderer.getTextureManager()->findShadow(ls.shadowingRingSystem->texture) != nullptr)
-    {
-        shadprop.texUsage |= TexUsage::RingShadowTexture;
-        shadprop.setRingShadowForLight(0, true);
-    }
+    Texture* ringShadowTex = setupRingShadowTexture(ls, shadprop, &m_renderer);
 
     bool useDualSource = false;
     GLenum scatteringBlendDestination = GL_ONE;
@@ -435,8 +428,6 @@ AtmosphereRenderer::render(
 
     if (scatteringProg != nullptr)
     {
-        Texture* ringShadowTex = nullptr;
-
         scatteringProg->use();
         scatteringProg->setLightParameters(ls, ri.color, ri.specularColor, Color::Black);
         scatteringProg->ambientColor = Eigen::Vector3f::Zero();
@@ -450,8 +441,6 @@ AtmosphereRenderer::render(
         }
         if (shadprop.hasRingShadowForLight(0))
         {
-            ringShadowTex =
-                m_renderer.getTextureManager()->findShadow(ls.shadowingRingSystem->texture);
             scatteringProg->setRingShadowParameters(ls, bodyScale * atmScale);
         }
 

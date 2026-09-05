@@ -232,6 +232,13 @@ applyRenderDetails(CelestiaConfig::RenderDetails& renderDetails, const Associati
     applyNumber(renderDetails.ShadowMapSize, hash, "ShadowMapSize"sv);
     applyStringArray(renderDetails.ignoreGLExtensions, hash, "IgnoreGLExtensions"sv);
     applyBoolean(renderDetails.output.sRGB, hash, "SRGBRendering"sv);
+    applyNumber(renderDetails.output.sceneExposure, hash, "SceneExposure"sv);
+    if (!std::isfinite(renderDetails.output.sceneExposure) || renderDetails.output.sceneExposure <= 0.0f)
+    {
+        GetLogger()->error("SceneExposure must be finite and positive.\n");
+        renderDetails.output.sceneExposure = 1.0f;
+    }
+    renderDetails.output.sceneExposure = std::clamp(renderDetails.output.sceneExposure, 1.0e-6f, 1.0e6f);
     applyNumber(renderDetails.output.toneMappingExposure, hash, "ToneMappingExposure"sv);
     renderDetails.output.toneMappingExposure = std::clamp(renderDetails.output.toneMappingExposure, 1.0e-3f, 1.0e6f);
     applyToneMappingMode(renderDetails.output.toneMapping, hash, "ToneMappingMode"sv);

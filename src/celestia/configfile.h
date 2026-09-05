@@ -102,6 +102,7 @@ struct CelestiaConfig
         struct OutputRendering
         {
             bool sRGB{ false };
+            float sceneExposure{ 1.0f };
             float toneMappingExposure{ 1.0f };
             ToneMappingMode toneMapping{ ToneMappingMode::None };
         };
