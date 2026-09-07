@@ -197,6 +197,7 @@ struct ShaderProperties
     FisheyeOverrideMode fishEyeOverride { FisheyeOverrideMode::None };
     bool separateRayleighMieScaleHeights{ false };
     bool physicalRings{ false };
+    std::uint8_t ringPhaseCullingMask{ 0 };
 };
 
 bool

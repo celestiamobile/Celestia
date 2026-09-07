@@ -37,6 +37,7 @@ struct DecodedTexture
     Texture::MipMapMode              mipMode      = Texture::DefaultMipMaps;
     bool                             dxt5NormalMap = false;
     bool                             singleTexture = false;
+    bool                             opticalData = false;
 
     // Virtual-texture path: building a VirtualTexture is just file parsing
     // and bookkeeping (tile uploads happen lazily on bind), so it's safe

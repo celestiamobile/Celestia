@@ -64,6 +64,8 @@ offline using an appropriate particle model. The renderer does not infer
 particle size or composition from RGB.
 
 Optical textures are loaded in linear color space without generated mipmaps.
+Hardware anisotropic filtering is disabled for these data textures: it would
+prefilter depth and encoded phase before the shader's nonlinear evaluation.
 Averaging depth is not generally equivalent to averaging transmission, and
 averaging logarithmically encoded phase values is not energy-preserving.
 Radial phase interpolation therefore decodes adjacent columns before mixing
@@ -75,6 +77,14 @@ This reduces aliasing without turning narrow opaque bands into a uniformly
 semitransparent slab. It is a finite box-filter approximation, not exact
 anisotropic footprint integration; shadow lookups and very sharp angular
 peaks still require further filtering work.
+
+View/light geometry and eclipse factors are shared across the eight samples.
+For high-phase light sources, a specialized shader skips phase lookups only
+for exactly zero scattering weight, without a brightness cutoff. Depth,
+opacity, and nonzero faint scattering are still evaluated. Other light sources
+retain a branchless phase lookup path, including within mixed-light views.
+Optical lookups explicitly use mip level zero so conditional phase sampling
+does not depend on derivatives inside divergent branches.
 
 Within `Modify`, omitted scattering fields retain their values. Empty texture
 filenames remove the corresponding map. `Scattering false` disables the block.
@@ -137,6 +147,9 @@ RGB multiplication by alpha.
 
 Physical ring shadows on surfaces, meshes, clouds, and atmospheres use the same
 depth profile and scale, with the light direction replacing the view direction.
+Physical shadow shaders explicitly reject samples outside the ring annulus;
+they retain edge clamping on the shared depth texture rather than changing
+the ring surface's addressing to a zero border.
 Constant-depth rings also cast shadows. Legacy shadows retain their original
 alpha behavior. Optical-map loads do not temporarily substitute a uniform slab
 or an unrelated phase function while an asynchronous load is pending.

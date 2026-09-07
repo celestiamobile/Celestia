@@ -71,6 +71,16 @@ createShaderProperties(const LightingState& ls,
     if (albedoTex != nullptr)
         shadprop.texUsage |= TexUsage::RingAlbedoTexture;
     shadprop.physicalRings = physical;
+    if (physical && phaseTex != nullptr)
+    {
+        // High-phase views often contain fully shadowed or opaque transmitting
+        // regions. Other lights keep branchless sampling for coherent execution.
+        for (unsigned int li = 0; li < shadprop.nLights; ++li)
+        {
+            if (ls.lights[li].direction_obj.dot(ls.eyePos_obj) < 0.0f)
+                shadprop.ringPhaseCullingMask |= std::uint8_t(1u << li);
+        }
+    }
 
     return shadprop;
 }

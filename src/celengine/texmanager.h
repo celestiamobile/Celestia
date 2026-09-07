@@ -43,6 +43,8 @@ enum class TextureFlags : unsigned int
     BorderClamp      = 0x4,
     LinearColorspace = 0x8,
     SingleTexture    = 0x10,
+    // Linear, mipless, edge-clamped single-image data with no anisotropic filtering.
+    OpticalData      = 0x20,
 };
 
 ENUM_CLASS_BITWISE_OPS(TextureFlags)

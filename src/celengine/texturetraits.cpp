@@ -44,6 +44,13 @@ translateFlags(TextureFlags flags,
 
     if (util::is_set(flags, TextureFlags::LinearColorspace))
         colorspace = Texture::LinearColorspace;
+
+    if (util::is_set(flags, TextureFlags::OpticalData))
+    {
+        addressMode = Texture::EdgeClamp;
+        mipMode = Texture::NoMipMaps;
+        colorspace = Texture::LinearColorspace;
+    }
 }
 
 } // namespace
@@ -55,12 +62,20 @@ TextureTraits::decode(const Info& info) const
     Texture::MipMapMode  mipMode;
     Texture::Colorspace  colorspace;
     translateFlags(info.flags, addressMode, mipMode, colorspace);
+    const bool opticalData = util::is_set(info.flags, TextureFlags::OpticalData);
+    const bool singleTexture = opticalData || util::is_set(info.flags, TextureFlags::SingleTexture);
+
+    if (opticalData && info.bumpHeight != 0.0f)
+    {
+        util::GetLogger()->error("Optical data texture {} cannot be converted to a normal map.\n", info.path);
+        return std::nullopt;
+    }
 
     // Virtual textures are detected by extension; their loader is file
     // parsing only (no GL), so run it here on the worker.
     if (DetermineFileType(info.path) == ContentType::CelestiaTexture)
     {
-        if (util::is_set(info.flags, TextureFlags::SingleTexture))
+        if (singleTexture)
         {
             util::GetLogger()->error("Texture {} requires an ordinary, non-virtual image.\n", info.path);
             return std::nullopt;
@@ -92,7 +107,7 @@ TextureTraits::decode(const Info& info) const
         out.addressMode  = addressMode;
         out.mipMode      = Texture::DefaultMipMaps;
         out.dxt5NormalMap = false;
-        out.singleTexture = util::is_set(info.flags, TextureFlags::SingleTexture);
+        out.singleTexture = singleTexture;
         return out;
     }
 
@@ -111,7 +126,8 @@ TextureTraits::decode(const Info& info) const
     out.image        = std::move(img);
     out.addressMode  = addressMode;
     out.mipMode      = mipMode;
-    out.singleTexture = util::is_set(info.flags, TextureFlags::SingleTexture);
+    out.singleTexture = singleTexture;
+    out.opticalData   = opticalData;
     return out;
 }
 
@@ -133,7 +149,7 @@ TextureTraits::upload(CpuData&& cpu) const
 
     if (cpu.image == nullptr)
         return nullptr;
-    if (cpu.singleTexture &&
+    if ((cpu.singleTexture || cpu.opticalData) &&
         (cpu.image->getWidth() > gl::maxTextureSize || cpu.image->getHeight() > gl::maxTextureSize))
     {
         util::GetLogger()->error("Single-image optical texture exceeds the hardware texture-size limit.\n");
@@ -142,7 +158,16 @@ TextureTraits::upload(CpuData&& cpu) const
 
     // CreateTextureFromImage does the GL allocation — the only step that
     // must run on the render thread.
-    auto tex = CreateTextureFromImage(*cpu.image, cpu.addressMode, cpu.mipMode);
+    auto tex = CreateTextureFromImage(*cpu.image,
+                                     cpu.opticalData ? Texture::EdgeClamp : cpu.addressMode,
+                                     cpu.opticalData ? Texture::NoMipMaps : cpu.mipMode);
+    if (tex != nullptr && cpu.opticalData && gl::EXT_texture_filter_anisotropic)
+    {
+        // Hardware anisotropy would average depth and encoded phase before
+        // the shader evaluates their nonlinear transmission/scattering.
+        tex->bind();
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1);
+    }
     if (tex != nullptr && cpu.dxt5NormalMap)
         tex->setFormatOptions(Texture::DXT5NormalMap);
     return tex;

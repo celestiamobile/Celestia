@@ -23,10 +23,12 @@
 
 #include <celengine/texture.h>
 #include <celengine/texturetraits.h>
+#include <celengine/ringscattering.h>
 #include <celengine/glsupport.h>
 #include <celengine/virtualtex.h>
 #include <celimage/image.h>
 #include <celimage/imageformats.h>
+#include <celutil/associativearray.h>
 
 namespace
 {
@@ -369,14 +371,70 @@ TEST_CASE("Single-image optical textures reject virtual and tiled resources")
     TextureTraits traits({}, nullptr, TextureResolution::medres);
     CHECK_FALSE(traits.decode({"unused.ctx", TextureFlags::SingleTexture, 0.0f}));
 
-    DecodedTexture decoded;
-    decoded.image = std::make_unique<Image>(PixelFormat::RGBA32F, 8, 1);
-    decoded.singleTexture = true;
-    decoded.mipMode = Texture::NoMipMaps;
     const auto originalLimit = gl::maxTextureSize;
     gl::maxTextureSize = 4;
-    CHECK(traits.upload(std::move(decoded)) == nullptr);
+    for (bool opticalData : { false, true })
+    {
+        DecodedTexture decoded;
+        decoded.image = std::make_unique<Image>(PixelFormat::RGBA32F, 8, 1);
+        decoded.singleTexture = !opticalData;
+        decoded.opticalData = opticalData;
+        decoded.mipMode = Texture::NoMipMaps;
+        CHECK(traits.upload(std::move(decoded)) == nullptr);
+    }
     gl::maxTextureSize = originalLimit;
+}
+
+TEST_CASE("Optical data textures carry an isolated linear sampling policy")
+{
+    using namespace celestia::engine;
+    TemporaryDirectory directory;
+    const auto folder = directory.getPath("textures/medres");
+    std::filesystem::create_directories(folder);
+    const auto path = folder / "optical.dds";
+    writeFloatDDS(path);
+    auto paths = std::make_shared<TexturePaths>();
+    const auto base = directory.getPath("");
+    const auto ordinary = paths->getHandle("optical.dds", base, TextureFlags::SingleTexture);
+    const auto optical = paths->getHandle("optical.dds", base, TextureFlags::OpticalData);
+    CHECK(ordinary != optical);
+    TextureInfo info;
+    REQUIRE(paths->getInfo(optical, TextureResolution::medres, info));
+    CHECK(info.flags == TextureFlags::OpticalData);
+
+    celestia::util::AssociativeArray properties;
+    for (const auto* key : { "OpticalDepthTexture", "SingleScatteringAlbedoTexture", "PhaseFunctionTexture" })
+        properties.addValue(key, celestia::util::Value(std::string("optical.dds")));
+    RingScattering scattering;
+    REQUIRE(ReadRingScattering(properties, base, *paths, scattering));
+    CHECK(scattering.opticalDepthTexture == optical);
+    CHECK(scattering.albedoTexture == optical);
+    CHECK(scattering.phaseTexture == optical);
+
+    TextureTraits traits(paths, nullptr, TextureResolution::medres);
+    auto decoded = traits.decode(info);
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded->image != nullptr);
+    CHECK(decoded->image->getFormat() == PixelFormat::RGBA32F);
+    CHECK(decoded->image->getMipLevelCount() == 2);
+    CHECK(decoded->opticalData);
+    CHECK(decoded->singleTexture);
+    CHECK(decoded->addressMode == Texture::EdgeClamp);
+    CHECK(decoded->mipMode == Texture::NoMipMaps);
+
+    info.flags |= TextureFlags::WrapTexture | TextureFlags::BorderClamp;
+    auto conflictingAddress = traits.decode(info);
+    REQUIRE(conflictingAddress.has_value());
+    CHECK(conflictingAddress->addressMode == Texture::EdgeClamp);
+
+    REQUIRE(paths->getInfo(ordinary, TextureResolution::medres, info));
+    auto legacy = traits.decode(info);
+    REQUIRE(legacy.has_value());
+    CHECK_FALSE(legacy->opticalData);
+    CHECK(legacy->mipMode == Texture::DefaultMipMaps);
+
+    CHECK_FALSE(traits.decode({"unused.ctx", TextureFlags::OpticalData, 0.0f}));
+    CHECK_FALSE(traits.decode({path, TextureFlags::OpticalData, 1.0f}));
 }
 
 TEST_SUITE_END();

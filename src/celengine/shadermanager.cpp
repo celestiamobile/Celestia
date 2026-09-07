@@ -2067,16 +2067,58 @@ RingShadowDeclarations(const ShaderProperties& props)
 }
 
 void
+AddPhysicalRingLightGeometry(std::string& source, const ShaderProperties& props, unsigned int lightIndex)
+{
+    const auto suffix = std::to_string(lightIndex);
+    source += "float ringLightCosine" + suffix + " = max(abs(" +
+              LightProperty(lightIndex, "direction") + ".y), 1.0e-4);\n";
+    source += "float ringCosPhaseAngle" + suffix + " = clamp(dot(" +
+              LightProperty(lightIndex, "direction") + ", eyeDir), -1.0, 1.0);\n";
+    if (util::is_set(props.texUsage, TexUsage::RingPhaseTexture))
+    {
+        source += "float ringScatteringAngle" + suffix + " = max(acos(-ringCosPhaseAngle" +
+                  suffix + "), " + LightProperty(lightIndex, "angularRadius") + ");\n";
+        source += "float ringPhaseCoord" + suffix +
+                  " = 1.0 - pow(clamp(ringScatteringAngle" + suffix +
+                  " / 3.141592653589793, 0.0, 1.0), 0.25);\n";
+    }
+    else
+    {
+        source += "float ringPhaseValue" + suffix + ";\n{\n"
+                  "float g = ringPhaseAsymmetry;\n"
+                  "float hgDenominator = (1.0 - abs(g)) * (1.0 - abs(g))"
+                  " + 2.0 * abs(g) * (1.0 + sign(g) * ringCosPhaseAngle" + suffix + ");\n";
+        source += "ringPhaseValue" + suffix +
+                  " = (1.0 - g * g) / pow(hgDenominator, 1.5);\n}\n";
+    }
+    if (props.getEclipseShadowCountForLight(lightIndex) > 0)
+    {
+        source += "float ringShadow" + suffix + ";\n{\n"
+                  "float shadow = 1.0;\n"
+                  "vec2 shadowCenter;\n"
+                  "float shadowR;\n";
+        source += Shadow(lightIndex, 0);
+        source += "ringShadow" + suffix + " = min(1.0, shadow + step(0.0, " +
+                  ShadowDepth(lightIndex) + "));\n}\n";
+    }
+}
+
+void
 AddRingLightSource(std::string& source, const ShaderProperties& props, unsigned int lightIndex)
 {
     source += "{\n";
     const bool scattering = props.physicalRings || util::is_set(props.texUsage, TexUsage::RingPhaseTexture);
     if (scattering)
     {
-        source += "lightCosine = max(abs(" + LightProperty(lightIndex, "direction") + ".y), 1.0e-4);\n";
-        source += "cosPhaseAngle = clamp(dot(" + LightProperty(lightIndex, "direction") +
-                  ", eyeDir), -1.0, 1.0);\n";
-        if (util::is_set(props.texUsage, TexUsage::RingPhaseTexture))
+        if (props.physicalRings)
+            source += "lightCosine = ringLightCosine" + std::to_string(lightIndex) + ";\n";
+        else
+        {
+            source += "lightCosine = max(abs(" + LightProperty(lightIndex, "direction") + ".y), 1.0e-4);\n";
+            source += "cosPhaseAngle = clamp(dot(" + LightProperty(lightIndex, "direction") +
+                      ", eyeDir), -1.0, 1.0);\n";
+        }
+        if (!props.physicalRings)
         {
             // Legacy LUTs contain omega * P; Scattering block LUTs contain P.
             // Both use a fourth-root scattering-angle coordinate and log2 encoding.
@@ -2084,22 +2126,9 @@ AddRingLightSource(std::string& source, const ShaderProperties& props, unsigned 
                       LightProperty(lightIndex, "angularRadius") + ");\n";
             source += "phaseCoord = 1.0 - pow(clamp(scatteringAngle / 3.141592653589793,"
                       " 0.0, 1.0), 0.25);\n";
-            if (props.physicalRings)
-                source += "scatteringSource = sampleRingPhase(ringSampleU, phaseCoord);\n";
-            else
-                source += "scatteringSource = exp2(mix(vec3(-24.0), vec3(16.0),"
-                          " texture(ringPhaseTex, vec2(ringTexCoord.s, phaseCoord)).rgb));\n";
-            source += props.physicalRings ? "scatteringSource *= particleAlbedo;\n"
-                                         : "scatteringSource *= ringColor;\n";
-        }
-        else
-        {
-            // g > 0 means forward scattering (cosPhaseAngle = -1).
-            source += "float g = ringPhaseAsymmetry;\n";
-            source += "float hgDenominator = (1.0 - abs(g)) * (1.0 - abs(g))"
-                      " + 2.0 * abs(g) * (1.0 + sign(g) * cosPhaseAngle);\n";
-            source += "scatteringSource = particleAlbedo * ((1.0 - g * g)"
-                      " / pow(hgDenominator, 1.5));\n";
+            source += "scatteringSource = exp2(mix(vec3(-24.0), vec3(16.0),"
+                      " texture(ringPhaseTex, vec2(ringTexCoord.s, phaseCoord)).rgb));\n";
+            source += "scatteringSource *= ringColor;\n";
         }
 
         // Classical single scattering for a plane-parallel particulate
@@ -2146,7 +2175,30 @@ AddRingLightSource(std::string& source, const ShaderProperties& props, unsigned 
         source += "intensity = mix(intensity, intensity * (1.0 - opticalDepth), litSide);\n";
     }
 
-    if (props.getEclipseShadowCountForLight(lightIndex) > 0)
+    if (props.physicalRings)
+    {
+        if (props.getEclipseShadowCountForLight(lightIndex) > 0)
+            source += "float ringLightWeight = ringShadow" + std::to_string(lightIndex) + " * intensity;\n";
+        else
+            source += "float ringLightWeight = intensity;\n";
+        if (util::is_set(props.texUsage, TexUsage::RingPhaseTexture))
+        {
+            // Skip only exact zeros; opacity is independent. Other lights keep
+            // a branchless variant to avoid divergent lookups around narrow gaps.
+            if ((props.ringPhaseCullingMask & (1u << lightIndex)) != 0)
+                source += "if (ringLightWeight != 0.0)\n";
+            source += "{\n";
+            source += "scatteringSource = sampleRingPhase(ringSampleU, ringPhaseCoord" +
+                      std::to_string(lightIndex) + ");\n";
+            source += "scatteringSource *= particleAlbedo;\n";
+        }
+        else
+            source += "{\nscatteringSource = particleAlbedo * ringPhaseValue" +
+                      std::to_string(lightIndex) + ";\n";
+        source += "litColor += ringLightWeight * " + LightProperty(lightIndex, "diffuse") +
+                  " * scatteringSource;\n}\n";
+    }
+    else if (props.getEclipseShadowCountForLight(lightIndex) > 0)
     {
         source += "shadow = 1.0;\n";
         source += Shadow(lightIndex, 0);
@@ -2229,9 +2281,9 @@ buildRingsFragmentShader(const ShaderProperties& props)
         source += "vec3 sampleRingPhase(float u, float v)\n{\n"
                   "    float x = u * ringPhaseTextureWidth - 0.5;\n"
                   "    float left = (floor(x) + 0.5) / ringPhaseTextureWidth;\n"
-                  "    vec3 p0 = exp2(-24.0 + 40.0 * texture(ringPhaseTex, vec2(left, v)).rgb);\n"
-                  "    vec3 p1 = exp2(-24.0 + 40.0 * texture(ringPhaseTex,"
-                  " vec2(left + 1.0 / ringPhaseTextureWidth, v)).rgb);\n"
+                  "    vec3 p0 = exp2(-24.0 + 40.0 * textureLod(ringPhaseTex, vec2(left, v), 0.0).rgb);\n"
+                  "    vec3 p1 = exp2(-24.0 + 40.0 * textureLod(ringPhaseTex,"
+                  " vec2(left + 1.0 / ringPhaseTextureWidth, v), 0.0).rgb);\n"
                   "    return mix(p0, p1, fract(x));\n"
                   "}\n";
     }
@@ -2267,6 +2319,13 @@ buildRingsFragmentShader(const ShaderProperties& props)
 
     // Get the normalized direction from the eye to the vertex
     source += "vec3 eyeDir = normalize(eyePosition - position);\n";
+    if (props.physicalRings)
+    {
+        // Lighting geometry is constant across the radial integration samples.
+        source += "float viewCosine = max(abs(eyeDir.y), 1.0e-4);\n";
+        for (unsigned int i = 0; i < props.nLights; ++i)
+            AddPhysicalRingLightGeometry(source, props, i);
+    }
 
     source += DeclareLocal("color", Shader_Vector4);
     if (util::is_set(props.texUsage, TexUsage::DiffuseTexture))
@@ -2289,10 +2348,10 @@ buildRingsFragmentShader(const ShaderProperties& props)
         {
             source += DeclareLocal("particleAlbedo", Shader_Vector3, "ringAlbedo");
             if (util::is_set(props.texUsage, TexUsage::RingAlbedoTexture))
-                source += "particleAlbedo *= clamp(texture(ringAlbedoTex, vec2(ringSampleU, 0.5)).rgb, 0.0, 1.0);\n";
+                source += "particleAlbedo *= clamp(textureLod(ringAlbedoTex, vec2(ringSampleU, 0.5), 0.0).rgb, 0.0, 1.0);\n";
             source += DeclareLocal("opticalDepth", Shader_Float, "ringOpticalDepth");
             if (util::is_set(props.texUsage, TexUsage::RingOpticalDepthTexture))
-                source += "opticalDepth *= clamp(texture(ringOpticalDepthTex, vec2(ringSampleU, 0.5)).r, 0.0, 1.0);\n";
+                source += "opticalDepth *= clamp(textureLod(ringOpticalDepthTex, vec2(ringSampleU, 0.5), 0.0).r, 0.0, 1.0);\n";
         }
         else
         {
@@ -2303,7 +2362,8 @@ buildRingsFragmentShader(const ShaderProperties& props)
             source += DeclareLocal("opticalDepth", Shader_Float,
                                    "-log(max(1.0 - normalOpacity, 1.0e-6))");
         }
-        source += DeclareLocal("viewCosine", Shader_Float, "max(abs(eyeDir.y), 1.0e-4)");
+        if (!props.physicalRings)
+            source += DeclareLocal("viewCosine", Shader_Float, "max(abs(eyeDir.y), 1.0e-4)");
         source += DeclareLocal("viewOpacity", Shader_Float,
                                props.physicalRings ? "ringOneMinusExp(opticalDepth / viewCosine)"
                                                    : "1.0 - exp(-opticalDepth / viewCosine)");
@@ -3001,7 +3061,8 @@ bool operator==(const ShaderProperties& lhs, const ShaderProperties& rhs)
            lhs.fishEyeOverride == rhs.fishEyeOverride &&
            lhs.lightModel == rhs.lightModel &&
            lhs.separateRayleighMieScaleHeights == rhs.separateRayleighMieScaleHeights &&
-           lhs.physicalRings == rhs.physicalRings;
+           lhs.physicalRings == rhs.physicalRings &&
+           lhs.ringPhaseCullingMask == rhs.ringPhaseCullingMask;
 }
 
 std::size_t
@@ -3016,6 +3077,7 @@ std::hash<ShaderProperties>::operator()(const ShaderProperties& props) const
     boost::hash_combine(seed, props.lightModel);
     boost::hash_combine(seed, props.separateRayleighMieScaleHeights);
     boost::hash_combine(seed, props.physicalRings);
+    boost::hash_combine(seed, props.ringPhaseCullingMask);
     return seed;
 }
 

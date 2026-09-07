@@ -335,11 +335,15 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
         ringsTex->bind();
         textures[nTextures++] = ringsTex;
 
+        // Physical shadows check radial bounds in the shader. Their depth
+        // texture may be shared with the ring surface and must stay edge-clamped.
+        if (!shaderProps.physicalRings
 #ifdef GL_ES
-        if (celestia::gl::OES_texture_border_clamp)
-        {
+            && celestia::gl::OES_texture_border_clamp
 #endif
-            // Zero outside the radial range, for both legacy opacity and depth.
+        )
+        {
+            // Legacy shadow opacity uses a transparent border.
             float bc[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 #ifndef GL_ES
             glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, bc);
@@ -349,9 +353,7 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER_OES);
 #endif
 
-#ifdef GL_ES
         }
-#endif
         glActiveTexture(GL_TEXTURE0);
     }
 

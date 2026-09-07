@@ -68,8 +68,7 @@ bool ReadRingScattering(const util::AssociativeArray& data,
             handle = util::TextureHandle::Invalid;
             return true;
         }
-        handle = texturePaths.getHandle(*filename, path,
-            TextureFlags::LinearColorspace | TextureFlags::NoMipMaps | TextureFlags::SingleTexture);
+        handle = texturePaths.getHandle(*filename, path, TextureFlags::OpticalData);
         TextureInfo info;
         if (!texturePaths.getInfo(handle, TextureResolution::lores, info))
         {

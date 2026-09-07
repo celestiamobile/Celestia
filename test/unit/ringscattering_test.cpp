@@ -156,8 +156,19 @@ TEST_CASE("Legacy and physical shaders have distinct cache keys")
     albedoTextured.texUsage |= TexUsage::RingAlbedoTexture;
     CHECK(albedoTextured != physical);
     CHECK(albedoTextured != textured);
-    std::unordered_set<ShaderProperties> keys{ legacy, physical, textured, albedoTextured };
-    CHECK(keys.size() == 4);
+    ShaderProperties phaseTextured = physical;
+    phaseTextured.texUsage |= TexUsage::RingPhaseTexture;
+    ShaderProperties backlit = phaseTextured;
+    backlit.ringPhaseCullingMask = 1;
+    ShaderProperties mixedLights = backlit;
+    mixedLights.ringPhaseCullingMask = 2;
+    CHECK(backlit != phaseTextured);
+    CHECK(backlit != physical);
+    CHECK(mixedLights != backlit);
+    std::unordered_set<ShaderProperties> keys{
+        legacy, physical, textured, albedoTextured, phaseTextured, backlit, mixedLights
+    };
+    CHECK(keys.size() == 7);
 }
 
 TEST_SUITE_END();
