@@ -14,6 +14,7 @@
 #include "qtdateutil.h"
 
 #include <cmath>
+#include <numbers>
 #include <string>
 
 #include <Eigen/Core>
@@ -27,7 +28,6 @@
 
 #include <celastro/astro.h>
 #include <celastro/date.h>
-#include <celcompat/numbers.h>
 #include <celengine/body.h>
 #include <celengine/selection.h>
 #include <celengine/timeline.h>
@@ -110,7 +110,7 @@ rectToSpherical(const Eigen::Vector3d& v)
     double r = v.norm();
     double theta = std::atan2(v.y(), v.x());
     if (theta < 0)
-        theta = theta + 2.0 * celestia::numbers::pi;
+        theta = theta + 2.0 * std::numbers::pi;
     double phi = std::asin(v.z() / r);
 
     return Eigen::Vector3d(theta, phi, r);
@@ -216,12 +216,12 @@ void InfoPanel::buildSolarSystemBodyPage(Body* body,
     const TimelinePhase& phase = body->getTimeline()->findPhase(t);
     const celestia::ephem::Orbit* orbit = phase.orbit().get();
     if (orbit->isPeriodic())
-        orbitalPeriod = orbit->getPeriod();
+        orbitalPeriod = std::abs(orbit->getPeriod());
 
     // Show rotation information for natural, periodic rotators
     if (auto rotationModel = phase.rotationModel().get(); rotationModel->isPeriodic() && !isArtificial)
     {
-        double rotPeriod = rotationModel->getPeriod();
+        double rotPeriod = std::abs(rotationModel->getPeriod());
 
         double dayLength = 0.0;
         bool prograde = false;

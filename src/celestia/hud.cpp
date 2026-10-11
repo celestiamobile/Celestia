@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -25,7 +26,6 @@
 #include <fmt/format.h>
 #endif
 
-#include <celcompat/numbers.h>
 #include <celengine/body.h>
 #include <celengine/location.h>
 #include <celengine/observer.h>
@@ -157,27 +157,26 @@ DistanceKmToStr(const util::NumberFormatter& formatter, double distance, int dig
 void
 displayRotationPeriod(const util::NumberFormatter& formatter, Overlay& overlay, double days)
 {
-    double unitValue;
+    double unitValue = std::abs(days);
     const char *unitStr;
 
-    if (days > 1.0)
+    if (unitValue > 1.0)
     {
-        unitValue = days;
         unitStr = _("days");
     }
-    else if (days > 1.0 / 24.0)
+    else if (unitValue > 1.0 / 24.0)
     {
-        unitValue = days * 24.0;
+        unitValue *= 24.0;
         unitStr = _("hours");
     }
-    else if (days > 1.0 / (24.0 * 60.0))
+    else if (unitValue > 1.0 / (24.0 * 60.0))
     {
-        unitValue = days * 24.0 * 60.0;
+        unitValue *= 24.0 * 60.0;
         unitStr = _("minutes");
     }
     else
     {
-        unitValue = days * 24.0 * 60.0 * 60.0;
+        unitValue *= 24.0 * 60.0 * 60.0;
         unitStr = _("seconds");
     }
 
@@ -337,15 +336,15 @@ displayApparentMagnitude(Overlay& overlay,
 void
 displayRADec(Overlay& overlay, const Eigen::Vector3d& v, const std::locale& loc)
 {
-    double phi = std::atan2(v.x(), v.z()) - celestia::numbers::pi / 2;
+    double phi = std::atan2(v.x(), v.z()) - std::numbers::pi / 2;
     if (phi < 0.0)
-        phi = phi + 2.0 * celestia::numbers::pi;
+        phi = phi + 2.0 * std::numbers::pi;
 
     double theta = std::atan2(std::hypot(v.x(), v.z()), v.y());
     if (theta > 0)
-        theta = celestia::numbers::pi * 0.5 - theta;
+        theta = std::numbers::pi * 0.5 - theta;
     else
-        theta = -celestia::numbers::pi * 0.5 - theta;
+        theta = -std::numbers::pi * 0.5 - theta;
 
 
     displayRightAscension(overlay, math::radToDeg(phi), loc);
