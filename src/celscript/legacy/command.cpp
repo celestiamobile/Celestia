@@ -602,7 +602,7 @@ void CommandSet::processInstantaneous(ExecutionEnvironment& env)
 // Mark object command
 
 CommandMark::CommandMark(std::string _target,
-                         celestia::MarkerRepresentation _rep,
+                         celestia::engine::MarkerRepresentation _rep,
                          bool _occludable) :
     target(std::move(_target)),
     rep(_rep),
@@ -922,7 +922,7 @@ CommandScriptImage::CommandScriptImage(float _duration, float _fadeafter,
                                        float _xoffset, float _yoffset,
                                        const std::filesystem::path &_filename,
                                        bool _fitscreen,
-                                       std::array<Color,4> &_colors) :
+                                       std::span<Color,4> _colors) :
     duration(_duration),
     fadeafter(_fadeafter),
     xoffset(_xoffset),

@@ -680,7 +680,7 @@ Universe::getSolarSystem(const Selection& sel) const
     }
 }
 
-const celestia::MarkerList&
+const celestia::engine::MarkerList&
 Universe::getMarkers() const
 {
     return markers;
@@ -688,10 +688,10 @@ Universe::getMarkers() const
 
 void
 Universe::markObject(const Selection& sel,
-                     const celestia::MarkerRepresentation& rep,
+                     const celestia::engine::MarkerRepresentation& rep,
                      int priority,
                      bool occludable,
-                     celestia::MarkerSizing sizing)
+                     celestia::engine::MarkerSizing sizing)
 {
     if (auto iter = std::find_if(markers.begin(), markers.end(),
                                  [&sel](const auto& m) { return m.object() == sel; });
@@ -705,7 +705,7 @@ Universe::markObject(const Selection& sel,
         markers.erase(iter);
     }
 
-    celestia::Marker& marker = markers.emplace_back(sel);
+    celestia::engine::Marker& marker = markers.emplace_back(sel);
     marker.setRepresentation(rep);
     marker.setPriority(priority);
     marker.setOccludable(occludable);
@@ -1012,7 +1012,7 @@ Universe::findObjectInContext(const Selection& sel,
 //      to us to search.
 Selection
 Universe::find(std::string_view s,
-               util::array_view<Selection> contexts,
+               std::span<const Selection> contexts,
                bool i18n) const
 {
     if (starCatalog != nullptr)
@@ -1053,7 +1053,7 @@ Universe::find(std::string_view s,
 // in which the user is currently located.
 Selection
 Universe::findPath(std::string_view s,
-                   util::array_view<Selection> contexts,
+                   std::span<const Selection> contexts,
                    bool i18n) const
 {
     std::string_view::size_type pos = s.find('/', 0);
@@ -1086,7 +1086,7 @@ Universe::findPath(std::string_view s,
 void
 Universe::getCompletion(std::vector<celestia::engine::Completion>& completion,
                         std::string_view s,
-                        util::array_view<Selection> contexts,
+                        std::span<const Selection> contexts,
                         bool withLocations) const
 {
     // Solar bodies first:
@@ -1118,7 +1118,7 @@ Universe::getCompletion(std::vector<celestia::engine::Completion>& completion,
 void
 Universe::getCompletionPath(std::vector<celestia::engine::Completion>& completion,
                             std::string_view s,
-                            util::array_view<Selection> contexts,
+                            std::span<const Selection> contexts,
                             bool withLocations) const
 {
     std::string_view::size_type pos = s.rfind('/', s.length());

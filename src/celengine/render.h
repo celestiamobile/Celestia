@@ -13,6 +13,7 @@
 #include <array>
 #include <list>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -22,6 +23,7 @@
 
 #include <celengine/body.h>
 #include <celengine/lightenv.h>
+#include <celengine/marker.h>
 #include <celengine/meshmanager.h>
 #include <celengine/universe.h>
 #include <celengine/selection.h>
@@ -199,9 +201,9 @@ class Renderer
 
     // GL wrappers
     void getViewport(int* x, int* y, int* w, int* h) const;
-    void getViewport(std::array<int, 4>& viewport) const;
+    void getViewport(std::span<int, 4> viewport) const;
     void setViewport(int x, int y, int w, int h);
-    void setViewport(const std::array<int, 4>& viewport);
+    void setViewport(std::span<const int, 4> viewport);
     void setScissor(int x, int y, int w, int h);
     void removeScissor();
 
@@ -236,12 +238,12 @@ class Renderer
 
     bool captureFrame(int, int, int, int, celestia::engine::PixelFormat format, unsigned char*) const;
 
-    void renderMarker(celestia::MarkerRepresentation::Symbol symbol,
+    void renderMarker(celestia::engine::MarkerSymbol symbol,
                       float size,
                       const Color &color,
                       const Matrices &m);
 
-    celestia::util::array_view<const Star*> getNearStars() const
+    std::span<const Star* const> getNearStars() const
     {
         return nearStars;
     }
@@ -346,31 +348,29 @@ class Renderer
     struct Annotation
     {
         std::string labelText;
-        const celestia::MarkerRepresentation* markerRep;
+        const celestia::engine::MarkerRepresentation* markerRep;
         Color color;
         Eigen::Vector3f position;
         LabelHorizontalAlignment halign : 3;
         LabelVerticalAlignment valign : 3;
         float size;
-
-        bool operator<(const Annotation&) const;
     };
 
-    void addForegroundAnnotation(const celestia::MarkerRepresentation* markerRep,
+    void addForegroundAnnotation(const celestia::engine::MarkerRepresentation* markerRep,
                                  std::string_view labelText,
                                  Color color,
                                  const Eigen::Vector3f& position,
                                  LabelHorizontalAlignment halign = LabelHorizontalAlignment::Start,
                                  LabelVerticalAlignment valign = LabelVerticalAlignment::Bottom,
                                  float size = 0.0f);
-    void addBackgroundAnnotation(const celestia::MarkerRepresentation* markerRep,
+    void addBackgroundAnnotation(const celestia::engine::MarkerRepresentation* markerRep,
                                  std::string_view labelText,
                                  Color color,
                                  const Eigen::Vector3f& position,
                                  LabelHorizontalAlignment halign = LabelHorizontalAlignment::Start,
                                  LabelVerticalAlignment valign = LabelVerticalAlignment::Bottom,
                                  float size = 0.0f);
-    void addSortedAnnotation(const celestia::MarkerRepresentation* markerRep,
+    void addSortedAnnotation(const celestia::engine::MarkerRepresentation* markerRep,
                              std::string_view labelText,
                              Color color,
                              const Eigen::Vector3f& position,
@@ -383,7 +383,7 @@ class Renderer
     // Callbacks for renderables; these belong in a special renderer interface
     // only visible in object's render methods.
     void beginObjectAnnotations();
-    void addObjectAnnotation(const celestia::MarkerRepresentation* markerRep,
+    void addObjectAnnotation(const celestia::engine::MarkerRepresentation* markerRep,
                              std::string_view labelText,
                              Color,
                              const Eigen::Vector3f&,
@@ -407,8 +407,6 @@ class Renderer
         const Star* star;
         Eigen::Vector3d origin;
         float opacity;
-
-        bool operator<(const OrbitPathListEntry&) const;
     };
 
     enum class FontStyle : std::uint8_t
@@ -651,7 +649,7 @@ class Renderer
     void getLabelAlignmentInfo(const Annotation &annotation, const TextureFont *font, celestia::engine::TextLayout::HorizontalAlignment &halign, float &hOffset, float &vOffset) const;
 
     void addAnnotation(std::vector<Annotation>&,
-                       const celestia::MarkerRepresentation*,
+                       const celestia::engine::MarkerRepresentation*,
                        std::string_view labelText,
                        Color color,
                        const Eigen::Vector3f& position,
@@ -683,7 +681,7 @@ class Renderer
                                                         float farDist,
                                                         FontStyle fs);
 
-    void markersToAnnotations(const celestia::MarkerList &markers,
+    void markersToAnnotations(const celestia::engine::MarkerList &markers,
                               const Observer &observer,
                               double now);
 
@@ -884,15 +882,15 @@ class Renderer
 
     // Location markers
  public:
-    celestia::MarkerRepresentation mountainRep;
-    celestia::MarkerRepresentation craterRep;
-    celestia::MarkerRepresentation observatoryRep;
-    celestia::MarkerRepresentation cityRep;
-    celestia::MarkerRepresentation genericLocationRep;
-    celestia::MarkerRepresentation galaxyRep;
-    celestia::MarkerRepresentation nebulaRep;
-    celestia::MarkerRepresentation openClusterRep;
-    celestia::MarkerRepresentation globularRep;
+    celestia::engine::MarkerRepresentation mountainRep;
+    celestia::engine::MarkerRepresentation craterRep;
+    celestia::engine::MarkerRepresentation observatoryRep;
+    celestia::engine::MarkerRepresentation cityRep;
+    celestia::engine::MarkerRepresentation genericLocationRep;
+    celestia::engine::MarkerRepresentation galaxyRep;
+    celestia::engine::MarkerRepresentation nebulaRep;
+    celestia::engine::MarkerRepresentation openClusterRep;
+    celestia::engine::MarkerRepresentation globularRep;
 
     std::list<RendererWatcher*> watchers;
 

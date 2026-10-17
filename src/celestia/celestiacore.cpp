@@ -1035,7 +1035,7 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
             }
             else
             {
-                celestia::MarkerRepresentation markerRep(celestia::MarkerRepresentation::Diamond);
+                celestia::engine::MarkerRepresentation markerRep(celestia::engine::MarkerSymbol::Diamond);
                 markerRep.setSize(10.0f);
                 markerRep.setColor({0.0f, 1.0f, 0.0f, 0.9f});
 
@@ -3352,14 +3352,14 @@ View* CelestiaCore::getViewByObserver(const Observer *obs) const
     return it == end ? nullptr : *it;
 }
 
-void CelestiaCore::getCaptureInfo(std::array<int, 4>& viewport, celestia::engine::PixelFormat& format) const
+void CelestiaCore::getCaptureInfo(std::span<int, 4> viewport, celestia::engine::PixelFormat& format) const
 {
     renderer->getViewport(viewport);
     format = renderer->getPreferredCaptureFormat();
 }
 
 bool CelestiaCore::captureImage(std::uint8_t* buffer,
-                                const std::array<int, 4>& viewport,
+                                std::span<const int, 4> viewport,
                                 celestia::engine::PixelFormat format) const
 {
     if (renderer->captureFrame(viewport[0], viewport[1],
