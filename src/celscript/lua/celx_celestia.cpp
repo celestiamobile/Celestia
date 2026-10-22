@@ -1772,6 +1772,9 @@ static int celestia_getstarcolor(lua_State* l)
     case ColorTableType::Enhanced:
         lua_pushstring(l, "enhanced");
         break;
+    case ColorTableType::Illuminant_E:
+        lua_pushstring(l, "illuminant_e");
+        break;
     case ColorTableType::Blackbody_D65:
         lua_pushstring(l, "blackbody_d65");
         break;
@@ -1802,14 +1805,16 @@ static int celestia_setstarcolor(lua_State* l)
         return 0;
     }
 
-    if (starColor == "blackbody_d65"sv)
+    if (starColor == "illuminant_e"sv)
+        renderer->setStarColorTable(ColorTableType::Illuminant_E);
+    else if (starColor == "blackbody_d65"sv)
         renderer->setStarColorTable(ColorTableType::Blackbody_D65);
-    else if (starColor == "enhanced"sv)
-        renderer->setStarColorTable(ColorTableType::Enhanced);
     else if (starColor == "sunwhite"sv)
         renderer->setStarColorTable(ColorTableType::SunWhite);
     else if (starColor == "vegawhite"sv)
         renderer->setStarColorTable(ColorTableType::VegaWhite);
+    else if (starColor == "enhanced"sv)
+        renderer->setStarColorTable(ColorTableType::Enhanced);
     else
         Celx_DoError(l, "Invalid starcolor");
 

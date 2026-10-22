@@ -16,10 +16,10 @@
 
 #pragma once
 
+#include <any>
 #include <cstdint>
 #include <functional>
 #include <limits>
-#include <utility>
 #include <vector>
 
 #include <Eigen/Core>
@@ -41,6 +41,7 @@ struct StarBrowserRecord
     const Star* star;
     float distance{ std::numeric_limits<float>::max() };
     float appMag{ std::numeric_limits<float>::max() };
+    std::any userData;
 };
 
 class StarBrowser
@@ -62,27 +63,25 @@ public:
 
     enum class Filter : unsigned int
     {
-        All = 0,
-        Visible = 1,
-        Multiple = 2,
-        WithPlanets = 4,
-        SpectralType = 8,
+        All          = 0,
+        Visible      = 0x1,
+        Multiple     = 0x2,
+        WithPlanets  = 0x4,
+        SpectralType = 0x8,
     };
 
-    StarBrowser(const Universe*,
-                std::uint32_t = DefaultListStars,
-                Comparison = Comparison::Nearest,
-                Filter = Filter::Visible);
+    explicit StarBrowser(const Universe*,
+                         std::uint32_t = DefaultListStars,
+                         Comparison = Comparison::Nearest,
+                         Filter = Filter::Visible);
 
-    inline const Universe* universe() const { return m_universe; }
-
-    inline Comparison comparison() const { return m_comparison; }
+    inline Comparison comparison() const noexcept { return m_comparison; }
     inline void setComparison(Comparison newComparison) { m_comparison = newComparison; }
 
-    inline Filter filter() const { return m_filter; }
+    inline Filter filter() const noexcept { return m_filter; }
     inline void setFilter(Filter newFilter) { m_filter = newFilter; }
 
-    inline std::uint32_t size() const { return m_size; }
+    inline std::uint32_t size() const noexcept { return m_size; }
     bool setSize(std::uint32_t newSize);
 
     // Currently this is only used by the Qt front-end, whose implementation
@@ -91,9 +90,9 @@ public:
     // specialized version to enable queries like "B5-F5"
     void setSpectralTypeFilter(const std::function<bool(const char*)>& filter) { m_spectralTypeFilter = filter; }
 
-    const UniversalCoord& position() const { return m_ucPos; }
+    const UniversalCoord& position() const noexcept { return m_ucPos; }
     void setPosition(const UniversalCoord&);
-    double time() const { return m_jd; }
+    double time() const noexcept { return m_jd; }
     inline void setTime(double jd) { m_jd = jd; }
 
     void populate(std::vector<StarBrowserRecord>&) const;

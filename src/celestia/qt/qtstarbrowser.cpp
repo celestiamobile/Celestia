@@ -1,4 +1,4 @@
-// qtcelestialbrowser.cpp
+// qtstarbrowser.cpp
 //
 // Copyright (C) 2007-2008, Celestia Development Team
 // celestia-developers@lists.sourceforge.net
@@ -10,10 +10,13 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#include "qtcelestialbrowser.h"
+#include "qtstarbrowser.h"
 
 #include <algorithm>
+#include <any>
+#include <cassert>
 #include <cstring>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -26,6 +29,7 @@
 #include <QAbstractTableModel>
 #include <QCheckBox>
 #include <QCollator>
+#include <QCollatorSortKey>
 #include <QColor>
 #include <QComboBox>
 #include <QGridLayout>
@@ -59,6 +63,7 @@
 #include <celutil/flag.h>
 #include <celutil/gettext.h>
 #include <celutil/greek.h>
+#include "qtcompareutil.h"
 #include "qtcolorswatchwidget.h"
 #include "qtmarkerutil.h"
 #include "qtinfopanel.h"
@@ -69,6 +74,16 @@ namespace celestia::qt
 namespace
 {
 
+struct UserData //NOSONAR
+{
+    UserData(const QString& _displayName, const QCollatorSortKey& _sortKey) :
+        displayName(_displayName), sortKey(_sortKey)
+    {}
+
+    QString displayName;
+    QCollatorSortKey sortKey;
+};
+
 struct StarFilter
 {
     engine::StarBrowser::Filter filter{ engine::StarBrowser::Filter::All };
@@ -77,7 +92,7 @@ struct StarFilter
 
 } // end unnamed namespace
 
-class CelestialBrowser::StarTableModel : public QAbstractTableModel, public ModelHelper
+class StarBrowser::StarTableModel : public QAbstractTableModel, public ModelHelper
 {
 public:
     static constexpr int NameColumn         = 0;
@@ -86,10 +101,8 @@ public:
     static constexpr int AbsMagColumn       = 3;
     static constexpr int SpectralTypeColumn = 4;
 
-    explicit StarTableModel(const Universe* _universe);
+    explicit StarTableModel(const Universe* universe);
     ~StarTableModel() override = default;
-
-    Selection objectAtIndex(const QModelIndex& index) const;
 
     // Methods from QAbstractTableModel
     Qt::ItemFlags flags(const QModelIndex& index) const override;
@@ -107,55 +120,43 @@ public:
                   const StarFilter& filter,
                   engine::StarBrowser::Comparison comparison);
 
-    Selection itemAtRow(unsigned int row) const;
+    const Star* itemAtRow(unsigned int) const;
 
 private:
-    bool compareByName(const engine::StarBrowserRecord&, const engine::StarBrowserRecord&) const;
-    bool compareByDistance(const engine::StarBrowserRecord&, const engine::StarBrowserRecord&) const;
-    bool compareByAppMag(const engine::StarBrowserRecord&, const engine::StarBrowserRecord&) const;
-    bool compareByAbsMag(const engine::StarBrowserRecord&, const engine::StarBrowserRecord&) const;
-    bool compareBySpectralType(const engine::StarBrowserRecord&, const engine::StarBrowserRecord&) const;
-
-    QCollator coll;
-    engine::StarBrowser starBrowser;
-    const Universe* universe;
-    std::vector<engine::StarBrowserRecord> records;
+    QCollator m_coll;
+    engine::StarBrowser m_starBrowser;
+    const Universe* m_universe;
+    std::vector<engine::StarBrowserRecord> m_records;
 };
 
-CelestialBrowser::StarTableModel::StarTableModel(const Universe* _universe) :
-    starBrowser(_universe, 1000),
-    universe(_universe)
+StarBrowser::StarTableModel::StarTableModel(const Universe* _universe) :
+    m_starBrowser(_universe, 1000),
+    m_universe(_universe)
 {
-    coll.setNumericMode(true);
-}
-
-Selection
-CelestialBrowser::StarTableModel::objectAtIndex(const QModelIndex& _index) const
-{
-    return itemAtRow((unsigned int) _index.row());
+    m_coll.setNumericMode(true);
 }
 
 /****** Virtual methods from QAbstractTableModel *******/
 
 // Override QAbstractTableModel::flags()
 Qt::ItemFlags
-CelestialBrowser::StarTableModel::flags(const QModelIndex& /*unused*/) const
+StarBrowser::StarTableModel::flags(const QModelIndex& /*unused*/) const
 {
     return static_cast<Qt::ItemFlags>(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 }
 
 // Override QAbstractTableModel::data()
 QVariant
-CelestialBrowser::StarTableModel::data(const QModelIndex& index, int role) const
+StarBrowser::StarTableModel::data(const QModelIndex& index, int role) const
 {
     int row = index.row();
-    if (row < 0 || row >= (int) records.size())
+    if (row < 0 || row >= static_cast<int>(m_records.size()))
     {
         // Out of range
         return QVariant();
     }
 
-    const engine::StarBrowserRecord& record = records[row];
+    const engine::StarBrowserRecord& record = m_records[row];
 
     switch (role)
     {
@@ -163,10 +164,7 @@ CelestialBrowser::StarTableModel::data(const QModelIndex& index, int role) const
         switch (index.column())
         {
         case NameColumn:
-            {
-                std::string starNameString = ReplaceGreekLetterAbbr(universe->getStarCatalog()->getStarName(*record.star, true));
-                return QString::fromStdString(starNameString);
-            }
+            return std::any_cast<UserData>(&record.userData)->displayName;
         case DistanceColumn:
             return record.distance < 0.001f
                 ? QString("%L1").arg(record.distance, 0, 'g')
@@ -196,7 +194,7 @@ CelestialBrowser::StarTableModel::data(const QModelIndex& index, int role) const
         if (index.column() == NameColumn)
         {
             auto hipCatNo = record.star->getIndex();
-            if (auto hdCatNo = universe->getStarCatalog()->getNameDatabase()->crossIndex(StarCatalog::HenryDraper, hipCatNo);
+            if (auto hdCatNo = m_universe->getStarCatalog()->getNameDatabase()->crossIndex(StarCatalog::HenryDraper, hipCatNo);
                 hdCatNo != AstroCatalog::InvalidIndex)
             {
                 return QString("HD %1").arg(hdCatNo);
@@ -211,7 +209,7 @@ CelestialBrowser::StarTableModel::data(const QModelIndex& index, int role) const
 
 // Override QAbstractDataModel::headerData()
 QVariant
-CelestialBrowser::StarTableModel::headerData(int section, Qt::Orientation /* orientation */, int role) const
+StarBrowser::StarTableModel::headerData(int section, Qt::Orientation /* orientation */, int role) const
 {
     if (role != Qt::DisplayRole)
         return QVariant();
@@ -235,147 +233,104 @@ CelestialBrowser::StarTableModel::headerData(int section, Qt::Orientation /* ori
 
 // Override QAbstractDataModel::rowCount()
 int
-CelestialBrowser::StarTableModel::rowCount(const QModelIndex& /*unused*/) const
+StarBrowser::StarTableModel::rowCount(const QModelIndex& /*unused*/) const
 {
-    return (int) records.size();
+    return static_cast<int>(m_records.size());
 }
 
 // Override QAbstractDataModel::columnCount()
 int
-CelestialBrowser::StarTableModel::columnCount(const QModelIndex& /*unused*/) const
+StarBrowser::StarTableModel::columnCount(const QModelIndex& /*unused*/) const
 {
     return 5;
 }
 
 Selection
-CelestialBrowser::StarTableModel::itemForInfoPanel(const QModelIndex& _index)
+StarBrowser::StarTableModel::itemForInfoPanel(const QModelIndex& idx)
 {
-    Selection sel = itemAtRow((unsigned int) _index.row());
-    return sel;
-}
-
-bool
-CelestialBrowser::StarTableModel::compareByName(const engine::StarBrowserRecord& lhs,
-                                                const engine::StarBrowserRecord& rhs) const
-{
-    return coll.compare(QString::fromUtf8(universe->getStarCatalog()->getStarName(*lhs.star, true).c_str()),
-                        QString::fromUtf8(universe->getStarCatalog()->getStarName(*rhs.star, true).c_str())) < 0;
-}
-
-bool
-CelestialBrowser::StarTableModel::compareByDistance(const engine::StarBrowserRecord& lhs,
-                                                    const engine::StarBrowserRecord& rhs) const
-{
-    return lhs.distance < rhs.distance;
-}
-
-bool
-CelestialBrowser::StarTableModel::compareByAppMag(const engine::StarBrowserRecord& lhs,
-                                                  const engine::StarBrowserRecord& rhs) const
-{
-    return lhs.appMag < rhs.appMag;
-}
-
-bool
-CelestialBrowser::StarTableModel::compareByAbsMag(const engine::StarBrowserRecord& lhs,
-                                                  const engine::StarBrowserRecord& rhs) const
-{
-    return lhs.star->getAbsoluteMagnitude() < rhs.star->getAbsoluteMagnitude();
-}
-
-bool
-CelestialBrowser::StarTableModel::compareBySpectralType(const engine::StarBrowserRecord& lhs,
-                                                        const engine::StarBrowserRecord& rhs) const
-{
-    return std::strcmp(lhs.star->getSpectralType(), rhs.star->getSpectralType()) < 0;
+    return const_cast<Star*>(itemAtRow(static_cast<unsigned int>(idx.row())));
 }
 
 // Override QAbstractDataMode::sort()
 void
-CelestialBrowser::StarTableModel::sort(int column, Qt::SortOrder order)
+StarBrowser::StarTableModel::sort(int column, Qt::SortOrder order)
 {
-    if (records.empty())
+    if (m_records.empty())
         return;
 
-    bool (StarTableModel::*compareFn)(const engine::StarBrowserRecord&, const engine::StarBrowserRecord&) const = nullptr;
+    SortOrderComparePredicate pred(order);
     switch (column)
     {
     case NameColumn:
-        compareFn = &StarTableModel::compareByName;
+        std::ranges::sort(m_records, pred, [](const auto& r) -> const auto& { return std::any_cast<UserData>(&r.userData)->sortKey; });
         break;
     case DistanceColumn:
-        compareFn = &StarTableModel::compareByDistance;
+        std::ranges::sort(m_records, pred, [](const auto& r) { return r.distance; });
         break;
     case AppMagColumn:
-        compareFn = &StarTableModel::compareByAppMag;
+        std::ranges::sort(m_records, pred, [](const auto& r) { return r.appMag; });
         break;
     case AbsMagColumn:
-        compareFn = &StarTableModel::compareByAbsMag;
+        std::ranges::sort(m_records, pred, [](const auto& r) { return r.star->getAbsoluteMagnitude(); });
         break;
     case SpectralTypeColumn:
-        compareFn = &StarTableModel::compareBySpectralType;
+        std::ranges::sort(m_records, pred, [](const auto& r) { return std::string_view(r.star->getSpectralType()); });
         break;
     default:
+        assert(0);
         return;
     }
 
-    if (order == Qt::AscendingOrder)
-    {
-        std::sort(records.begin(), records.end(),
-                  [this, compareFn](const auto& a, const auto& b) { return (this->*compareFn)(a, b); });
-    }
-    else
-    {
-        std::sort(records.begin(), records.end(),
-                  [this, compareFn](const auto& a, const auto& b) { return (this->*compareFn)(b, a); });
-    }
-
-    dataChanged(index(0, 0), index(static_cast<int>(records.size() - 1), 4));
+    dataChanged(index(0, 0), index(static_cast<int>(m_records.size() - 1), 4));
 }
 
 void
-CelestialBrowser::StarTableModel::populate(const UniversalCoord& _observerPos,
-                                           double _now,
-                                           const StarFilter& filter,
-                                           engine::StarBrowser::Comparison comparison)
+StarBrowser::StarTableModel::populate(const UniversalCoord& _observerPos,
+                                      double _now,
+                                      const StarFilter& filter,
+                                      engine::StarBrowser::Comparison comparison)
 {
-    starBrowser.setFilter(filter.filter);
+    m_starBrowser.setFilter(filter.filter);
     if (util::is_set(filter.filter, engine::StarBrowser::Filter::SpectralType) && filter.regexp.isValid())
     {
-        starBrowser.setSpectralTypeFilter([regexp=filter.regexp](const char* sptype)
-                                          {
-                                              return regexp.match(sptype).hasMatch();
-                                          });
+        m_starBrowser.setSpectralTypeFilter([regexp = filter.regexp](const char* sptype)
+                                            {
+                                                return regexp.match(sptype).hasMatch();
+                                            });
     }
 
-    starBrowser.setComparison(comparison);
-    starBrowser.setPosition(_observerPos);
-    starBrowser.setTime(_now);
+    m_starBrowser.setComparison(comparison);
+    m_starBrowser.setPosition(_observerPos);
+    m_starBrowser.setTime(_now);
 
     // Clear out the results of the previous populate() call
-    if (!records.empty())
+    if (!m_records.empty())
     {
         beginResetModel();
-        records.clear();
+        m_records.clear();
         endResetModel();
     }
 
-    starBrowser.populate(records);
+    m_starBrowser.populate(m_records);
+    const StarDatabase* starDB = m_universe->getStarCatalog();
+    for (auto& record : m_records)
+    {
+        auto name = starDB->getStarName(*record.star, true);
+        record.userData.emplace<UserData>(QString::fromStdString(ReplaceGreekLetterAbbr(name)),
+                                          m_coll.sortKey(QString::fromStdString(name)));
+    }
 
-    beginInsertRows(QModelIndex(), 0, static_cast<int>(records.size()));
+    beginInsertRows(QModelIndex(), 0, static_cast<int>(m_records.size()));
     endInsertRows();
 }
 
-Selection
-CelestialBrowser::StarTableModel::itemAtRow(unsigned int row) const
+const Star*
+StarBrowser::StarTableModel::itemAtRow(unsigned int row) const
 {
-    if (row >= records.size())
-        return Selection();
-    else
-        return Selection(const_cast<Star*>(records[row].star)); //NOSONAR
+    return row < m_records.size() ? m_records[row].star : nullptr;
 }
 
-CelestialBrowser::CelestialBrowser(CelestiaCore* _appCore, QWidget* parent, InfoPanel* _infoPanel) :
+StarBrowser::StarBrowser(CelestiaCore* _appCore, QWidget* parent, InfoPanel* _infoPanel) :
     QWidget(parent),
     appCore(_appCore),
     infoPanel(_infoPanel)
@@ -462,7 +417,7 @@ CelestialBrowser::CelestialBrowser(CelestiaCore* _appCore, QWidget* parent, Info
 
     QPushButton* unmarkSelectedButton = new QPushButton(_("Unmark Selected"));
     unmarkSelectedButton->setToolTip(_("Unmark stars selected in list view"));
-    connect(unmarkSelectedButton, &QPushButton::clicked, this, &CelestialBrowser::slotUnmarkSelected);
+    connect(unmarkSelectedButton, &QPushButton::clicked, this, &StarBrowser::slotUnmarkSelected);
     markGroupLayout->addWidget(unmarkSelectedButton, 0, 2, 1, 2);
 
     QPushButton* clearMarkersButton = new QPushButton(_("Clear Markers"));
@@ -510,21 +465,21 @@ CelestialBrowser::CelestialBrowser(CelestiaCore* _appCore, QWidget* parent, Info
 
 /******* Slots ********/
 void
-CelestialBrowser::slotUncheckMultipleFilterBox()
+StarBrowser::slotUncheckMultipleFilterBox()
 {
     multipleFilterBox->setChecked(false);
     slotRefreshTable();
 }
 
 void
-CelestialBrowser::slotUncheckBarycentersFilterBox()
+StarBrowser::slotUncheckBarycentersFilterBox()
 {
     barycentersFilterBox->setChecked(false);
     slotRefreshTable();
 }
 
 void
-CelestialBrowser::slotRefreshTable()
+StarBrowser::slotRefreshTable()
 {
     UniversalCoord observerPos = appCore->getSimulation()->getActiveObserver()->getPosition();
     double now = appCore->getSimulation()->getTime();
@@ -563,89 +518,87 @@ CelestialBrowser::slotRefreshTable()
 }
 
 void
-CelestialBrowser::slotContextMenu(const QPoint& pos)
+StarBrowser::slotContextMenu(const QPoint& pos)
 {
     QModelIndex index = treeView->indexAt(pos);
-    Selection sel = starModel->itemAtRow((unsigned int) index.row());
-
-    if (!sel.empty())
+    if (const Star* star = starModel->itemAtRow(static_cast<unsigned int>(index.row())); star)
     {
+        Selection sel(const_cast<Star*>(star));
         emit selectionContextMenuRequested(treeView->mapToGlobal(pos), sel);
     }
 }
 
 void
-CelestialBrowser::slotMarkSelected()
+StarBrowser::slotMarkSelected()
 {
     using engine::MarkerRepresentation, engine::MarkerSymbol;
-    QItemSelectionModel* sm = treeView->selectionModel();
     bool labelMarker = labelMarkerBox->checkState() == Qt::Checked;
     bool convertOK = false;
     QVariant markerData = markerSymbolBox->itemData(markerSymbolBox->currentIndex());
     auto markerSymbol = static_cast<MarkerSymbol>(markerData.toInt(&convertOK));
     QVariant markerSize = markerSizeBox->itemData(markerSizeBox->currentIndex());
-    float size = (float) markerSize.toInt(&convertOK);
+    auto size = static_cast<float>(markerSize.toInt(&convertOK));
     QColor markerColor = colorSwatch->color();
-    Color color((float) markerColor.redF(),
-                (float) markerColor.greenF(),
-                (float) markerColor.blueF());
+    Color color(markerColor.redF(),
+                markerColor.greenF(),
+                markerColor.blueF());
 
     Universe* universe = appCore->getSimulation()->getUniverse();
-    std::string label;
-
-    for (int row = 0; row < starModel->rowCount(QModelIndex()); row++)
+    const QItemSelectionModel* sm = treeView->selectionModel();
+    for (int row = 0, nRows = starModel->rowCount(QModelIndex()); row < nRows; ++row)
     {
-        if (sm->isRowSelected(row, QModelIndex()))
-        {
-            Selection sel = starModel->itemAtRow((unsigned int) row);
-            if (!sel.empty())
-            {
-                if (convertOK)
-                {
-                    if (labelMarker)
-                    {
-                        if (sel.star() != nullptr)
-                            label = universe->getStarCatalog()->getStarName(*sel.star());
-                        label = ReplaceGreekLetterAbbr(label);
-                    }
+        if (!sm->isRowSelected(row, QModelIndex()))
+            continue;
 
-                    // FIXME: unmark is required to change the marker representation
-                    universe->unmarkObject(sel, 1);
-                    universe->markObject(sel,
-                                         MarkerRepresentation(markerSymbol, size, color, label),
-                                         1);
-                }
-                else
-                {
-                    universe->unmarkObject(sel, 1);
-                }
+        const Star* star = starModel->itemAtRow(static_cast<unsigned int>(row));
+        if (!star)
+            continue;
+
+        if (convertOK)
+        {
+            std::string label;
+            if (labelMarker)
+            {
+                label = universe->getStarCatalog()->getStarName(*star);
+                label = ReplaceGreekLetterAbbr(label);
             }
+
+            // FIXME: unmark is required to change the marker representation
+            Selection sel(const_cast<Star*>(star));
+            universe->unmarkObject(sel, 1);
+            universe->markObject(sel,
+                                 MarkerRepresentation(markerSymbol, size, color, label),
+                                 1);
+        }
+        else
+        {
+            universe->unmarkObject(const_cast<Star*>(star), 1);
         }
     }
 }
 
 void
-CelestialBrowser::slotUnmarkSelected()
+StarBrowser::slotUnmarkSelected()
 {
     QModelIndexList rows = treeView->selectionModel()->selectedRows();
     Universe* universe = appCore->getSimulation()->getUniverse();
 
     for (const auto &index : rows)
     {
-        Selection sel = starModel->objectAtIndex(index);
+        Selection sel = starModel->itemForInfoPanel(index);
         if (!sel.empty())
             universe->unmarkObject(sel, 1);
-    } // for
+    }
 }
 
 void
-CelestialBrowser::slotClearMarkers()
+StarBrowser::slotClearMarkers()
 {
     appCore->getSimulation()->getUniverse()->unmarkAll();
 }
 
 void
-CelestialBrowser::slotSelectionChanged(const QItemSelection& newSel, const QItemSelection& oldSel)
+StarBrowser::slotSelectionChanged(const QItemSelection& newSel, const QItemSelection& oldSel)
 {
     if (infoPanel)
         infoPanel->updateHelper(starModel, newSel, oldSel);
