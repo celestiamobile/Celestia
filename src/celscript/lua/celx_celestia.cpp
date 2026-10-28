@@ -890,9 +890,14 @@ static int celestia_setlabelcolor(lua_State* l)
     std::string_view key = lua_tostring(l, 2);
     const auto &LabelColorMap = this_celestia(l)->scriptMaps().LabelColorMap;
     if (auto it = LabelColorMap.find(key); it == LabelColorMap.end())
+    {
         GetLogger()->warn("Unknown label style: {}\n", key);
+        return 0;
+    }
     else
+    {
         color = it->second;
+    }
 
     double red     = Celx_SafeGetNumber(l, 3, AllErrors, "setlabelcolor: color values must be numbers");
     double green   = Celx_SafeGetNumber(l, 4, AllErrors, "setlabelcolor: color values must be numbers");
@@ -906,7 +911,7 @@ static int celestia_setlabelcolor(lua_State* l)
         *color = Color((float) red, (float) green, (float) blue, (float) opacity);
     }
 
-    return 1;
+    return 0;
 }
 
 
@@ -948,9 +953,14 @@ static int celestia_setlinecolor(lua_State* l)
     std::string_view key = lua_tostring(l, 2);
     const auto &LineColorMap = this_celestia(l)->scriptMaps().LineColorMap;
     if (auto it = LineColorMap.find(key); it == LineColorMap.end())
+    {
         GetLogger()->warn("Unknown line style: {}\n", key);
+        return 0;
+    }
     else
+    {
         color = it->second;
+    }
 
     double red     = Celx_SafeGetNumber(l, 3, AllErrors, "setlinecolor: color values must be numbers");
     double green   = Celx_SafeGetNumber(l, 4, AllErrors, "setlinecolor: color values must be numbers");
@@ -964,7 +974,7 @@ static int celestia_setlinecolor(lua_State* l)
         *color = Color((float) red, (float) green, (float) blue, (float) opacity);
     }
 
-    return 1;
+    return 0;
 }
 
 
@@ -1930,7 +1940,7 @@ static int celestia_newposition(lua_State* l)
     Celx_CheckArgs(l, 4, 4, "Expected 3 arguments for celestia:newposition");
     // for error checking only:
     this_celestia(l);
-    R128 components[3];
+    std::array<R128, 3> components;
     for (int i = 0; i < 3; i++)
     {
         if (lua_isnumber(l, i+2))
@@ -1940,7 +1950,16 @@ static int celestia_newposition(lua_State* l)
         }
         else if (lua_isstring(l, i+2))
         {
-            components[i] = util::DecodeFromBase64(lua_tostring(l, i+2));
+            std::string_view src = lua_tostring(l, i+2);
+            if (auto component = util::DecodeFromBase64(src); component.has_value())
+            {
+                components[i] = *component;
+            }
+            else
+            {
+                Celx_DoError(l, "String arguments to celestia:newposition must be decodable as base64");
+                return 0;
+            }
         }
         else
         {

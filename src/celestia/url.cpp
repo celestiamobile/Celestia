@@ -38,7 +38,6 @@ using namespace std::string_view_literals;
 
 using celestia::util::GetLogger;
 using celestia::util::DecodeFromBase64;
-using celestia::util::EncodeAsBase64;
 
 namespace astro = celestia::astro;
 namespace math = celestia::math;
@@ -164,9 +163,9 @@ Url::Url(const CelestiaState &appState, int version, Url::TimeSource timeSource)
 
     // observer position
     fmt::print(u, "?x={}&y={}&z={}",
-                     EncodeAsBase64(m_state.m_observerPosition.x),
-                     EncodeAsBase64(m_state.m_observerPosition.y),
-                     EncodeAsBase64(m_state.m_observerPosition.z));
+               m_state.m_observerPosition.x,
+               m_state.m_observerPosition.y,
+               m_state.m_observerPosition.z);
 
     // observer orientation
     fmt::print(u, "&ow={}&ox={}&oy={}&oz={}",
@@ -528,7 +527,7 @@ Url::initVersion3(const std::map<std::string_view, std::string> &params, std::st
 {
     m_version = 3;
 
-    if (!astro::parseDate(std::string(timeStr), m_date))
+    if (!astro::parseDate(timeStr, m_date))
         return false;
     m_state.m_tdb = (double) m_date;
 
@@ -537,11 +536,16 @@ Url::initVersion3(const std::map<std::string_view, std::string> &params, std::st
     {
         return false;
     }
+    else if (auto x = DecodeFromBase64(itx->second),
+                  y = DecodeFromBase64(ity->second),
+                  z = DecodeFromBase64(itz->second);
+             x.has_value() && y.has_value() && z.has_value())
+    {
+        m_state.m_observerPosition = UniversalCoord(*x, *y, *z);
+    }
     else
     {
-        m_state.m_observerPosition = UniversalCoord(DecodeFromBase64(itx->second),
-                                                    DecodeFromBase64(ity->second),
-                                                    DecodeFromBase64(itz->second));
+        return false;
     }
 
     float ow, ox, oy, oz;

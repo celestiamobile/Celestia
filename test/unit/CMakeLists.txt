@@ -2,12 +2,14 @@ set(UNIT_TEST_SOURCES
   associativearray_test.cpp
   category_test.cpp
   constellation_test.cpp
+  date_test.cpp
   greek_test.cpp
   kepler_test.cpp
   legacy_cmdparser_test.cpp
   loader_validation_test.cpp
   logger_test.cpp
   psf_test.cpp
+  r128_test.cpp
   resourcesystem_test.cpp
   stellarclass_test.cpp
   strnatcmp_test.cpp

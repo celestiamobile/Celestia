@@ -19,7 +19,6 @@
 #include <iterator>
 #include <numbers>
 #include <string_view>
-#include <type_traits>
 #include <utility>
 
 #include <boost/smart_ptr/intrusive_ptr.hpp>
@@ -32,7 +31,7 @@
 #include <celmath/geomutil.h>
 #include <celmath/mathlib.h>
 #include <celutil/associativearray.h>
-#include <celutil/binaryread.h>
+#include <celutil/bytes.h>
 #include <celutil/fsutils.h>
 #include <celutil/gettext.h>
 #include <celutil/infourl.h>
@@ -153,57 +152,30 @@ constexpr float VALID_APPMAG_DISTANCE_THRESHOLD = 1e-5f;
 constexpr std::string_view STARSDAT_MAGIC = "CELSTARS"sv;
 constexpr std::uint16_t StarDBVersion     = 0x0100;
 
-#pragma pack(push, 1)
-
-// stars.dat header structure
-struct StarsDatHeader
-{
-    StarsDatHeader() = delete;
-    char magic[8]; //NOSONAR
-    std::uint16_t version;
-    std::uint32_t counter;
-};
-
-// stars.dat record structure
-struct StarsDatRecord
-{
-    StarsDatRecord() = delete;
-    AstroCatalog::IndexNumber catNo;
-    float x;
-    float y;
-    float z;
-    std::int16_t absMag;
-    std::uint16_t spectralType;
-};
-
-#pragma pack(pop)
-
-static_assert(std::is_standard_layout_v<StarsDatHeader>);
-static_assert(std::is_standard_layout_v<StarsDatRecord>);
-
 bool
 parseStarsDatHeader(std::istream& in, std::uint32_t& nStarsInFile)
 {
-    std::array<char, sizeof(StarsDatHeader)> header;
-    if (!in.read(header.data(), header.size()).good()) /* Flawfinder: ignore */
+    struct StarsDatHeader
+    {
+        std::array<char, 8> magic;
+        util::LE<std::uint16_t> version;
+        util::LE<std::uint32_t> counter;
+    };
+
+    StarsDatHeader header;
+    if (!in.read(reinterpret_cast<char*>(&header), sizeof(header))) /* Flawfinder: ignore */
         return false;
 
     // Verify the magic string
-    if (auto magic = std::string_view(header.data() + offsetof(StarsDatHeader, magic), STARSDAT_MAGIC.size());
-        magic != STARSDAT_MAGIC)
-    {
+    if (std::string_view(header.magic.data(), header.magic.size()) != STARSDAT_MAGIC)
         return false;
-    }
 
     // Verify the version
-    if (auto version = util::fromMemoryLE<std::uint16_t>(header.data() + offsetof(StarsDatHeader, version));
-        version != StarDBVersion)
-    {
+    if (header.version != StarDBVersion)
         return false;
-    }
 
     // Read the star count
-    nStarsInFile = util::fromMemoryLE<std::uint32_t>(header.data() + offsetof(StarsDatHeader, counter));
+    nStarsInFile = header.counter;
     return true;
 }
 
@@ -523,16 +495,38 @@ applyTemperatureBoloCorrection(const StarDatabaseBuilder::StcHeader& header,
             StarDetails::setTemperature(details, *temperature);
             if (!bolometricCorrection.has_value())
             {
-                // if we change the temperature, recalculate the bolometric
-                // correction using formula from formula for main sequence
-                // stars given in B. Cameron Reed (1998), "The Composite
-                // Observational-Theoretical HR Diagram", Journal of the Royal
-                // Astronomical Society of Canada, Vol 92. p36.
+                // If temperature is changed, recalculate bolometric correction
+                // using formula from Flower (1998), ApJ 469, p.355
+                //   "Transformations from Theoretical Hertzsprung-Russell Diagrams to Color-Magnitude Diagrams:
+                //    Effective Temperatures, B-V Colors, and Bolometric Corrections"
+                //   https://scixplorer.org/abs/1996ApJ...469..355F/abstract
+                //   The valid range for formula is estimated from range of data points in Fig. 4
+                //   to be logT = (4.7 to 3.6)
+                // With corrected coefficients from Torres (2010), AJ 140 (5), pp. 1158-1162
+                //   "On the Use of Empirical Bolometric Corrections for Stars"
+                //   https://iopscience.iop.org/article/10.1088/0004-6256/140/5/1158
+                //   https://scixplorer.org/abs/2010AJ....140.1158T/abstract
 
-                double logT = std::log10(static_cast<double>(*temperature)) - 4.0;
-                double bc = -0.438 + logT * (-3.901 + logT * (-8.131 + logT * (13.421 - logT * 8.499)));
+                double logT = std::log10(static_cast<double>(*temperature));
 
-                StarDetails::setBolometricCorrection(details, static_cast<float>(bc));
+                if (logT > 3.6 && logT < 4.7)
+                {
+                    if (logT > 3.9)  // logT = (4.7, 3.90)
+                    {
+                        double bc = -118115.450538963 + logT * (137145.973583929 + logT * (-63623.3812100225 + logT * (14741.2923562646 + logT * (-1705.87278406872 + logT * 78.8731721804990))));
+                        StarDetails::setBolometricCorrection(details, static_cast<float>(bc));
+                    }
+                    else if (logT > 3.7)  // logT = (3.90, 3.70)
+                    {
+                        double bc = -37051.0203809015 + logT * (38567.2629965804 + logT * (-15065.1486316025 + logT * (2617.24637119416 + logT * -170.623810323864)));
+                        StarDetails::setBolometricCorrection(details, static_cast<float>(bc));
+                    }
+                    else  // logT = (3.70, 3.6)
+                    {
+                        double bc = -19053.7291496456 + logT * (15514.4866764412 + logT * (-4212.78819301717 + logT * 381.476328422343));
+                        StarDetails::setBolometricCorrection(details, static_cast<float>(bc));
+                    }
+                }
             }
         }
         else
@@ -621,40 +615,41 @@ StarDatabaseBuilder::loadBinary(std::istream& in)
     if (!parseStarsDatHeader(in, nStarsInFile))
         return false;
 
+    struct StarsDatRecord
+    {
+        util::LE<AstroCatalog::IndexNumber> catNo;
+        util::LE<float> x;
+        util::LE<float> y;
+        util::LE<float> z;
+        util::LE<std::int16_t> absMag;
+        util::LE<std::uint16_t> spectralType;
+    };
+
     constexpr std::uint32_t BUFFER_RECORDS = UINT32_C(4096) / sizeof(StarsDatRecord);
-    std::vector<char> buffer(sizeof(StarsDatRecord) * BUFFER_RECORDS);
+    auto buffer = std::make_unique_for_overwrite<std::array<StarsDatRecord, BUFFER_RECORDS>>();
     std::uint32_t nStarsRemaining = nStarsInFile;
     while (nStarsRemaining > 0)
     {
         std::uint32_t recordsToRead = std::min(BUFFER_RECORDS, nStarsRemaining);
-        if (!in.read(buffer.data(), sizeof(StarsDatRecord) * recordsToRead).good()) /* Flawfinder: ignore */
+        if (!in.read(reinterpret_cast<char*>(buffer->data()), sizeof(StarsDatRecord) * recordsToRead).good()) /* Flawfinder: ignore */
             return false;
 
-        const char* ptr = buffer.data();
         for (std::uint32_t i = 0; i < recordsToRead; ++i)
         {
-            auto catNo = util::fromMemoryLE<AstroCatalog::IndexNumber>(ptr + offsetof(StarsDatRecord, catNo));
-            Eigen::Vector3f position(util::fromMemoryLE<float>(ptr + offsetof(StarsDatRecord, x)),
-                                     util::fromMemoryLE<float>(ptr + offsetof(StarsDatRecord, y)),
-                                     util::fromMemoryLE<float>(ptr + offsetof(StarsDatRecord, z)));
-            auto absMag = util::fromMemoryLE<std::int16_t>(ptr + offsetof(StarsDatRecord, absMag));
-            auto spectralType = util::fromMemoryLE<std::uint16_t>(ptr + offsetof(StarsDatRecord, spectralType));
-
+            const auto& record = (*buffer)[i];
             boost::intrusive_ptr<StarDetails> details = nullptr;
-            if (StellarClass sc; sc.unpackV1(spectralType))
+            if (StellarClass sc; sc.unpackV1(record.spectralType))
                 details = StarDetails::GetStarDetails(sc);
 
-            if (details == nullptr)
+            if (!details)
             {
-                GetLogger()->error(_("Bad spectral type in star database, star #{}\n"), catNo);
+                GetLogger()->error(_("Bad spectral type in star database, star #{}\n"), record.catNo.get());
                 continue;
             }
 
-            Star& star = unsortedStars.emplace_back(catNo, details);
-            star.setPosition(position);
-            star.setAbsoluteMagnitude(static_cast<float>(absMag) / 256.0f);
-
-            ptr += sizeof(StarsDatRecord);
+            Star& star = unsortedStars.emplace_back(record.catNo, details);
+            star.setPosition(Eigen::Vector3f(record.x, record.y, record.z));
+            star.setAbsoluteMagnitude(static_cast<float>(record.absMag.get()) / 256.0f);
         }
 
         nStarsRemaining -= recordsToRead;
