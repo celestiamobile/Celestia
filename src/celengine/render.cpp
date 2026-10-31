@@ -4388,6 +4388,23 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     starRenderer.psf.proj              = &getCurrentProjectionMatrix();
     starRenderer.psf.modelView         = &getCurrentModelViewMatrix();
     starRenderer.cosFOV            = std::cos(math::degToRad(calcMaxFOV(fov, getAspectRatio())) / 2.0f);
+    if (starStyle != StarStyle::PointSpreadFunction
+        && !util::is_set(labelMode, RenderLabels::StarLabels)
+        && static_cast<float>(cosViewConeAngle) > 1.0e-5f)
+    {
+        auto planes = engine::detail::makePointStarCullPlanes(
+            *projectionMode,
+            observer.getZoom(),
+            getCameraOrientationf().conjugate().toRotationMatrix(),
+            static_cast<float>(gl::maxPointSize),
+            viewportWidth,
+            viewportHeight);
+        if (planes.has_value())
+        {
+            starRenderer.pointCullEnabled = true;
+            starRenderer.pointCullPlaneNormals = *planes;
+        }
+    }
 
     starRenderer.pixelSize         = pixelSize;
     starRenderer.faintestMag       = faintestMag;
@@ -4474,12 +4491,20 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
 
     setPipelineState(ps);
 
+    engine::StarVisibilityFilter starFilter;
+    if (starRenderer.pointCullEnabled)
+    {
+        starFilter = [&starRenderer](const Star &star, float distance)
+        { return starRenderer.isVisible(star, distance); };
+    }
+
     starDB.findVisibleStars(starRenderer,
                             obsPos.cast<float>(),
                             getCameraOrientationf(),
                             math::degToRad(fov),
                             getAspectRatio(),
-                            iterFaintestMag);
+                            iterFaintestMag,
+                            starFilter);
 
     if (starStyle == StarStyle::PointSpreadFunction)
     {

@@ -15,9 +15,11 @@
 
 #include <celastro/astro.h>
 #include <celengine/glsupport.h>
+#include <celengine/projectionmode.h>
 #include <celengine/starcolors.h>
 #include <celengine/star.h>
 #include <celengine/univcoord.h>
+#include <celmath/frustum.h>
 #include <celrender/psfglowlargerenderer.h>
 #include "observer.h"
 #include "pointstarvertexbuffer.h"
@@ -45,6 +47,57 @@ float smoothStep(float t)
 }
 
 } // namespace
+
+std::optional<std::array<Eigen::Vector3f, 4>>
+celestia::engine::detail::makePointStarCullPlanes(
+    const ProjectionMode &projection,
+    float zoom,
+    const Eigen::Matrix3f &cameraToWorld,
+    float maxPointSize,
+    int viewportWidth,
+    int viewportHeight)
+{
+    // Sprite-footprint expansion requires a symmetric perspective projection.
+    if (!projection.supportsPerspectiveFrustumCulling())
+        return std::nullopt;
+
+    auto frustum = projection.getInfiniteFrustum(1.0f, zoom);
+    float maxPointDiameter = maxPointSize + 2.0f;
+    float verticalScale = 1.0f + maxPointDiameter / std::max(1, viewportHeight);
+    float horizontalScale = 1.0f + maxPointDiameter / std::max(1, viewportWidth);
+    auto expandedNormal = [&](celestia::math::FrustumPlane plane, float scale) -> Vector3f
+    {
+        Vector3f normal = frustum.plane(plane).normal();
+        // Point sprites can overlap the viewport with offscreen centers.
+        normal.z() *= scale;
+        return cameraToWorld * normal.normalized();
+    };
+    return std::array{
+        expandedNormal(celestia::math::FrustumPlane::Bottom, verticalScale),
+        expandedNormal(celestia::math::FrustumPlane::Top, verticalScale),
+        expandedNormal(celestia::math::FrustumPlane::Left, horizontalScale),
+        expandedNormal(celestia::math::FrustumPlane::Right, horizontalScale),
+    };
+}
+
+bool
+celestia::engine::detail::pointStarOutsideViewFrustum(
+    const Eigen::Vector3f &relativePosition,
+    float                  viewDepth,
+    std::span<const Eigen::Vector3f, 4> planeNormals)
+{
+    if (viewDepth <= 0.0f)
+        return true;
+
+    float margin = relativePosition.cwiseAbs().sum() * 1.0e-5f;
+    for (const auto &normal : planeNormals)
+    {
+        if (relativePosition.dot(normal) < -margin)
+            return true;
+    }
+
+    return false;
+}
 
 float
 celestia::engine::detail::psfAtmosphereBrightness(
@@ -90,6 +143,26 @@ static Vector3d astrocentricPosition(const UniversalCoord& pos,
 PointStarRenderer::PointStarRenderer() :
     ObjectRenderer(StarDistanceLimit)
 {
+}
+
+bool PointStarRenderer::isVisible(const Star& star, float distance) const
+{
+    if (distance > distanceLimit)
+        return false;
+
+    // Include the maximum point-sprite footprint at viewport edges. Keep nearby
+    // meshes, orbital positions, PSF billboards, and labels on their existing paths.
+    if (pointCullEnabled && distance > SolarSystemMaxDistance
+        && !(star.getOrbitalRadius() > 0.0f))
+    {
+        Vector3f relPos = (star.getPosition().cast<double>() - obsPos).cast<float>();
+        return !celestia::engine::detail::pointStarOutsideViewFrustum(
+            relPos,
+            relPos.dot(viewNormal),
+            pointCullPlaneNormals);
+    }
+
+    return true;
 }
 
 void PointStarRenderer::process(const Star& star, float distance, float appMag)

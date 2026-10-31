@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <span>
 
 #include <Eigen/Geometry>
@@ -26,14 +27,15 @@ namespace celestia::engine
 
 using StarOctree = StaticOctree<Star, float>;
 using StarHandler = OctreeProcessor<Star, float>;
+using StarVisibilityFilter = std::function<bool(const Star&, float)>;
 
 // This class searches the octree for objects that are likely to be visible
 // to a viewer with the specified obsPosition and limitingFactor.  The
 // octreeProcessor is invoked for each potentially visible object --no object with
 // a property greater than limitingFactor will be processed, but
 // objects that are outside the view frustum may be.  Frustum tests are performed
-// only at the node level to optimize the octree traversal, so an exact test
-// (if one is required) is the responsibility of the callback method.
+// only at the node level. Callers may supply an exact per-object filter before
+// the magnitude calculation or perform additional tests in their callback.
 class StarOctreeVisibleObjectsProcessor
 {
 public:
@@ -42,7 +44,8 @@ public:
     StarOctreeVisibleObjectsProcessor(StarHandler*,
                                       const StarOctree::PointType&,
                                       std::span<const PlaneType, 5>,
-                                      float);
+                                      float,
+                                      const StarVisibilityFilter& = {});
 
     bool checkNode(const StarOctree::PointType&, float, float);
     void process(const Star&) const;
@@ -53,6 +56,7 @@ private:
     std::span<const PlaneType, 5> m_frustumPlanes;
     std::array<float, 5> m_projectedRadiusFactors;
     float m_limitingFactor;
+    StarVisibilityFilter m_starFilter;
 
     float m_dimmest{ 1000.0f };
 };

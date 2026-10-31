@@ -40,11 +40,13 @@ constexpr float MAX_STAR_ORBIT_RADIUS = 1.0f;
 StarOctreeVisibleObjectsProcessor::StarOctreeVisibleObjectsProcessor(StarHandler* starHandler, // cppcheck-suppress uninitMemberVar
                                                                      const StarOctree::PointType& obsPosition,
                                                                      std::span<const PlaneType, 5> frustumPlanes,
-                                                                     float limitingFactor) :
+                                                                     float limitingFactor,
+                                                                     const StarVisibilityFilter& starFilter) :
     m_starHandler(starHandler),
     m_obsPosition(obsPosition),
     m_frustumPlanes(frustumPlanes),
-    m_limitingFactor(limitingFactor)
+    m_limitingFactor(limitingFactor),
+    m_starFilter(starFilter)
 {
     for (int i = 0; i < 5; ++i)
         m_projectedRadiusFactors[i] = m_frustumPlanes[i].normal().cwiseAbs().sum();
@@ -86,6 +88,9 @@ StarOctreeVisibleObjectsProcessor::process(const Star& obj) const
         return;
 
     float distance = (m_obsPosition - obj.getPosition()).norm();
+    if (m_starFilter && !m_starFilter(obj, distance))
+        return;
+
     float appMag   = obj.getApparentMagnitude(distance);
 
     if (appMag <= m_limitingFactor || (distance < MAX_STAR_ORBIT_RADIUS && obj.getOrbit()))

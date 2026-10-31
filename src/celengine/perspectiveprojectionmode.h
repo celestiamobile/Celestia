@@ -38,6 +38,7 @@ public:
     float getFieldCorrection(float zoom) const override;
     math::Frustum getFrustum(float nearZ, float farZ, float zoom) const override;
     math::InfiniteFrustum getInfiniteFrustum(float nearZ, float zoom) const override;
+    bool supportsPerspectiveFrustumCulling() const override { return true; }
     double getViewConeAngleMax(float zoom) const override;
 
     float getNormalizedDeviceZ(float nearZ, float farZ, float z) const override;

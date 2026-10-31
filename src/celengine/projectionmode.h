@@ -46,6 +46,9 @@ public:
     virtual celestia::math::Frustum getFrustum(float nearZ, float farZ, float zoom) const = 0;
     virtual celestia::math::InfiniteFrustum getInfiniteFrustum(float nearZ, float zoom) const = 0;
 
+    // Whether a symmetric perspective frustum can be used for per-point culling.
+    virtual bool supportsPerspectiveFrustumCulling() const { return false; }
+
     // Calculate the cosine of half the maximum field of view. We'll use this for
     // fast testing of object visibility.
     virtual double getViewConeAngleMax(float zoom) const = 0;

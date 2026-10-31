@@ -10,6 +10,9 @@
 
 #pragma once
 
+#include <array>
+#include <optional>
+#include <span>
 #include <vector>
 
 #include <Eigen/Core>
@@ -22,6 +25,7 @@
 
 class ColorTemperatureTable;
 class PointStarVertexBuffer;
+namespace celestia::engine { class ProjectionMode; }
 namespace celestia::render { class PsfGlowLargeRenderer; }
 namespace celestia::render { class PsfStarVertexBuffer; }
 class Star;
@@ -37,6 +41,19 @@ constexpr inline float GlareOpacity          = 0.65f;
 
 namespace celestia::engine::detail
 {
+
+std::optional<std::array<Eigen::Vector3f, 4>> makePointStarCullPlanes(
+    const ProjectionMode &projection,
+    float zoom,
+    const Eigen::Matrix3f &cameraToWorld,
+    float maxPointSize,
+    int viewportWidth,
+    int viewportHeight);
+
+bool pointStarOutsideViewFrustum(
+    const Eigen::Vector3f &relativePosition,
+    float                  viewDepth,
+    std::span<const Eigen::Vector3f, 4> planeNormals);
 
 float psfAtmosphereBrightness(float faintestMagnitude,
                               float faintestMagnitudeWithoutAtmosphere);
@@ -87,6 +104,7 @@ public:
     };
 
     PointStarRenderer();
+    bool isVisible(const Star& star, float distance) const;
     void process(const Star &star, float distance, float appMag) override;
 
     Eigen::Vector3d obsPos;
@@ -98,6 +116,8 @@ public:
     const ColorTemperatureTable* colorTemp      { nullptr };
     float SolarSystemMaxDistance                { 1.0f };
     float cosFOV                                { 1.0f };
+    bool pointCullEnabled                        { false };
+    std::array<Eigen::Vector3f, 4> pointCullPlaneNormals;
 
     StarStyle starStyle                         { StarStyle::FuzzyPointStars };
     PsfState  psf;
