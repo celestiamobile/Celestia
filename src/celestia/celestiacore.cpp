@@ -216,6 +216,13 @@ CelestiaCore::CelestiaCore() :
     console->setWindowHeight(Console::PageRows);
 }
 
+void
+CelestiaCore::shutdownResources() noexcept
+{
+    if (resourceSystem != nullptr)
+        resourceSystem->shutdown();
+}
+
 CelestiaCore::~CelestiaCore()
 {
     if (movieCapture != nullptr)
@@ -224,8 +231,7 @@ CelestiaCore::~CelestiaCore()
     // Join the resource worker threads before tearing down the renderer (and
     // the geometry manager), so no in-flight decode task can post to a cache
     // that has already been destroyed.
-    if (resourceSystem != nullptr)
-        resourceSystem->shutdown();
+    shutdownResources();
 
     delete timer;
     delete renderer;

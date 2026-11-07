@@ -187,6 +187,8 @@ public:
 
     CelestiaCore();
     ~CelestiaCore();
+    // Call only after simulation/render work has stopped; joins resource workers.
+    void shutdownResources() noexcept;
 
     static void initLocale();
     bool initSimulation(const std::filesystem::path& configFileName = std::filesystem::path(),
