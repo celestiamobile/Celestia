@@ -21,23 +21,32 @@ namespace
 // scope below lets new sessions latch onto the existing instance, and the
 // last session out lets the shared_ptr's refcount destroy it.
 //
-// Why share at all? On iOS each ma_context_init / ma_context_uninit
-// reconfigures the process-wide AVAudioSession singleton (we set
-// ma_ios_session_category_playback on each one), so per-channel teardowns
-// would suspend playback on the other channels. With one context shared
-// for as long as anything is playing, AVAudioSession is configured once
-// and only released after the very last session goes away.
+// Sharing also prevents per-channel teardown from releasing the iOS
+// audio session while another channel still needs it. In managed iOS
+// builds, this backend holds one lease alongside any PiP owners.
 struct AudioBackend
 {
     ma_context context;
     ma_engine  engine;
     bool       valid = false;
+#ifdef CELESTIA_MANAGE_IOS_AUDIO_SESSION
+    bool       audioSessionAcquired = false;
+#endif
 
     AudioBackend()
     {
         auto config = ma_context_config_init();
+#ifdef CELESTIA_MANAGE_IOS_AUDIO_SESSION
+        if (!acquireScriptAudioSession())
+            return;
+        audioSessionAcquired = true;
+        config.coreaudio.sessionCategory = ma_ios_session_category_none;
+        config.coreaudio.noAudioSessionActivate = MA_TRUE;
+        config.coreaudio.noAudioSessionDeactivate = MA_TRUE;
+#else
         // on iOS, explicitly set the correct category for correct routing
         config.coreaudio.sessionCategory = ma_ios_session_category_playback;
+#endif
         if (ma_context_init(nullptr, 0, &config, &context) != MA_SUCCESS)
         {
             GetLogger()->error("Failed to init miniaudio context");
@@ -61,6 +70,10 @@ struct AudioBackend
             ma_engine_uninit(&engine);
             ma_context_uninit(&context);
         }
+#ifdef CELESTIA_MANAGE_IOS_AUDIO_SESSION
+        if (audioSessionAcquired)
+            releaseScriptAudioSession();
+#endif
     }
 
     AudioBackend(const AudioBackend&)            = delete;
