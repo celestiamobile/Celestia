@@ -2533,13 +2533,6 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
         std::shared_ptr<engine::ResourceSystem> system{ std::make_shared<engine::ResourceSystem>() };
         std::shared_ptr<engine::GeometryManager> geometry;
         std::unique_ptr<Universe> universe;
-
-        ~PendingResources()
-        {
-            // Join workers before destroying this attempt's catalogs and caches.
-            if (system != nullptr)
-                system->shutdown();
-        }
     };
 
     auto geometryPaths = std::make_shared<engine::GeometryPaths>();
