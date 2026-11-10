@@ -237,6 +237,20 @@ applyRenderDetails(CelestiaConfig::RenderDetails& renderDetails, const Associati
     applyNumber(renderDetails.output.toneMappingExposure, hash, "ToneMappingExposure"sv);
     renderDetails.output.toneMappingExposure = std::clamp(renderDetails.output.toneMappingExposure, 1.0e-3f, 1.0e6f);
     applyToneMappingMode(renderDetails.output.toneMapping, hash, "ToneMappingMode"sv);
+    applyNumber(renderDetails.output.fsr1Scale, hash, "FSR1Scale"sv);
+    if (!std::isfinite(renderDetails.output.fsr1Scale) ||
+        renderDetails.output.fsr1Scale < 1.0f || renderDetails.output.fsr1Scale > 4.0f)
+    {
+        GetLogger()->error("FSR1Scale must be between 1 and 4; disabling FSR1.\n");
+        renderDetails.output.fsr1Scale = 1.0f;
+    }
+    applyNumber(renderDetails.output.fsr1Sharpness, hash, "FSR1Sharpness"sv);
+    if (!std::isfinite(renderDetails.output.fsr1Sharpness) ||
+        renderDetails.output.fsr1Sharpness < 0.0f || renderDetails.output.fsr1Sharpness > 2.0f)
+    {
+        GetLogger()->error("FSR1Sharpness must be between 0 and 2; using 0.2.\n");
+        renderDetails.output.fsr1Sharpness = 0.2f;
+    }
     applyNumber(renderDetails.stars.pointRadius, hash, "StarPointRadius"sv);
     renderDetails.stars.pointRadius = std::clamp(renderDetails.stars.pointRadius, 1.0f, 10.0f);
     applyNumber(renderDetails.stars.optimization, hash, "StarOptimization"sv);

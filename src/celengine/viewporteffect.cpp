@@ -10,7 +10,9 @@
 
 #include "viewporteffect.h"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <span>
 
 #include "framebuffer.h"
@@ -69,6 +71,13 @@ bool ViewportEffect::prerender(Renderer* renderer, FramebufferObject* fbo, Frame
     if (!dst->bind())
         return false;
 
+    // Wrapped caller framebuffers have no size metadata; retain their viewport.
+    if (dst->width() != 0 && dst->height() != 0)
+    {
+        renderer->removeScissor();
+        renderer->setViewport(0, 0, dst->width(), dst->height());
+    }
+
     Renderer::PipelineState ps;
     ps.depthMask = true;
     renderer->setPipelineState(ps);
@@ -104,16 +113,55 @@ bool PassthroughViewportEffect::render(Renderer* renderer, FramebufferObject* fb
     if (prog == nullptr)
         return false;
 
-    initialize();
-
     prog->use();
     prog->intParam("convertToSRGB") = m_convertToSRGB ? 1 : 0;
     if (toneMap)
         prog->floatParam("exposure") = renderer->getToneMappingExposure();
     prepareEffect(renderer, prog, fbo, preserveDepth);
-    vo.draw();
+    drawQuad();
     glBindTexture(GL_TEXTURE_2D, 0);
 
+    return true;
+}
+
+void PassthroughViewportEffect::drawQuad()
+{
+    initialize();
+    vo.draw();
+}
+
+FsrViewportEffect::FsrViewportEffect(Pass pass, float parameter) :
+    PassthroughViewportEffect(false, false),
+    m_pass(pass),
+    m_parameter(parameter)
+{
+}
+
+Eigen::Vector2i FsrViewportEffect::inputSize(const Eigen::Vector2i& outputSize) const
+{
+    if (m_pass == Pass::Sharpen)
+        return outputSize;
+
+    return {
+        std::max(1, static_cast<int>(std::ceil(outputSize.x() / m_parameter))),
+        std::max(1, static_cast<int>(std::ceil(outputSize.y() / m_parameter))),
+    };
+}
+
+bool FsrViewportEffect::render(Renderer* renderer, FramebufferObject* fbo,
+                               int width, int height, bool preserveDepth)
+{
+    auto* prog = renderer->getShaderManager().getShader(
+        m_pass == Pass::Upscale ? StaticShader::FsrEasu : StaticShader::FsrRcas);
+    if (prog == nullptr)
+        return false;
+
+    prog->use();
+    prog->vec2Param("outputSize") = Eigen::Vector2f(width, height);
+    prog->floatParam("sharpness") = m_parameter;
+    prepareEffect(renderer, prog, fbo, preserveDepth);
+    drawQuad();
+    glBindTexture(GL_TEXTURE_2D, 0);
     return true;
 }
 

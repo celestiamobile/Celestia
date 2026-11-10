@@ -16,6 +16,7 @@
 #include "celestiacore.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
@@ -2038,6 +2039,9 @@ void CelestiaCore::draw(View* view)
 
     isViewportEffectUsed = false;
 
+    if (viewportEffectsDirty)
+        updateViewportEffects();
+
     int nEffects = static_cast<int>(viewportEffects.size());
     if (presentationEffect == nullptr)
     {
@@ -2061,6 +2065,9 @@ void CelestiaCore::draw(View* view)
     auto viewWidth = static_cast<int>(view->width * static_cast<float>(metrics.width));
     auto viewHeight = static_cast<int>(view->height * static_cast<float>(metrics.height));
     renderer->setRenderRegion(0, 0, viewWidth, viewHeight, false);
+    // Keep projection, LOD and annotation layout in logical (native) pixels.
+    // Only the raster viewport follows the scene framebuffer's resolution.
+    renderer->setViewport(0, 0, view->getFBO(0)->width(), view->getFBO(0)->height());
 
     if (view->isRootView())
         sim->renderScene(*renderer);
@@ -2073,7 +2080,7 @@ void CelestiaCore::draw(View* view)
         FramebufferObject* dst = view->getFBO(i + 1);
         FramebufferObject* src = view->getFBO(i);
         if (!viewportEffects[i]->prerender(renderer, src, dst, true) ||
-            !viewportEffects[i]->render(renderer, src, viewWidth, viewHeight, true))
+            !viewportEffects[i]->render(renderer, src, dst->width(), dst->height(), true))
         {
             GetLogger()->error("Unable to render viewport effect.\n");
             ok = false;
@@ -2083,6 +2090,7 @@ void CelestiaCore::draw(View* view)
     auto* composition = view->getFBO(nEffects);
     if (ok)
     {
+        renderer->setViewport(0, 0, viewWidth, viewHeight);
         renderer->renderAnnotations(viewportEffects, gl::sRGBRendering);
         ok = composition->resolve();
         screenFbo.bind();
@@ -2482,6 +2490,10 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
         return false;
     }
 
+    fsr1Scale = config->renderDetails.output.fsr1Scale;
+    fsr1Sharpness = config->renderDetails.output.fsr1Sharpness;
+    viewportEffectsDirty = true;
+
     // Set the console log size; ignore any request to use less than 100 lines
     if (config->consoleLogRows > 100)
         console->setRowCount(config->consoleLogRows);
@@ -2639,7 +2651,10 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
             GetLogger()->warn("Unknown viewport effect {}\n", config->viewportEffect);
         }
         if (effect != nullptr)
+        {
+            configuredViewportEffect = effect.get();
             viewportEffects.push_back(std::move(effect));
+        }
     }
 
     if (!config->measurementSystem.empty())
@@ -2757,10 +2772,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
     gl::sRGBRendering = sRGBRendering.value_or(config->renderDetails.output.sRGB);
     celestia::engine::SetTextureAnisotropy(config->renderDetails.textures.anisotropy);
 
-    if (gl::sRGBRendering)
-    {
-        viewportEffects.push_back(std::make_unique<PassthroughViewportEffect>(true));
-    }
+    updateViewportEffects();
     presentationEffect = std::make_unique<PassthroughViewportEffect>(false, false);
 
     renderer->setRenderFlags(RenderFlags::ShowStars |
@@ -3129,6 +3141,82 @@ void CelestiaCore::flash(const string& s, double duration)
 const CelestiaConfig* CelestiaCore::getConfig() const
 {
     return config.get();
+}
+
+float CelestiaCore::getFsr1Scale() const
+{
+    return fsr1Scale;
+}
+
+float CelestiaCore::getFsr1Sharpness() const
+{
+    return fsr1Sharpness;
+}
+
+bool CelestiaCore::setFsr1Scale(float scale)
+{
+    if (!std::isfinite(scale) || scale < 1.0f || scale > 4.0f)
+    {
+        GetLogger()->error("FSR1Scale must be between 1 and 4.\n");
+        return false;
+    }
+    if (fsr1Scale != scale)
+    {
+        fsr1Scale = scale;
+        viewportEffectsDirty = true;
+    }
+    return true;
+}
+
+bool CelestiaCore::setFsr1Sharpness(float sharpness)
+{
+    if (!std::isfinite(sharpness) || sharpness < 0.0f || sharpness > 2.0f)
+    {
+        GetLogger()->error("FSR1Sharpness must be between 0 and 2.\n");
+        return false;
+    }
+    if (fsr1Sharpness != sharpness)
+    {
+        fsr1Sharpness = sharpness;
+        viewportEffectsDirty = true;
+    }
+    return true;
+}
+
+void CelestiaCore::updateViewportEffects()
+{
+    // Keep the configured distortion and its mesh while rebuilding only
+    // post-processing passes. This runs with the rendering context current.
+    std::unique_ptr<ViewportEffect> distortion;
+    for (auto& effect : viewportEffects)
+    {
+        if (effect.get() == configuredViewportEffect)
+        {
+            distortion = std::move(effect);
+            break;
+        }
+    }
+    viewportEffects.clear();
+
+    if (fsr1Scale > 1.0f)
+    {
+        if (gl::sRGBRendering)
+            viewportEffects.push_back(std::make_unique<PassthroughViewportEffect>(true));
+        viewportEffects.push_back(std::make_unique<FsrViewportEffect>(
+            FsrViewportEffect::Pass::Upscale, fsr1Scale));
+        viewportEffects.push_back(std::make_unique<FsrViewportEffect>(
+            FsrViewportEffect::Pass::Sharpen, fsr1Sharpness));
+        if (distortion)
+            viewportEffects.push_back(std::move(distortion));
+    }
+    else
+    {
+        if (distortion)
+            viewportEffects.push_back(std::move(distortion));
+        if (gl::sRGBRendering)
+            viewportEffects.push_back(std::make_unique<PassthroughViewportEffect>(true));
+    }
+    viewportEffectsDirty = false;
 }
 
 

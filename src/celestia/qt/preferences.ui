@@ -1131,6 +1131,81 @@
              </layout>
             </item>
             <item>
+             <layout class="QHBoxLayout" name="horizontalLayout_fsr1Scale">
+              <item>
+               <widget class="QLabel" name="fsr1ScaleLabel">
+                <property name="text">
+                 <string>FSR1 scale:</string>
+                </property>
+                <property name="buddy">
+                 <cstring>fsr1ScaleSpinBox</cstring>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QDoubleSpinBox" name="fsr1ScaleSpinBox">
+                <property name="toolTip">
+                 <string>Scene upscaling ratio. 1.0 disables FSR1; 2.0 renders at half width and height. Values above 2.0 are experimental. Changes apply immediately; text stays at native resolution.</string>
+                </property>
+                <property name="specialValueText">
+                 <string>Off (native resolution)</string>
+                </property>
+                <property name="suffix">
+                 <string>x</string>
+                </property>
+                <property name="decimals">
+                 <number>2</number>
+                </property>
+                <property name="minimum">
+                 <double>1.000000000000000</double>
+                </property>
+                <property name="maximum">
+                 <double>4.000000000000000</double>
+                </property>
+                <property name="singleStep">
+                 <double>0.100000000000000</double>
+                </property>
+                <property name="keyboardTracking">
+                 <bool>false</bool>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <layout class="QHBoxLayout" name="horizontalLayout_fsr1Sharpness">
+              <item>
+               <widget class="QLabel" name="fsr1SharpnessLabel">
+                <property name="text">
+                 <string>FSR1 sharpness:</string>
+                </property>
+                <property name="buddy">
+                 <cstring>fsr1SharpnessSpinBox</cstring>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QDoubleSpinBox" name="fsr1SharpnessSpinBox">
+                <property name="toolTip">
+                 <string>RCAS sharpening in stops: 0 is strongest, 1 halves the strength, and 2 quarters it. Changes apply immediately.</string>
+                </property>
+                <property name="decimals">
+                 <number>2</number>
+                </property>
+                <property name="maximum">
+                 <double>2.000000000000000</double>
+                </property>
+                <property name="singleStep">
+                 <double>0.100000000000000</double>
+                </property>
+                <property name="keyboardTracking">
+                 <bool>false</bool>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
              <spacer name="verticalSpacer_13">
               <property name="orientation">
                <enum>Qt::Vertical</enum>

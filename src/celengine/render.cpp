@@ -527,6 +527,16 @@ float Renderer::getScaleFactor() const
     return screenDpi / 96.0f;
 }
 
+float Renderer::getRasterScale() const
+{
+    return static_cast<float>(m_viewport[3]) / static_cast<float>(viewportHeight);
+}
+
+Eigen::Vector2i Renderer::getLogicalViewportSize() const
+{
+    return {viewportWidth, viewportHeight};
+}
+
 float Renderer::getPointWidth() const
 {
     return 2.0f / static_cast<float>(viewportWidth) * getScaleFactor();

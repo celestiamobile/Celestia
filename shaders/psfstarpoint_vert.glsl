@@ -25,6 +25,7 @@ layout(location = 9) in float in_Intensity;   // peakRadiance = exposure * 3 * i
 
 uniform float pointRadius; // pt, user setting (1..10)
 uniform float pointScale;  // DPI scale
+uniform float rasterScale;
 
 out vec3  v_color;
 out float v_peakRadiance;
@@ -42,7 +43,7 @@ void main(void)
     set_vp(vec4(in_Center, 1.0));
     gl_Position.xy += in_Position * size * viewportRcp * gl_Position.w;
 #else
-    gl_PointSize = size;
+    gl_PointSize = size * rasterScale;
     set_vp(in_Position);
 #endif
 }

@@ -112,6 +112,8 @@ private slots:
     void on_sRGBRenderingCombo_currentIndexChanged(int index);
     void on_toneMappingCombo_currentIndexChanged(int index) const;
     void on_toneMappingExposureSpinBox_valueChanged(double value) const;
+    void on_fsr1ScaleSpinBox_valueChanged(double value) const;
+    void on_fsr1SharpnessSpinBox_valueChanged(double value) const;
 
     void on_lowResolutionButton_clicked() const;
     void on_mediumResolutionButton_clicked() const;

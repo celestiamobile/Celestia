@@ -24,6 +24,7 @@ uniform float psfMinVisRad; // smallest linear radiance value that the
                             // framebuffer can still encode as non-zero
                             // (1/255 for linear, 1/(255*12.92) for sRGB)
 uniform float pointScale;  // DPI scale
+uniform float rasterScale;
 
 out vec3  v_color;
 out float v_alpha;
@@ -79,6 +80,6 @@ void main(void)
     v_valLimb   = valLimb;
     v_alphaFade = pow(v_alpha, fadeExp);
 
-    gl_PointSize = 2.0 * rEff * pointScale;
+    gl_PointSize = 2.0 * rEff * pointScale * rasterScale;
     set_vp(in_Position);
 }

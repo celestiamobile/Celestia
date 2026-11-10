@@ -57,6 +57,8 @@ constexpr std::array StaticShaderBaseNames
     "comet"sv,
     "crosshair"sv,
     "depth"sv,
+    "fsr_easu"sv,
+    "fsr_rcas"sv,
     "galaxy"sv,
     "globular"sv,
     "largestar"sv,
@@ -1136,6 +1138,7 @@ PointSizeDeclaration()
     std::string source;
     source += DeclareOutput("pointFade", Shader_Float);
     source += DeclareUniform("pointScale", Shader_Float);
+    source += DeclareUniform("rasterScale", Shader_Float);
     source += DeclareAttribute("in_PointSize", Shader_Float, CelestiaGLProgram::PointSizeAttributeIndex);
     return source;
 }
@@ -1146,7 +1149,7 @@ PointSizeCalculation()
     std::string source;
     source += "float ptSize = pointScale * in_PointSize / length(vec3(ModelViewMatrix * in_Position));\n";
     source += "pointFade = min(1.0, ptSize * ptSize);\n";
-    source += "gl_PointSize = ptSize;\n";
+    source += "gl_PointSize = ptSize * rasterScale;\n";
 
     return source;
 }
@@ -1156,7 +1159,7 @@ StaticPointSize()
 {
     std::string source;
     source += "pointFade = 1.0;\n";
-    source += "gl_PointSize = in_PointSize * pointScale;\n";
+    source += "gl_PointSize = in_PointSize * pointScale * rasterScale;\n";
     return source;
 }
 
@@ -2860,13 +2863,25 @@ std::shared_ptr<CelestiaGLProgram>
 ShaderManager::loadShader(StaticShaderProperties props)
 {
     auto name = StaticShaderBaseNames[static_cast<std::size_t>(props.shader)];
-    auto vs = ReadShaderFile(ShaderDirectory / util::U8Path(fmt::format("{}_vert.glsl", name)));
+    auto vertexName = props.shader == StaticShader::FsrEasu || props.shader == StaticShader::FsrRcas
+        ? "srgb"sv : name;
+    auto vs = ReadShaderFile(ShaderDirectory / util::U8Path(fmt::format("{}_vert.glsl", vertexName)));
     if (vs.empty())
         return getErrorProgram();
 
     auto fs = ReadShaderFile(ShaderDirectory / util::U8Path(fmt::format("{}_frag.glsl", name)));
     if (fs.empty())
         return getErrorProgram();
+
+    if (props.shader == StaticShader::FsrEasu || props.shader == StaticShader::FsrRcas)
+    {
+        auto compatibility = ReadShaderFile(ShaderDirectory / "fsr_compat.glsl");
+        auto fsr = ReadShaderFile(ShaderDirectory / "ffx_fsr1.h");
+        if (compatibility.empty() || fsr.empty())
+            return getErrorProgram();
+        fs = (props.shader == StaticShader::FsrEasu ? "#define FSR_EASU_F 1\n" : "#define FSR_RCAS_F 1\n")
+            + compatibility + "\n" + fsr + "\n" + fs;
+    }
 
     std::shared_ptr<CelestiaGLProgram> result;
     result = buildProgram(vs, fs, m_fisheyeEnabled, props.options);

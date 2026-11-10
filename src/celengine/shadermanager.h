@@ -32,6 +32,8 @@ enum class StaticShader
     Comet = 0,
     Crosshair,
     Depth,
+    FsrEasu,
+    FsrRcas,
     Galaxy,
     Globular,
     LargeStar,

@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <random>
 #include <stdexcept>
@@ -22,11 +23,14 @@
 #include <doctest.h>
 
 #include <celengine/texture.h>
+#include <celengine/texmanager.h>
 #include <celengine/virtualtex.h>
+#include <celengine/viewporteffect.h>
 #include <celengine/warpmesh.h>
 #include <celimage/image.h>
 #include <celimage/imageformats.h>
 #include <celestia/celestiacore.h>
+#include <celestia/configfile.h>
 #include <celutil/logger.h>
 
 namespace
@@ -283,6 +287,98 @@ TEST_CASE("Warp mesh inverse mapping follows the rendered triangles")
         CHECK(positions[0].x() == doctest::Approx(-0.25f));
         CHECK(positions[0].y() == doctest::Approx(0.25f));
     }
+}
+
+TEST_CASE("FSR source sizes propagate backwards without rounding to zero")
+{
+    FsrViewportEffect upscale(FsrViewportEffect::Pass::Upscale, 1.5f);
+    FsrViewportEffect sharpen(FsrViewportEffect::Pass::Sharpen, 0.2f);
+    CHECK(upscale.inputSize({1920, 1080}) == Eigen::Vector2i(1280, 720));
+    CHECK(upscale.inputSize(sharpen.inputSize({641, 359})) == Eigen::Vector2i(428, 240));
+    CHECK(upscale.inputSize({1, 1}) == Eigen::Vector2i(1, 1));
+    FsrViewportEffect performance(FsrViewportEffect::Pass::Upscale, 2.0f);
+    CHECK(performance.inputSize({3, 5}) == Eigen::Vector2i(2, 3));
+    FsrViewportEffect experimental(FsrViewportEffect::Pass::Upscale, 4.0f);
+    CHECK(experimental.inputSize({1920, 1080}) == Eigen::Vector2i(480, 270));
+    CHECK(experimental.inputSize({3, 5}) == Eigen::Vector2i(1, 2));
+}
+
+TEST_CASE("FSR configuration is opt-in and rejects invalid parameters")
+{
+    celestia::util::CreateLogger();
+    TemporaryDirectory directory;
+    const auto path = directory.getPath("fsr.cfg");
+    CelestiaConfig config;
+    celestia::engine::TexturePaths textures;
+    std::string settings;
+    SUBCASE("Disabled by default")
+    {
+        settings = "";
+    }
+    SUBCASE("Configured scale and sharpening")
+    {
+        settings = "FSR1Scale 1.7 FSR1Sharpness 1.25";
+    }
+    SUBCASE("Invalid scale and sharpening")
+    {
+        settings = "FSR1Scale 0.5 FSR1Sharpness -1";
+    }
+    SUBCASE("Experimental four-times scale")
+    {
+        settings = "FSR1Scale 4.0";
+    }
+    SUBCASE("Excessive scale and sharpening")
+    {
+        settings = "FSR1Scale 4.1 FSR1Sharpness 3";
+    }
+    {
+        std::ofstream out(path);
+        out << "Configuration { " << settings << " }";
+        REQUIRE(out.good());
+    }
+    REQUIRE(ReadCelestiaConfig(path, config, textures));
+    if (settings == "FSR1Scale 1.7 FSR1Sharpness 1.25")
+    {
+        CHECK(config.renderDetails.output.fsr1Scale == doctest::Approx(1.7f));
+        CHECK(config.renderDetails.output.fsr1Sharpness == doctest::Approx(1.25f));
+    }
+    else if (settings == "FSR1Scale 4.0")
+    {
+        CHECK(config.renderDetails.output.fsr1Scale == 4.0f);
+        CHECK(config.renderDetails.output.fsr1Sharpness == doctest::Approx(0.2f));
+    }
+    else
+    {
+        CHECK(config.renderDetails.output.fsr1Scale == 1.0f);
+        CHECK(config.renderDetails.output.fsr1Sharpness == doctest::Approx(0.2f));
+    }
+}
+
+TEST_CASE("Live FSR parameters preserve config defaults and reject invalid updates")
+{
+    TemporaryDirectory directory;
+    const auto path = directory.getPath("fsr-live.cfg");
+    {
+        std::ofstream out(path);
+        out << "Configuration { FSR1Scale 2.0 FSR1Sharpness 0.2 }";
+        REQUIRE(out.good());
+    }
+    CelestiaCore core;
+    REQUIRE(core.initSimulation(path));
+    REQUIRE(core.setFsr1Scale(1.5f));
+    REQUIRE(core.setFsr1Sharpness(1.0f));
+    CHECK_FALSE(core.setFsr1Scale(0.5f));
+    CHECK_FALSE(core.setFsr1Scale(4.1f));
+    CHECK_FALSE(core.setFsr1Scale(std::numeric_limits<float>::infinity()));
+    CHECK_FALSE(core.setFsr1Sharpness(-0.1f));
+    CHECK_FALSE(core.setFsr1Sharpness(2.1f));
+    CHECK_FALSE(core.setFsr1Sharpness(std::numeric_limits<float>::quiet_NaN()));
+    CHECK(core.getFsr1Scale() == 1.5f);
+    CHECK(core.getFsr1Sharpness() == 1.0f);
+    CHECK(core.getConfig()->renderDetails.output.fsr1Scale == 2.0f);
+    CHECK(core.getConfig()->renderDetails.output.fsr1Sharpness == doctest::Approx(0.2f));
+    REQUIRE(core.setFsr1Scale(1.0f));
+    CHECK(core.getFsr1Scale() == 1.0f);
 }
 
 TEST_SUITE_END();

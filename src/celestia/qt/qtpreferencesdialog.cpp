@@ -244,6 +244,14 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
             static_cast<int>(renderer->getToneMappingMode()));
     }
     ui.toneMappingExposureSpinBox->setValue(renderer->getToneMappingExposure());
+    {
+        QSignalBlocker scaleBlocker(ui.fsr1ScaleSpinBox);
+        QSignalBlocker sharpnessBlocker(ui.fsr1SharpnessSpinBox);
+        ui.fsr1ScaleSpinBox->setValue(appCore->getFsr1Scale());
+        ui.fsr1SharpnessSpinBox->setValue(appCore->getFsr1Sharpness());
+    }
+    ui.fsr1SharpnessLabel->setEnabled(appCore->getFsr1Scale() > 1.0f);
+    ui.fsr1SharpnessSpinBox->setEnabled(appCore->getFsr1Scale() > 1.0f);
     // Exposure only applies in Manual tone mapping mode.
     {
         bool manual = ui.toneMappingCombo->currentIndex() == 1;
@@ -835,6 +843,20 @@ void
 PreferencesDialog::on_toneMappingExposureSpinBox_valueChanged(double value) const
 {
     appCore->getRenderer()->setToneMappingExposure(static_cast<float>(value));
+}
+
+void
+PreferencesDialog::on_fsr1ScaleSpinBox_valueChanged(double value) const
+{
+    appCore->setFsr1Scale(static_cast<float>(value));
+    ui.fsr1SharpnessLabel->setEnabled(appCore->getFsr1Scale() > 1.0f);
+    ui.fsr1SharpnessSpinBox->setEnabled(appCore->getFsr1Scale() > 1.0f);
+}
+
+void
+PreferencesDialog::on_fsr1SharpnessSpinBox_valueChanged(double value) const
+{
+    appCore->setFsr1Sharpness(static_cast<float>(value));
 }
 
 // Texture resolution

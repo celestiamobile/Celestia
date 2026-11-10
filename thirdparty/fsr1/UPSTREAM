@@ -1,0 +1,13 @@
+FidelityFX Super Resolution 1.0
+https://github.com/GPUOpen-Effects/FidelityFX-FSR
+Revision: a21ffb8f6c13233ba336352bdff293894c706575
+Source: ffx-fsr/ffx_fsr1.h
+License: MIT (LICENSE.txt)
+
+Local changes: add unsigned suffixes to three zero constants for GLSL 330
+and GLSL ES 300, which do not allow implicit int-to-uint conversions.
+
+shaders/fsr_compat.glsl supplies only the FP32 portability helpers needed
+by this header, adapted from the same revision of ffx-fsr/ffx_a.h.
+The portable half packer avoids requiring newer desktop GL extensions;
+EASU and RCAS themselves run in FP32.

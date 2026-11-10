@@ -136,6 +136,9 @@ CelestiaGlWidget::initializeGL()
     if (settings.contains("sRGBRendering"))
         sRGBOverride = settings.value("sRGBRendering").toBool();
 
+    appCore->setFsr1Scale(settings.value("FSR1Scale", appCore->getFsr1Scale()).toFloat());
+    appCore->setFsr1Sharpness(settings.value("FSR1Sharpness", appCore->getFsr1Sharpness()).toFloat());
+
     if (!appCore->initRenderer(static_cast<engine::TextureResolution>(textureResolution), sRGBOverride, false))
     {
         // cerr << "Failed to initialize renderer.\n";

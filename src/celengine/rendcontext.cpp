@@ -461,10 +461,12 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
     if (usePointSize)
     {
         prog->pointScale = getPointScale();
+        prog->floatParam("rasterScale") = renderer->getRasterScale();
     }
     else if (useStaticPointSize)
     {
         prog->pointScale = renderer->getScreenDpi() / 96.0f;
+        prog->floatParam("rasterScale") = renderer->getRasterScale();
     }
 
     // Ring shadow parameters
@@ -621,10 +623,12 @@ GLSLUnlit_RenderContext::makeCurrent(const cmod::Material& m)
     if (usePointSize)
     {
         prog->pointScale = getPointScale();
+        prog->floatParam("rasterScale") = renderer->getRasterScale();
     }
     else if (useStaticPointSize)
     {
         prog->pointScale = renderer->getScreenDpi() / 96.0f;
+        prog->floatParam("rasterScale") = renderer->getRasterScale();
     }
 
     cmod::BlendMode newBlendMode = cmod::BlendMode::InvalidBlend;

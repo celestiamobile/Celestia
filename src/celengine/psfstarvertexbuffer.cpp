@@ -134,6 +134,7 @@ PsfStarVertexBuffer::makeCurrent()
     setupVertexArrayObject();
 
     m_prog->use();
+    m_prog->floatParam("rasterScale") = m_renderer.getRasterScale();
     m_prog->setMVPMatrices(m_renderer.getCurrentProjectionMatrix(),
                            m_renderer.getCurrentModelViewMatrix());
     m_prog->floatParam("pointRadius") = m_pointRadius;

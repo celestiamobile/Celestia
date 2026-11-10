@@ -265,8 +265,8 @@ bool
 View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, int gWidth, int gHeight)
 {
     int count = static_cast<int>(effects.size()) + 1;
-    auto newWidth = static_cast<GLuint>(width * gWidth);
-    auto newHeight = static_cast<GLuint>(height * gHeight);
+    Eigen::Vector2i size(static_cast<int>(width * gWidth),
+                         static_cast<int>(height * gHeight));
 
     // Query the sample count of the currently bound (output) framebuffer so the
     // first viewport-effect FBO matches it.  glGetIntegerv(GL_SAMPLES) returns 0
@@ -290,7 +290,18 @@ View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, in
     for (int i = count - 1; i >= 0; i--)
     {
         if (i < static_cast<int>(effects.size()))
+        {
             useFloat = useFloat || effects[i]->needsFloatSource();
+            size = effects[i]->inputSize(size);
+        }
+
+        if (size.x() <= 0 || size.y() <= 0)
+        {
+            GetLogger()->error("Invalid view FBO {} dimensions: {} x {}.\n", i, size.x(), size.y());
+            return false;
+        }
+        auto newWidth = static_cast<GLuint>(size.x());
+        auto newHeight = static_cast<GLuint>(size.y());
 
         // Scene geometry and final annotations use the output's sample count.
         int samples = (i == 0 || i == count - 1) ? samplesToRequest : 1;

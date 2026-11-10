@@ -102,10 +102,9 @@ LargeStarRenderer::makeCurrent()
     m_prog->setMVPMatrices(m_renderer.getCurrentProjectionMatrix(),
                            m_renderer.getCurrentModelViewMatrix());
 
-    std::array<int, 4> vp{};
-    m_renderer.getViewport(vp);
-    float invW = (vp[2] > 0) ? (1.0f / static_cast<float>(vp[2])) : 0.0f;
-    float invH = (vp[3] > 0) ? (1.0f / static_cast<float>(vp[3])) : 0.0f;
+    const auto size = m_renderer.getLogicalViewportSize();
+    float invW = (size.x() > 0) ? (1.0f / static_cast<float>(size.x())) : 0.0f;
+    float invH = (size.y() > 0) ? (1.0f / static_cast<float>(size.y())) : 0.0f;
 
     onMakeCurrent(Eigen::Vector2f(invW, invH));
 }

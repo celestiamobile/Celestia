@@ -607,6 +607,8 @@ CelestiaAppWindow::writeSettings()
     settings.setValue("AtmosphereSegmentCount", renderer->getAtmosphereSegmentCount());
     settings.setValue("CloudSegmentCount", renderer->getCloudSegmentCount());
     settings.setValue("ToneMappingExposure", renderer->getToneMappingExposure());
+    settings.setValue("FSR1Scale", m_appCore->getFsr1Scale());
+    settings.setValue("FSR1Sharpness", m_appCore->getFsr1Sharpness());
     settings.setValue("ToneMappingMode",
                       static_cast<int>(renderer->getToneMappingMode()));
     settings.setValue("TextureResolution", static_cast<unsigned int>(renderer->getResolution()));

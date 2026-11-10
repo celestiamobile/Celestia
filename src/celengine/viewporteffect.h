@@ -38,7 +38,10 @@ public:
     virtual bool render(Renderer*, FramebufferObject*, int width, int height,
                         bool preserveDepth = false) = 0;
     virtual bool distortXY(float& x, float& y);
-    // Source/output coordinates are pixels; overlapping warps can produce multiple anchors.
+    // Work backwards from the destination to determine each pass's source size.
+    virtual Eigen::Vector2i inputSize(const Eigen::Vector2i& outputSize) const { return outputSize; }
+    // Anchors use logical view pixels, independent of framebuffer resolution.
+    // Overlapping warps can produce multiple anchors.
     virtual void mapToOutput(const Eigen::Vector2f&, int width, int height,
                              std::vector<Eigen::Vector2f>&) const;
 
@@ -64,6 +67,9 @@ public:
     bool render(Renderer*, FramebufferObject*, int width, int height,
                 bool preserveDepth = false) override;
 
+protected:
+    void drawQuad();
+
 private:
     bool m_needsFloatSource;
     bool m_convertToSRGB;
@@ -73,6 +79,21 @@ private:
     void initialize();
 
     bool initialized{ false };
+};
+
+class FsrViewportEffect : public PassthroughViewportEffect
+{
+public:
+    enum class Pass { Upscale, Sharpen };
+
+    FsrViewportEffect(Pass pass, float parameter);
+    Eigen::Vector2i inputSize(const Eigen::Vector2i& outputSize) const override;
+    bool render(Renderer*, FramebufferObject*, int width, int height,
+                bool preserveDepth = false) override;
+
+private:
+    Pass m_pass;
+    float m_parameter;
 };
 
 class WarpMeshViewportEffect : public ViewportEffect //NOSONAR

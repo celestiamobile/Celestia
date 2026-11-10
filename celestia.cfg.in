@@ -563,4 +563,20 @@ StarTextures
 # ToneMappingExposure 1.0
 # ToneMappingMode     "Manual"
 
+#------------------------------------------------------------------------
+# FSR1Scale enables FidelityFX Super Resolution 1.0 scene upscaling.
+# 1.0 disables it (default). Valid range: 1.0 to 4.0.
+# Suggested ratios: 1.3 (Ultra Quality), 1.5 (Quality), 1.7 (Balanced),
+# 2.0 (Performance). Each scene dimension is ceil(output / FSR1Scale).
+# Ratios above 2.0 are experimental and may substantially reduce quality.
+# FSR1 runs after tone mapping/sRGB encoding, before any warp mesh and
+# native-resolution annotations/HUD. Works with perspective and fisheye.
+# FSR1Sharpness controls RCAS sharpening in stops: 0 is strongest, 1
+# halves the strength, 2 quarters it. Valid range: 0 to 2. Default: 0.2.
+# These are startup defaults. Qt Preferences can override them in real time
+# and save the overrides for subsequent launches.
+#------------------------------------------------------------------------
+# FSR1Scale          1.5
+# FSR1Sharpness      0.2
+
 }

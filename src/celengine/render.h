@@ -207,6 +207,8 @@ class Renderer
     void setTextScaleFactor(float);
 
     float getScaleFactor() const;
+    float getRasterScale() const;
+    Eigen::Vector2i getLogicalViewportSize() const;
     float getPointWidth() const;
     float getPointHeight() const;
 

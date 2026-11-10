@@ -315,6 +315,10 @@ public:
     void flash(const std::string&, double duration = 1.0);
 
     const CelestiaConfig* getConfig() const;
+    float getFsr1Scale() const;
+    float getFsr1Sharpness() const;
+    bool setFsr1Scale(float);
+    bool setFsr1Sharpness(float);
 
     void setLogFile(const std::filesystem::path&);
 
@@ -428,6 +432,7 @@ public:
     celestia::engine::TexturePaths* getTexturePaths() const noexcept { return texturePaths.get(); }
 
 private:
+    void updateViewportEffects();
     void charEnteredAutoComplete(const char*);
     void updateSelectionFromInput();
     void renderOverlay();
@@ -531,7 +536,11 @@ private:
     std::optional<Eigen::Vector2f> dragStart{ std::nullopt };
 
     std::vector<std::unique_ptr<ViewportEffect>> viewportEffects;
+    ViewportEffect* configuredViewportEffect{ nullptr }; // Owned by viewportEffects.
     std::unique_ptr<ViewportEffect> presentationEffect;
+    float fsr1Scale{ 1.0f };
+    float fsr1Sharpness{ 0.2f };
+    bool viewportEffectsDirty{ true };
     bool isViewportEffectUsed { false };
     bool needsUpdateFonts{ false };
 

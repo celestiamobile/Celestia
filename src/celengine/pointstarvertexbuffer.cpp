@@ -80,6 +80,7 @@ void PointStarVertexBuffer::makeCurrent()
     setupVertexArrayObject();
 
     m_prog->use();
+    m_prog->floatParam("rasterScale") = m_renderer.getRasterScale();
     m_prog->setMVPMatrices(m_renderer.getCurrentProjectionMatrix(), m_renderer.getCurrentModelViewMatrix());
     if (m_pointSizeFromVertex)
     {
