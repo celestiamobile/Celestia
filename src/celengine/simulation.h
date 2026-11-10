@@ -46,6 +46,8 @@ public:
     void update(double dt);
     void render(Renderer&);
     void render(Renderer&, Observer&);
+    void renderScene(Renderer&);
+    void renderScene(Renderer&, Observer&);
 
     Selection pickObject(const Eigen::Vector3f& pickRay, RenderFlags renderFlags, float tolerance = 0.0f);
 

@@ -14,14 +14,12 @@
 #include <numbers>
 #include <span>
 
-#include <celmath/frustum.h>
 #include <celmath/mathlib.h>
 #include <celmath/vecgl.h>
 #include <celrender/gl/buffer.h>
 #include <celrender/gl/vertexobject.h>
 #include <celrender/linerenderer.h>
 #include "marker.h"
-#include "observer.h"
 #include "render.h"
 
 using celestia::render::LineRenderer;
@@ -103,20 +101,11 @@ Renderer::renderMarker(MarkerSymbol symbol,
  *  should only be called when the selection lies outside the view frustum.
  */
 void
-Renderer::renderSelectionPointer(const Observer& observer,
-                                 double now,
-                                 const math::InfiniteFrustum& viewFrustum,
-                                 const Selection& sel)
+Renderer::renderSelectionPointer(Eigen::Vector3d position,
+                                 std::span<const std::unique_ptr<ViewportEffect>> effects,
+                                 bool outputSRGB)
 {
     constexpr float cursorDistance = 20.0f;
-    if (sel.empty())
-        return;
-
-    // Get the position of the cursor relative to the eye
-    Eigen::Vector3d position = sel.getPosition(now).offsetFromKm(observer.getPosition());
-    if (viewFrustum.testSphere(position, sel.radius()) != math::FrustumAspect::Outside)
-        return;
-
     assert(shaderManager != nullptr);
     auto* prog = shaderManager->getShader(StaticShader::SelPointer);
     if (prog == nullptr)
@@ -159,8 +148,10 @@ Renderer::renderSelectionPointer(const Observer& observer,
 
     prog->use();
     Eigen::Vector3f center = cameraMatrix.col(2);
-    prog->setMVPMatrices(getProjectionMatrix(), getModelViewMatrix() * math::translate(Eigen::Vector3f(-center)));
-    prog->vec4Param("color") = Color(colors.SelectionCursor, 0.6f).toVector4();
+    const Eigen::Matrix4f modelView = getModelViewMatrix() * math::translate(Eigen::Vector3f(-center));
+    prog->setMVPMatrices(getProjectionMatrix(), modelView);
+    const Color color(colors.SelectionCursor, 0.6f);
+    prog->vec4Param("color") = (outputSRGB ? color.toSRGB() : color).toVector4();
     prog->floatParam("pixelSize") = pixelSize * getScaleFactor();
     prog->floatParam("s") = s;
     prog->floatParam("c") = c;
@@ -168,7 +159,18 @@ Renderer::renderSelectionPointer(const Observer& observer,
     prog->floatParam("y0") = y0;
     prog->vec3Param("u") = u;
     prog->vec3Param("v") = v;
-    m_markerVO->draw(gl::VertexObject::Primitive::Triangles, SelPointerCount, SelPointerOffset);
+    const std::array<int, 4> viewport{0, 0, viewportWidth, viewportHeight};
+    Eigen::Vector3f anchor;
+    if (!projectionMode->project(x0 * u + y0 * v, modelView, getProjectionMatrix(),
+                                 getProjectionMatrix() * modelView, viewport, anchor))
+        return;
+    for (const auto& mapped : mapAnnotationPositions(anchor.head<2>(), effects))
+    {
+        prog->vec2Param("screenOffset") = Eigen::Vector2f{
+            (mapped.x() - anchor.x()) * 2.0f / viewportWidth,
+            (mapped.y() - anchor.y()) * 2.0f / viewportHeight};
+        m_markerVO->draw(gl::VertexObject::Primitive::Triangles, SelPointerCount, SelPointerOffset);
+    }
 }
 
 void

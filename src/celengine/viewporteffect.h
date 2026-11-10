@@ -13,6 +13,9 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
+
+#include <Eigen/Core>
 
 #include <celrender/gl/buffer.h>
 #include <celrender/gl/vertexobject.h>
@@ -29,9 +32,15 @@ public:
     virtual ~ViewportEffect() = default;
 
     virtual bool preprocess(Renderer*, FramebufferObject*);
-    virtual bool prerender(Renderer*, FramebufferObject* fbo, FramebufferObject* dst);
-    virtual bool render(Renderer*, FramebufferObject*, int width, int height) = 0;
+    // Effects must reproject depth with color when annotations follow the chain.
+    virtual bool prerender(Renderer*, FramebufferObject* fbo, FramebufferObject* dst,
+                           bool preserveDepth = false);
+    virtual bool render(Renderer*, FramebufferObject*, int width, int height,
+                        bool preserveDepth = false) = 0;
     virtual bool distortXY(float& x, float& y);
+    // Source/output coordinates are pixels; overlapping warps can produce multiple anchors.
+    virtual void mapToOutput(const Eigen::Vector2f&, int width, int height,
+                             std::vector<Eigen::Vector2f>&) const;
 
     // Bitmask of FramebufferObject attachment flags this effect samples
     // from the source FBO. Anything else may be discarded before resolve.
@@ -48,14 +57,16 @@ public:
 class PassthroughViewportEffect : public ViewportEffect
 {
 public:
-    explicit PassthroughViewportEffect(bool needsFloatSource = false);
+    explicit PassthroughViewportEffect(bool needsFloatSource = false, bool convertToSRGB = true);
     ~PassthroughViewportEffect() override = default;
 
     bool needsFloatSource() const override { return m_needsFloatSource; }
-    bool render(Renderer*, FramebufferObject*, int width, int height) override;
+    bool render(Renderer*, FramebufferObject*, int width, int height,
+                bool preserveDepth = false) override;
 
 private:
     bool m_needsFloatSource;
+    bool m_convertToSRGB;
 
     celestia::gl::VertexObject vo;
 
@@ -70,9 +81,13 @@ public:
     explicit WarpMeshViewportEffect(std::unique_ptr<WarpMesh>&& mesh);
     ~WarpMeshViewportEffect() override;
 
-    bool prerender(Renderer*, FramebufferObject* fbo, FramebufferObject* dst) override;
-    bool render(Renderer*, FramebufferObject*, int width, int height) override;
+    bool prerender(Renderer*, FramebufferObject* fbo, FramebufferObject* dst,
+                   bool preserveDepth = false) override;
+    bool render(Renderer*, FramebufferObject*, int width, int height,
+                bool preserveDepth = false) override;
     bool distortXY(float& x, float& y) override;
+    void mapToOutput(const Eigen::Vector2f&, int width, int height,
+                     std::vector<Eigen::Vector2f>&) const override;
 
 private:
     celestia::gl::VertexObject vo;

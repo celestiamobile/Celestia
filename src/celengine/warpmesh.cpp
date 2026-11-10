@@ -18,6 +18,7 @@
 #include <fstream>
 #include <istream>
 #include <limits>
+#include <numeric>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -43,6 +44,81 @@ struct WarpMesh::WarpVertex
     float u;
     float v;
     float i;
+};
+
+// Index source-UV triangles so moving labels do not scan the entire mesh.
+struct WarpMesh::InverseMap
+{
+    struct Node
+    {
+        Eigen::Vector2f min;
+        Eigen::Vector2f max;
+        std::uint32_t first;
+        std::uint32_t count;
+        std::uint32_t right{0};
+    };
+    std::vector<std::uint32_t> triangles;
+    std::vector<Node> nodes;
+
+    explicit InverseMap(const WarpMesh& mesh)
+    {
+        const auto count = (mesh.m_nx - 1U) * (mesh.m_ny - 1U) * 2U;
+        triangles.resize(count);
+        std::iota(triangles.begin(), triangles.end(), 0U);
+        build(mesh, 0, count);
+    }
+
+    std::uint32_t build(const WarpMesh& mesh, std::uint32_t first, std::uint32_t count)
+    {
+        const auto infinity = std::numeric_limits<float>::infinity();
+        Node node{Eigen::Vector2f::Constant(infinity), Eigen::Vector2f::Constant(-infinity), first, count};
+        for (auto i = first; i < first + count; ++i)
+        {
+            for (const auto* vertex : mesh.triangleVertices(triangles[i]))
+            {
+                const Eigen::Vector2f point{vertex->u, vertex->v};
+                node.min = node.min.cwiseMin(point);
+                node.max = node.max.cwiseMax(point);
+            }
+        }
+        const auto index = static_cast<std::uint32_t>(nodes.size());
+        nodes.push_back(node);
+        if (count > 8U)
+        {
+            const int axis = node.max.x() - node.min.x() > node.max.y() - node.min.y() ? 0 : 1;
+            const auto center = [&mesh, axis](std::uint32_t triangle)
+            {
+                const auto v = mesh.triangleVertices(triangle);
+                return axis == 0 ? v[0]->u + v[1]->u + v[2]->u
+                                 : v[0]->v + v[1]->v + v[2]->v;
+            };
+            const auto half = count / 2U;
+            std::nth_element(triangles.begin() + first, triangles.begin() + first + half,
+                             triangles.begin() + first + count,
+                             [&center](auto a, auto b) { return center(a) < center(b); });
+            nodes[index].first = build(mesh, first, half);
+            nodes[index].right = build(mesh, first + half, count - half);
+            nodes[index].count = 0;
+        }
+        return index;
+    }
+
+    void query(const Eigen::Vector2f& point, std::vector<std::uint32_t>& output,
+               std::uint32_t index = 0) const
+    {
+        const auto& node = nodes[index];
+        if ((point.array() < node.min.array() - 1.0e-6f).any() ||
+            (point.array() > node.max.array() + 1.0e-6f).any())
+            return;
+        if (node.count != 0)
+            output.insert(output.end(), triangles.begin() + node.first,
+                           triangles.begin() + node.first + node.count);
+        else
+        {
+            query(point, output, node.first);
+            query(point, output, node.right);
+        }
+    }
 };
 
 namespace {
@@ -204,6 +280,7 @@ WarpMesh::WarpMesh(std::uint32_t nx, std::uint32_t ny,
     m_yCoords.reserve(ny);
     for (std::uint32_t i = 0; i < m_data.size(); i += m_nx)
         m_yCoords.push_back(m_data[i].y);
+    m_inverseMap = std::make_unique<InverseMap>(*this);
 }
 
 WarpMesh::~WarpMesh() = default;
@@ -299,6 +376,47 @@ bool WarpMesh::mapVertex(float x, float y, float& u, float& v) const
 
     interpolateQuad(vertex, m_nx, x, y, u, v);
     return true;
+}
+
+std::array<const WarpMesh::WarpVertex*, 3>
+WarpMesh::triangleVertices(std::uint32_t triangle) const
+{
+    const auto cell = triangle / 2U;
+    const auto* topLeft = &m_data[(cell / (m_nx - 1U)) * m_nx + cell % (m_nx - 1U)];
+    return triangle % 2U == 0
+        ? std::array{topLeft + m_nx, topLeft, topLeft + 1}
+        : std::array{topLeft + m_nx, topLeft + 1, topLeft + m_nx + 1};
+}
+
+void WarpMesh::mapTexture(float u, float v, std::vector<Eigen::Vector2f>& output) const
+{
+    constexpr float tolerance = 1.0e-6f;
+    std::vector<std::uint32_t> candidates;
+    m_inverseMap->query({u, v}, candidates);
+    const auto first = output.size();
+    for (const auto triangle : candidates)
+    {
+        const auto vertices = triangleVertices(triangle);
+        const auto* a = vertices[0];
+        const auto* b = vertices[1];
+        const auto* c = vertices[2];
+        const double determinant = (double(b->u) - a->u) * (double(c->v) - a->v)
+                                 - (double(c->u) - a->u) * (double(b->v) - a->v);
+        if (determinant == 0.0)
+            continue;
+        const double w1 = ((double(u) - a->u) * (double(c->v) - a->v)
+                         - (double(c->u) - a->u) * (double(v) - a->v)) / determinant;
+        const double w2 = ((double(b->u) - a->u) * (double(v) - a->v)
+                         - (double(u) - a->u) * (double(b->v) - a->v)) / determinant;
+        if (w1 < -tolerance || w2 < -tolerance || w1 + w2 > 1.0 + tolerance)
+            continue;
+        const Eigen::Vector2f position{
+            static_cast<float>((1.0 - w1 - w2) * a->x + w1 * b->x + w2 * c->x),
+            static_cast<float>((1.0 - w1 - w2) * a->y + w1 * b->y + w2 * c->y)};
+        if (std::none_of(output.begin() + first, output.end(),
+                         [&position](const auto& other) { return (position - other).squaredNorm() < 1.0e-10f; }))
+            output.push_back(position);
+    }
 }
 
 std::unique_ptr<WarpMesh>

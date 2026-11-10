@@ -10,10 +10,13 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <vector>
+
+#include <Eigen/Core>
 
 namespace celestia::gl
 {
@@ -38,10 +41,15 @@ public:
 
     // Convert a vertex coordinate to texture coordinate
     bool mapVertex(float x, float y, float& u, float& v) const;
+    void mapTexture(float u, float v, std::vector<Eigen::Vector2f>& output) const;
 
 private:
+    struct InverseMap;
+    std::array<const WarpVertex*, 3> triangleVertices(std::uint32_t) const;
+
     std::uint32_t m_nx;
     std::uint32_t m_ny;
     std::vector<WarpVertex> m_data;
     std::vector<float> m_yCoords;
+    std::unique_ptr<InverseMap> m_inverseMap;
 };

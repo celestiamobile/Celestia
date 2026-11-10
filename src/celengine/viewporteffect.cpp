@@ -20,32 +20,58 @@
 namespace gl = celestia::gl;
 namespace util = celestia::util;
 
-static const Renderer::PipelineState ps;
+namespace
+{
+
+void prepareEffect(Renderer* renderer, CelestiaGLProgram* prog,
+                   FramebufferObject* fbo, bool preserveDepth)
+{
+    Renderer::PipelineState ps;
+    ps.depthTest = preserveDepth;
+    ps.depthMask = preserveDepth;
+    renderer->setPipelineState(ps);
+    prog->samplerParam("tex") = 0;
+    prog->samplerParam("depthTex") = 1;
+    prog->intParam("preserveDepth") = preserveDepth ? 1 : 0;
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, preserveDepth ? fbo->depthTexture() : 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, fbo->colorTexture());
+}
+
+} // namespace
 
 bool ViewportEffect::preprocess(Renderer* renderer, FramebufferObject* fbo)
 {
     return fbo->bind();
 }
 
-bool ViewportEffect::prerender(Renderer* renderer, FramebufferObject* fbo, FramebufferObject* dst)
+bool ViewportEffect::prerender(Renderer* renderer, FramebufferObject* fbo, FramebufferObject* dst,
+                              bool preserveDepth)
 {
+    auto attachments = sourceAttachments();
+    if (preserveDepth)
+        attachments |= FramebufferObject::Attachment::Depth;
     // Discard unused attachments now. MSAA path skips this since resolve()
     // invalidates the MSAA renderbuffers itself.
     if (!fbo->isMultisample())
     {
         constexpr auto allAttachments =
             FramebufferObject::Attachment::Color | FramebufferObject::Attachment::Depth;
-        fbo->discard(allAttachments & ~sourceAttachments());
+        fbo->discard(allAttachments & ~attachments);
     }
 
     // For renderbuffer MSAA (desktop GL / GLES3), blit the MSAA color buffer into
     // the resolve texture before switching to the destination framebuffer
-    if (!fbo->resolve())
+    if (!fbo->resolve(attachments))
         return false;
 
     if (!dst->bind())
         return false;
 
+    Renderer::PipelineState ps;
+    ps.depthMask = true;
+    renderer->setPipelineState(ps);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     return true;
@@ -56,14 +82,22 @@ bool ViewportEffect::distortXY(float &x, float &y)
     return true;
 }
 
-PassthroughViewportEffect::PassthroughViewportEffect(bool needsFloatSource) :
-    m_needsFloatSource(needsFloatSource)
+void ViewportEffect::mapToOutput(const Eigen::Vector2f& position, int, int,
+                                std::vector<Eigen::Vector2f>& output) const
+{
+    output.push_back(position);
+}
+
+PassthroughViewportEffect::PassthroughViewportEffect(bool needsFloatSource, bool convertToSRGB) :
+    m_needsFloatSource(needsFloatSource),
+    m_convertToSRGB(convertToSRGB)
 {
 }
 
-bool PassthroughViewportEffect::render(Renderer* renderer, FramebufferObject* fbo, int width, int height)
+bool PassthroughViewportEffect::render(Renderer* renderer, FramebufferObject* fbo, int width, int height,
+                                      bool preserveDepth)
 {
-    bool toneMap = renderer->getToneMappingMode() != ToneMappingMode::None;
+    bool toneMap = m_convertToSRGB && renderer->getToneMappingMode() != ToneMappingMode::None;
     auto *prog = renderer->getShaderManager().getShader(
         StaticShader::sRGB,
         toneMap ? StaticShaderOptions::ToneMap : StaticShaderOptions::None);
@@ -73,11 +107,10 @@ bool PassthroughViewportEffect::render(Renderer* renderer, FramebufferObject* fb
     initialize();
 
     prog->use();
-    prog->samplerParam("tex") = 0;
+    prog->intParam("convertToSRGB") = m_convertToSRGB ? 1 : 0;
     if (toneMap)
         prog->floatParam("exposure") = renderer->getToneMappingExposure();
-    glBindTexture(GL_TEXTURE_2D, fbo->colorTexture());
-    renderer->setPipelineState(ps);
+    prepareEffect(renderer, prog, fbo, preserveDepth);
     vo.draw();
     glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -132,15 +165,17 @@ WarpMeshViewportEffect::WarpMeshViewportEffect(std::unique_ptr<WarpMesh>&& _mesh
 
 WarpMeshViewportEffect::~WarpMeshViewportEffect() = default;
 
-bool WarpMeshViewportEffect::prerender(Renderer* renderer, FramebufferObject* fbo, FramebufferObject* dst)
+bool WarpMeshViewportEffect::prerender(Renderer* renderer, FramebufferObject* fbo, FramebufferObject* dst,
+                                     bool preserveDepth)
 {
     if (mesh == nullptr)
         return false;
 
-    return ViewportEffect::prerender(renderer, fbo, dst);
+    return ViewportEffect::prerender(renderer, fbo, dst, preserveDepth);
 }
 
-bool WarpMeshViewportEffect::render(Renderer* renderer, FramebufferObject* fbo, int width, int height)
+bool WarpMeshViewportEffect::render(Renderer* renderer, FramebufferObject* fbo, int width, int height,
+                                   bool preserveDepth)
 {
     auto *prog = renderer->getShaderManager().getShader(StaticShader::WarpMesh);
     if (prog == nullptr)
@@ -149,10 +184,8 @@ bool WarpMeshViewportEffect::render(Renderer* renderer, FramebufferObject* fbo, 
     initialize();
 
     prog->use();
-    prog->samplerParam("tex") = 0;
     prog->floatParam("screenRatio") = (float)height / width;
-    glBindTexture(GL_TEXTURE_2D, fbo->colorTexture());
-    renderer->setPipelineState(ps);
+    prepareEffect(renderer, prog, fbo, preserveDepth);
     vo.draw();
     glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -182,4 +215,22 @@ bool WarpMeshViewportEffect::distortXY(float &x, float &y)
     x = u / 2.0f;
     y = v / 2.0f;
     return true;
+}
+
+void WarpMeshViewportEffect::mapToOutput(const Eigen::Vector2f& position, int width, int height,
+                                        std::vector<Eigen::Vector2f>& output) const
+{
+    if (mesh == nullptr)
+        return;
+
+    const auto first = output.size();
+    const float screenRatio = static_cast<float>(height) / width;
+    const float offset = 0.5f - screenRatio * 0.5f;
+    mesh->mapTexture((position.x() / width - offset) / screenRatio,
+                     position.y() / height, output);
+    for (auto i = first; i < output.size(); ++i)
+    {
+        output[i].x() = (output[i].x() * screenRatio + 1.0f) * 0.5f * width;
+        output[i].y() = (output[i].y() + 1.0f) * 0.5f * height;
+    }
 }

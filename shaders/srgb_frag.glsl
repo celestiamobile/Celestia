@@ -1,6 +1,9 @@
 in vec2 texCoord;
 
 uniform sampler2D tex;
+uniform bool convertToSRGB;
+uniform highp sampler2D depthTex;
+uniform bool preserveDepth;
 
 #ifdef TONE_MAP
 // Exposure for tone mapping.
@@ -25,9 +28,15 @@ void main(void)
     vec4 color = texture(tex, texCoord);
 #ifdef TONE_MAP
     // Exponential tone mapping to roll off HDR highlights.
-    vec3 mapped = vec3(1.0) - exp(-exposure * color.rgb);
-    fragColor = vec4(linearToSRGB(mapped), color.a);
-#else
-    fragColor = vec4(linearToSRGB(color.rgb), color.a);
+    color.rgb = vec3(1.0) - exp(-exposure * color.rgb);
 #endif
+    fragColor = vec4(convertToSRGB ? linearToSRGB(color.rgb) : color.rgb, color.a);
+    if (preserveDepth)
+    {
+        ivec2 size = textureSize(depthTex, 0);
+        ivec2 coord = clamp(ivec2(texCoord * vec2(size)), ivec2(0), size - ivec2(1));
+        gl_FragDepth = texelFetch(depthTex, coord, 0).r;
+    }
+    else
+        gl_FragDepth = gl_FragCoord.z;
 }

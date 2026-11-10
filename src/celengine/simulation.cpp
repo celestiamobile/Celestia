@@ -56,6 +56,18 @@ void Simulation::render(Renderer& renderer, Observer& observer)
 }
 
 
+void Simulation::renderScene(Renderer& renderer)
+{
+    renderScene(renderer, *activeObserver);
+}
+
+
+void Simulation::renderScene(Renderer& renderer, Observer& observer)
+{
+    renderer.renderScene(observer, *universe, faintestVisible, selection);
+}
+
+
 Universe* Simulation::getUniverse() const
 {
     return universe.get();

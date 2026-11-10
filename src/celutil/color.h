@@ -146,6 +146,16 @@ public:
     {
         return enabled ? linearize() : *this;
     }
+
+    Color toSRGB() const noexcept
+    {
+        const auto encode = [](float value)
+        {
+            return value <= 0.0031308f ? value * 12.92f
+                : 1.055f * std::pow(value, 1.0f / 2.4f) - 0.055f;
+        };
+        return Color(encode(red()), encode(green()), encode(blue()), alpha());
+    }
 };
 
 constexpr Color operator*(Color a, float b)

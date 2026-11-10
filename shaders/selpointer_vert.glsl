@@ -4,6 +4,7 @@ uniform float pixelSize;
 uniform float s, c;
 uniform float x0, y0;
 uniform vec3 u, v;
+uniform vec2 screenOffset;
 
 void main(void)
 {
@@ -11,4 +12,5 @@ void main(void)
     float y = in_Position.y * pixelSize;
     vec3 pos = (x * c - y * s + x0) * u + (x * s + y * c + y0) * v;
     set_vp(vec4(pos, 1.0));
+    gl_Position.xy += screenOffset * gl_Position.w;
 }

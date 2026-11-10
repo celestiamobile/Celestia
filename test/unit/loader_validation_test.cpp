@@ -8,6 +8,7 @@
 // of the License, or (at your option) any later version.
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -16,14 +17,17 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <doctest.h>
 
 #include <celengine/texture.h>
 #include <celengine/virtualtex.h>
+#include <celengine/warpmesh.h>
 #include <celimage/image.h>
 #include <celimage/imageformats.h>
 #include <celestia/celestiacore.h>
+#include <celutil/logger.h>
 
 namespace
 {
@@ -201,6 +205,83 @@ TEST_CASE("Simulation initialization can retry after a failed star catalog")
         REQUIRE_FALSE(core.initSimulation(configPath));
         REQUIRE_FALSE(core.initSimulation(configPath));
         CHECK(core.getSimulation() == nullptr);
+    }
+}
+
+TEST_CASE("Warp mesh inverse mapping follows the rendered triangles")
+{
+    celestia::util::CreateLogger();
+    TemporaryDirectory directory;
+    const auto path = directory.getPath("mesh.data");
+    const auto load = [&path](std::string_view data)
+    {
+        std::ofstream out(path);
+        out << data;
+        out.close();
+        return WarpMesh::load(path);
+    };
+
+    SUBCASE("Non-affine UVs and shared triangle edges")
+    {
+        auto mesh = load("2\n2 2\n-1 -1 0 0 1\n1 -1 1 0.2 1\n"
+                         "-1 1 0.2 1 1\n1 1 0.8 0.8 1\n");
+        REQUIRE(mesh != nullptr);
+        std::vector<Eigen::Vector2f> positions;
+        mesh->mapTexture(0.3f, 0.54f, positions);
+        REQUIRE(positions.size() == 1);
+        CHECK(positions[0].x() == doctest::Approx(-0.6f));
+        CHECK(positions[0].y() == doctest::Approx(0.0f).epsilon(1.0e-5));
+        positions.clear();
+        mesh->mapTexture(0.54f, 0.78f, positions);
+        REQUIRE(positions.size() == 1);
+        CHECK(positions[0].x() == doctest::Approx(0.0f).epsilon(1.0e-5));
+        CHECK(positions[0].y() == doctest::Approx(0.6f));
+        positions.clear();
+        mesh->mapTexture(0.6f, 0.6f, positions);
+        REQUIRE(positions.size() == 1);
+        CHECK(positions[0].norm() < 1.0e-5f);
+        positions.clear();
+        mesh->mapTexture(-0.5f, -0.5f, positions);
+        CHECK(positions.empty());
+    }
+    SUBCASE("Overlapping UV triangles produce distinct output anchors")
+    {
+        auto mesh = load("2\n2 2\n-1 -1 0 0 1\n1 -1 1 0 1\n"
+                         "-1 1 0 1 1\n1 1 0 0 1\n");
+        REQUIRE(mesh != nullptr);
+        std::vector<Eigen::Vector2f> positions;
+        mesh->mapTexture(0.25f, 0.25f, positions);
+        REQUIRE(positions.size() == 2);
+        CHECK((positions[0] + positions[1]).norm() < 1.0e-5f);
+        CHECK(positions[0].norm() == doctest::Approx(std::sqrt(0.5f)));
+    }
+    SUBCASE("Degenerate UV triangles have no inverse")
+    {
+        auto mesh = load("2\n2 2\n-1 -1 0 0 1\n1 -1 0 0 1\n"
+                         "-1 1 0 0 1\n1 1 0 0 1\n");
+        REQUIRE(mesh != nullptr);
+        std::vector<Eigen::Vector2f> positions;
+        mesh->mapTexture(0, 0, positions);
+        CHECK(positions.empty());
+    }
+    SUBCASE("Spatial index traverses multiple branches")
+    {
+        {
+            std::ofstream out(path);
+            out << "2\n5 5\n";
+            for (int y = 0; y < 5; ++y)
+                for (int x = 0; x < 5; ++x)
+                    out << x * 0.5f - 1.0f << ' ' << y * 0.5f - 1.0f << ' '
+                        << x * 0.25f << ' ' << y * 0.25f << " 1\n";
+            REQUIRE(out.good());
+        }
+        auto mesh = WarpMesh::load(path);
+        REQUIRE(mesh != nullptr);
+        std::vector<Eigen::Vector2f> positions;
+        mesh->mapTexture(0.375f, 0.625f, positions);
+        REQUIRE(positions.size() == 1);
+        CHECK(positions[0].x() == doctest::Approx(-0.25f));
+        CHECK(positions[0].y() == doctest::Approx(0.25f));
     }
 }
 

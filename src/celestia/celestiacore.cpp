@@ -2036,65 +2036,67 @@ void CelestiaCore::draw(View* view)
 {
     if (view->type != View::ViewWindow) return;
 
-    bool viewportEffectUsed = false;
+    isViewportEffectUsed = false;
 
     int nEffects = static_cast<int>(viewportEffects.size());
-    FramebufferObject *fbo = nullptr;
-    // Capture the screen framebuffer before any binding changes so we can
-    // restore it after the effect chain without relying on preprocess to save it.
-    auto screenFbo = nEffects > 0 ? std::make_optional(FramebufferObject::wrapCurrentBinding())
-                                  : std::nullopt;
-    if (nEffects > 0)
+    if (presentationEffect == nullptr)
     {
-        // create/update FBOs for viewport effect chain
-        view->updateFBOs(viewportEffects, metrics.width, metrics.height);
-        fbo = view->getFBO(0);
+        GetLogger()->error("No viewport presentation pass configured.\n");
+        return;
     }
-    bool process = fbo != nullptr && viewportEffects[0]->preprocess(renderer, fbo);
+
+    auto screenFbo = FramebufferObject::wrapCurrentBinding();
+    if (!view->updateFBOs(viewportEffects, metrics.width, metrics.height))
+        return;
+
+    if (!presentationEffect->preprocess(renderer, view->getFBO(0)))
+    {
+        GetLogger()->error("Unable to prepare scene framebuffer.\n");
+        screenFbo.bind();
+        return;
+    }
 
     auto x = static_cast<int>(view->x * static_cast<float>(metrics.width));
     auto y = static_cast<int>(view->y * static_cast<float>(metrics.height));
     auto viewWidth = static_cast<int>(view->width * static_cast<float>(metrics.width));
     auto viewHeight = static_cast<int>(view->height * static_cast<float>(metrics.height));
-    // If we need to process, we draw to the FBO which starts at point zero
-    renderer->setRenderRegion(process ? 0 : x, process ? 0 : y, viewWidth, viewHeight, !view->isRootView() && !process);
+    renderer->setRenderRegion(0, 0, viewWidth, viewHeight, false);
 
     if (view->isRootView())
-        sim->render(*renderer);
+        sim->renderScene(*renderer);
     else
-        sim->render(*renderer, *view->observer);
+        sim->renderScene(*renderer, *view->observer);
 
-    if (process)
+    bool ok = true;
+    for (int i = 0; i < nEffects; i++)
     {
-        bool ok = true;
-        for (int i = 0; i < nEffects; i++)
+        FramebufferObject* dst = view->getFBO(i + 1);
+        FramebufferObject* src = view->getFBO(i);
+        if (!viewportEffects[i]->prerender(renderer, src, dst, true) ||
+            !viewportEffects[i]->render(renderer, src, viewWidth, viewHeight, true))
         {
-            FramebufferObject* dst;
-            if (i == nEffects - 1)
-            {
-                // The last effect renders to the screen FBO, needs to be reset
-                // to start from (x,y) instead of point zero
-                dst = &screenFbo.value();
-                if (x != 0 || y != 0)
-                    renderer->setRenderRegion(x, y, viewWidth, viewHeight);
-            }
-            else
-            {
-                dst = view->getFBO(i + 1);
-            }
-
-            FramebufferObject* src = view->getFBO(i);
-            if (!viewportEffects[i]->prerender(renderer, src, dst) ||
-                !viewportEffects[i]->render(renderer, src, viewWidth, viewHeight))
-            {
-                GetLogger()->error("Unable to render viewport effect.\n");
-                ok = false;
-                break;
-            }
+            GetLogger()->error("Unable to render viewport effect.\n");
+            ok = false;
+            break;
         }
-        viewportEffectUsed = ok;
     }
-    isViewportEffectUsed = viewportEffectUsed;
+    auto* composition = view->getFBO(nEffects);
+    if (ok)
+    {
+        renderer->renderAnnotations(viewportEffects, gl::sRGBRendering);
+        ok = composition->resolve();
+        screenFbo.bind();
+        renderer->setRenderRegion(x, y, viewWidth, viewHeight);
+        ok = ok && presentationEffect->render(renderer, composition, viewWidth, viewHeight);
+        if (!ok)
+            GetLogger()->error("Unable to present annotated view.\n");
+    }
+    else
+    {
+        renderer->discardAnnotations();
+    }
+    screenFbo.bind();
+    isViewportEffectUsed = ok;
 }
 
 void CelestiaCore::setSafeAreaInsets(int left, int top, int right, int bottom)
@@ -2757,13 +2759,9 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
 
     if (gl::sRGBRendering)
     {
-        // Apply sRGB output correction via software post-process.
-        // The SRGBViewportEffect shader performs the linear→sRGB conversion
-        // as the final rendering step, keeping the pipeline consistent across
-        // all GL variants without relying on GL_FRAMEBUFFER_SRGB or
-        // platform-specific sRGB surface negotiation.
         viewportEffects.push_back(std::make_unique<PassthroughViewportEffect>(true));
     }
+    presentationEffect = std::make_unique<PassthroughViewportEffect>(false, false);
 
     renderer->setRenderFlags(RenderFlags::ShowStars |
                              RenderFlags::ShowPlanets |

@@ -244,7 +244,7 @@ FramebufferObject::generateFbo(Attachment attachments)
     }
 #endif
 
-    if (celestia::util::is_set(attachments, Attachment::Depth) && !useRenderbufferMSAA)
+    if (celestia::util::is_set(attachments, Attachment::Depth))
     {
         generateDepthTexture();
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_depthTexId, 0);
@@ -406,7 +406,7 @@ FramebufferObject::unbind(GLint oldfboId)
 }
 
 bool
-FramebufferObject::resolve() const
+FramebufferObject::resolve(Attachment attachments) const
 {
     assert(m_owned && "resolve() called on non-owning FBO wrapper");
     // No explicit resolve needed for non-MSAA FBOs (m_msaaFboId == 0, m_samples == 1).
@@ -422,16 +422,21 @@ FramebufferObject::resolve() const
     if (scissorEnabled)
         glDisable(GL_SCISSOR_TEST);
 
-    // Desktop GL / GLES3: blit the MSAA color renderbuffer into the resolve texture FBO.
+    // Desktop GL / GLES3: resolve the requested MSAA attachments into their textures.
     // GL_READ_FRAMEBUFFER / GL_DRAW_FRAMEBUFFER and glBlitFramebuffer are available on
     // desktop GL (via ARB_framebuffer_object, which is required) and GLES 3.0+.
     glBindFramebuffer(GL_READ_FRAMEBUFFER, m_msaaFboId);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fboId);
+    GLbitfield mask = 0;
+    if (celestia::util::is_set(attachments, Attachment::Color))
+        mask |= GL_COLOR_BUFFER_BIT;
+    if (celestia::util::is_set(attachments, Attachment::Depth))
+        mask |= GL_DEPTH_BUFFER_BIT;
     glBlitFramebuffer(0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height),
                       0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height),
-                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+                      mask, GL_NEAREST);
 
-    // Discard the MSAA renderbuffers now that color has been resolved.
+    // The effect chain samples the resolved textures, not these renderbuffers.
     std::array<GLenum, 2> msaaAttachments{};
     GLsizei count = 0;
     if (m_colorRboId != 0)
