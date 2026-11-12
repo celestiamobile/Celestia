@@ -189,10 +189,10 @@ FramebufferObject::generateDepthTexture()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 #endif
 
-    // Only nearest sampling is appropriate for depth textures
-    // But we can use linear to decrease aliasing
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // GLES requires nearest filtering for raw scene depth, unlike shadow comparisons.
+    const GLint filter = m_colorTexId != 0 ? GL_NEAREST : GL_LINEAR;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
 
     // Clamp to edge
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -382,6 +382,42 @@ FramebufferObject::cleanup()
         glDeleteTextures(1, &m_depthTexId);
         m_depthTexId = 0;
     }
+}
+
+bool
+FramebufferObject::ensureDepthAttachment()
+{
+    if (!m_owned || m_depthTexId != 0)
+        return isValid();
+
+    GLint oldRead, oldDraw, oldRenderbuffer;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &oldRead);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &oldDraw);
+    glGetIntegerv(GL_RENDERBUFFER_BINDING, &oldRenderbuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_fboId);
+    generateDepthTexture();
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_depthTexId, 0);
+    m_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (isValid() && m_msaaFboId != 0)
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, m_msaaFboId);
+        glGenRenderbuffers(1, &m_depthRboId);
+        glBindRenderbuffer(GL_RENDERBUFFER, m_depthRboId);
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_DEPTH_COMPONENT24, m_width, m_height);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_depthRboId);
+        m_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    }
+    glBindRenderbuffer(GL_RENDERBUFFER, oldRenderbuffer);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, oldRead);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, oldDraw);
+    return isValid();
+}
+
+void
+FramebufferObject::bindForRead() const
+{
+    assert(m_owned);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_fboId);
 }
 
 bool

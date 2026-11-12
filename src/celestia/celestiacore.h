@@ -316,6 +316,8 @@ public:
 
     const CelestiaConfig* getConfig() const;
     float getFsr1Scale() const;
+    float getMetalFXScale() const;
+    bool setMetalFXScale(float);
     float getFsr1Sharpness() const;
     bool setFsr1Scale(float);
     bool setFsr1Sharpness(float);
@@ -539,6 +541,7 @@ private:
     ViewportEffect* configuredViewportEffect{ nullptr }; // Owned by viewportEffects.
     std::unique_ptr<ViewportEffect> presentationEffect;
     float fsr1Scale{ 1.0f };
+    float metalFXScale{ 1.0f };
     float fsr1Sharpness{ 0.2f };
     bool viewportEffectsDirty{ true };
     bool isViewportEffectUsed { false };

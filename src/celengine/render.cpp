@@ -1762,6 +1762,15 @@ void Renderer::renderAnnotations(std::span<const std::unique_ptr<ViewportEffect>
 }
 
 
+bool Renderer::annotationsNeedDepth() const
+{
+    return !depthSortedAnnotations.empty()
+        || std::ranges::any_of(backgroundAnnotationBatches, [](const auto& batch)
+                              { return !batch.annotations.empty(); })
+        || std::ranges::any_of(objectAnnotationBatches, [](const auto& batch)
+                              { return !batch.empty(); });
+}
+
 void Renderer::discardAnnotations()
 {
     backgroundAnnotationBatches.clear();

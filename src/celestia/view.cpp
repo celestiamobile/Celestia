@@ -9,6 +9,8 @@
 
 #include "view.h"
 
+#include <algorithm>
+
 #include <celengine/framebuffer.h>
 #include <celengine/glsupport.h>
 #include <celengine/overlay.h>
@@ -262,9 +264,10 @@ View::drawBorder(Overlay* overlay, int gWidth, int gHeight, const Color &color, 
 
 
 bool
-View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, int gWidth, int gHeight)
+View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, int gWidth, int gHeight,
+                 bool directOutput)
 {
-    int count = static_cast<int>(effects.size()) + 1;
+    int count = std::max(1, static_cast<int>(effects.size()) + (directOutput ? 0 : 1));
     Eigen::Vector2i size(static_cast<int>(width * gWidth),
                          static_cast<int>(height * gHeight));
 
@@ -303,8 +306,7 @@ View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, in
         auto newWidth = static_cast<GLuint>(size.x());
         auto newHeight = static_cast<GLuint>(size.y());
 
-        // Scene geometry and final annotations use the output's sample count.
-        int samples = (i == 0 || i == count - 1) ? samplesToRequest : 1;
+        int samples = (i == 0 || (!directOutput && i == count - 1)) ? samplesToRequest : 1;
 
         auto& fbo = fbos[i];
 
@@ -315,8 +317,11 @@ View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, in
             && fbo->useFloatColor() == useFloat)
             continue;
 
+        auto attachments = FramebufferObject::Attachment::Color;
+        if (i == 0 || (!directOutput && i == count - 1))
+            attachments |= FramebufferObject::Attachment::Depth;
         fbo = std::make_unique<FramebufferObject>(newWidth, newHeight,
-                                                  FramebufferObject::Attachment::Color | FramebufferObject::Attachment::Depth,
+                                                  attachments,
                                                   samples,
                                                   useFloat);
         if (!fbo->isValid())

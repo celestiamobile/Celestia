@@ -32,7 +32,7 @@ class FramebufferObject
     ~FramebufferObject();
 
     // Create a non-owning wrapper around the currently bound GL framebuffer.
-    // Only bind() is valid on the resulting object; other methods will assert.
+    // The caller owns its attachments; ensureDepthAttachment() leaves them unchanged.
     static FramebufferObject wrapCurrentBinding();
 
     bool isValid() const;
@@ -60,8 +60,10 @@ class FramebufferObject
     GLuint depthTexture() const;
 
     bool bind();
+    void bindForRead() const;
     bool unbind(GLint oldfboId);
     bool resolve(Attachment attachments = Attachment::Color) const;
+    bool ensureDepthAttachment();
 
     // True for MSAA FBOs whose contents must be resolved before sampling.
     bool isMultisample() const { return m_msaaFboId != 0; }

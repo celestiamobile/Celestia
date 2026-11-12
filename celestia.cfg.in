@@ -579,4 +579,11 @@ StarTextures
 # FSR1Scale          1.5
 # FSR1Sharpness      0.2
 
+# MetalFXScale opts into the experimental GL_ANGLE_metalfx_spatial_upscaling
+# extension. 1.0 disables it; valid range: 1.0 to 4.0. Requires SRGBRendering
+# and a compatible ANGLE Metal backend. Takes priority over FSR1 when available;
+# otherwise an error is logged and the configured FSR1/native path is used.
+# Only scene color is upscaled; annotations remain at native resolution.
+# MetalFXScale       2.0
+
 }

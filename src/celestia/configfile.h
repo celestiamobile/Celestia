@@ -105,6 +105,7 @@ struct CelestiaConfig
             float toneMappingExposure{ 1.0f };
             ToneMappingMode toneMapping{ ToneMappingMode::None };
             float fsr1Scale{ 1.0f };
+            float metalFXScale{ 1.0f };
             float fsr1Sharpness{ 0.2f };
         };
         OutputRendering output{ };

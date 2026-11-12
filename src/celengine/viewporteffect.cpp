@@ -68,6 +68,9 @@ bool ViewportEffect::prerender(Renderer* renderer, FramebufferObject* fbo, Frame
     if (!fbo->resolve(attachments))
         return false;
 
+    if (preserveDepth && !dst->ensureDepthAttachment())
+        return false;
+
     if (!dst->bind())
         return false;
 
@@ -79,10 +82,10 @@ bool ViewportEffect::prerender(Renderer* renderer, FramebufferObject* fbo, Frame
     }
 
     Renderer::PipelineState ps;
-    ps.depthMask = true;
+    ps.depthMask = preserveDepth;
     renderer->setPipelineState(ps);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | (preserveDepth ? GL_DEPTH_BUFFER_BIT : 0));
     return true;
 }
 
@@ -158,11 +161,48 @@ bool FsrViewportEffect::render(Renderer* renderer, FramebufferObject* fbo,
 
     prog->use();
     prog->vec2Param("outputSize") = Eigen::Vector2f(width, height);
+    std::array<int, 4> viewport;
+    renderer->getViewport(viewport);
+    prog->vec2Param("outputOrigin") = Eigen::Vector2f(viewport[0], viewport[1]);
     prog->floatParam("sharpness") = m_parameter;
     prepareEffect(renderer, prog, fbo, preserveDepth);
     drawQuad();
     glBindTexture(GL_TEXTURE_2D, 0);
     return true;
+}
+
+MetalFXViewportEffect::MetalFXViewportEffect(float scale) :
+    PassthroughViewportEffect(false, false),
+    m_scale(scale)
+{
+}
+
+Eigen::Vector2i MetalFXViewportEffect::inputSize(const Eigen::Vector2i& size) const
+{
+    return {std::max(1, static_cast<int>(std::ceil(size.x() / m_scale))),
+            std::max(1, static_cast<int>(std::ceil(size.y() / m_scale)))};
+}
+
+bool MetalFXViewportEffect::render(Renderer* renderer, FramebufferObject* source,
+                                   int width, int height, bool preserveDepth)
+{
+    // Keep the existing depth reprojection; MetalFX only replaces color.
+    if (preserveDepth && !PassthroughViewportEffect::render(renderer, source, width, height, true))
+        return false;
+    std::array<int, 4> viewport;
+    renderer->getViewport(viewport);
+    GLint oldRead, sourceReadBuffer;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &oldRead);
+    source->bindForRead();
+    glGetIntegerv(GL_READ_BUFFER, &sourceReadBuffer);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    constexpr GLenum MetalFXSpatialANGLE = 0x60001000;
+    glBlitFramebuffer(0, 0, source->width(), source->height(),
+                      viewport[0], viewport[1], viewport[0] + width, viewport[1] + height,
+                      GL_COLOR_BUFFER_BIT, MetalFXSpatialANGLE);
+    glReadBuffer(sourceReadBuffer);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, oldRead);
+    return glGetError() == GL_NO_ERROR;
 }
 
 void PassthroughViewportEffect::initialize()

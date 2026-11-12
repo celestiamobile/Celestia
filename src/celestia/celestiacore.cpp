@@ -2050,7 +2050,13 @@ void CelestiaCore::draw(View* view)
     }
 
     auto screenFbo = FramebufferObject::wrapCurrentBinding();
-    if (!view->updateFBOs(viewportEffects, metrics.width, metrics.height))
+    GLint outputFramebuffer = 0, outputDepthType = GL_NONE;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &outputFramebuffer);
+    glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER,
+                                         outputFramebuffer == 0 ? GL_DEPTH : GL_DEPTH_ATTACHMENT,
+                                         GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &outputDepthType);
+    const bool directOutput = outputDepthType != GL_NONE;
+    if (!view->updateFBOs(viewportEffects, metrics.width, metrics.height, directOutput))
         return;
 
     if (!presentationEffect->preprocess(renderer, view->getFBO(0)))
@@ -2074,30 +2080,48 @@ void CelestiaCore::draw(View* view)
     else
         sim->renderScene(*renderer, *view->observer);
 
+    const bool preserveDepth = renderer->annotationsNeedDepth();
+    const int intermediateEffects = directOutput ? std::max(0, nEffects - 1) : nEffects;
     bool ok = true;
-    for (int i = 0; i < nEffects; i++)
+    for (int i = 0; i < intermediateEffects; i++)
     {
         FramebufferObject* dst = view->getFBO(i + 1);
         FramebufferObject* src = view->getFBO(i);
-        if (!viewportEffects[i]->prerender(renderer, src, dst, true) ||
-            !viewportEffects[i]->render(renderer, src, dst->width(), dst->height(), true))
+        if (!viewportEffects[i]->prerender(renderer, src, dst, preserveDepth) ||
+            !viewportEffects[i]->render(renderer, src, dst->width(), dst->height(), preserveDepth))
         {
             GetLogger()->error("Unable to render viewport effect.\n");
             ok = false;
             break;
         }
     }
-    auto* composition = view->getFBO(nEffects);
+    if (ok && directOutput)
+    {
+        auto* src = view->getFBO(std::max(0, nEffects - 1));
+        auto* effect = nEffects == 0 ? presentationEffect.get() : viewportEffects.back().get();
+        renderer->setRenderRegion(x, y, viewWidth, viewHeight);
+        ok = effect->prerender(renderer, src, &screenFbo, preserveDepth)
+            && effect->render(renderer, src, viewWidth, viewHeight, preserveDepth);
+        if (!ok)
+            GetLogger()->error("Unable to render final viewport effect.\n");
+    }
     if (ok)
     {
-        renderer->setViewport(0, 0, viewWidth, viewHeight);
+        if (directOutput)
+            renderer->setRenderRegion(x, y, viewWidth, viewHeight);
+        else
+            renderer->setViewport(0, 0, viewWidth, viewHeight);
         renderer->renderAnnotations(viewportEffects, gl::sRGBRendering);
-        ok = composition->resolve();
-        screenFbo.bind();
-        renderer->setRenderRegion(x, y, viewWidth, viewHeight);
-        ok = ok && presentationEffect->render(renderer, composition, viewWidth, viewHeight);
-        if (!ok)
-            GetLogger()->error("Unable to present annotated view.\n");
+        if (!directOutput)
+        {
+            auto* composition = view->getFBO(nEffects);
+            ok = composition->resolve();
+            screenFbo.bind();
+            renderer->setRenderRegion(x, y, viewWidth, viewHeight);
+            ok = ok && presentationEffect->render(renderer, composition, viewWidth, viewHeight);
+            if (!ok)
+                GetLogger()->error("Unable to present annotated view.\n");
+        }
     }
     else
     {
@@ -2491,6 +2515,7 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
     }
 
     fsr1Scale = config->renderDetails.output.fsr1Scale;
+    metalFXScale = config->renderDetails.output.metalFXScale;
     fsr1Sharpness = config->renderDetails.output.fsr1Sharpness;
     viewportEffectsDirty = true;
 
@@ -3143,6 +3168,26 @@ const CelestiaConfig* CelestiaCore::getConfig() const
     return config.get();
 }
 
+float CelestiaCore::getMetalFXScale() const
+{
+    return metalFXScale;
+}
+
+bool CelestiaCore::setMetalFXScale(float scale)
+{
+    if (!std::isfinite(scale) || scale < 1.0f || scale > 4.0f)
+    {
+        GetLogger()->error("MetalFXScale must be between 1 and 4.\n");
+        return false;
+    }
+    if (metalFXScale != scale)
+    {
+        metalFXScale = scale;
+        viewportEffectsDirty = true;
+    }
+    return true;
+}
+
 float CelestiaCore::getFsr1Scale() const
 {
     return fsr1Scale;
@@ -3198,7 +3243,19 @@ void CelestiaCore::updateViewportEffects()
     }
     viewportEffects.clear();
 
-    if (fsr1Scale > 1.0f)
+    const bool useMetalFX = metalFXScale > 1.0f && gl::sRGBRendering &&
+        epoxy_has_gl_extension("GL_ANGLE_metalfx_spatial_upscaling");
+    if (metalFXScale > 1.0f && !useMetalFX)
+        GetLogger()->error("MetalFX requires sRGB rendering and an ANGLE MetalFX-capable context; "
+                           "using the configured FSR/native path.\n");
+    if (useMetalFX)
+    {
+        viewportEffects.push_back(std::make_unique<PassthroughViewportEffect>(true));
+        viewportEffects.push_back(std::make_unique<MetalFXViewportEffect>(metalFXScale));
+        if (distortion)
+            viewportEffects.push_back(std::move(distortion));
+    }
+    else if (fsr1Scale > 1.0f)
     {
         if (gl::sRGBRendering)
             viewportEffects.push_back(std::make_unique<PassthroughViewportEffect>(true));

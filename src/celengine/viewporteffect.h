@@ -96,6 +96,18 @@ private:
     float m_parameter;
 };
 
+class MetalFXViewportEffect : public PassthroughViewportEffect
+{
+public:
+    explicit MetalFXViewportEffect(float scale);
+    Eigen::Vector2i inputSize(const Eigen::Vector2i&) const override;
+    bool render(Renderer*, FramebufferObject*, int width, int height,
+                bool preserveDepth = false) override;
+
+private:
+    float m_scale;
+};
+
 class WarpMeshViewportEffect : public ViewportEffect //NOSONAR
 {
 public:

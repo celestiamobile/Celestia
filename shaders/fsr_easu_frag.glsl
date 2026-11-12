@@ -4,6 +4,7 @@ uniform sampler2D tex;
 uniform highp sampler2D depthTex;
 uniform bool preserveDepth;
 uniform vec2 outputSize;
+uniform vec2 outputOrigin;
 
 vec4 fsrGather(vec2 p, int channel)
 {
@@ -30,7 +31,7 @@ void main(void)
                inputSize.x, inputSize.y, inputSize.x, inputSize.y,
                outputSize.x, outputSize.y);
     vec3 color;
-    FsrEasuF(color, uvec2(gl_FragCoord.xy), con0, con1, con2, con3);
+    FsrEasuF(color, uvec2(gl_FragCoord.xy - outputOrigin), con0, con1, con2, con3);
     fragColor = vec4(clamp(color, vec3(0.0), vec3(1.0)), 1.0);
     if (preserveDepth)
     {

@@ -180,6 +180,7 @@ class Renderer
     void renderAnnotations(std::span<const std::unique_ptr<ViewportEffect>> effects = {},
                            bool outputSRGB = false);
     void discardAnnotations();
+    bool annotationsNeedDepth() const;
 
     bool getInfo(std::map<std::string, std::string>& info) const;
 

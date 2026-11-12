@@ -238,6 +238,13 @@ applyRenderDetails(CelestiaConfig::RenderDetails& renderDetails, const Associati
     renderDetails.output.toneMappingExposure = std::clamp(renderDetails.output.toneMappingExposure, 1.0e-3f, 1.0e6f);
     applyToneMappingMode(renderDetails.output.toneMapping, hash, "ToneMappingMode"sv);
     applyNumber(renderDetails.output.fsr1Scale, hash, "FSR1Scale"sv);
+    applyNumber(renderDetails.output.metalFXScale, hash, "MetalFXScale"sv);
+    if (!std::isfinite(renderDetails.output.metalFXScale) ||
+        renderDetails.output.metalFXScale < 1.0f || renderDetails.output.metalFXScale > 4.0f)
+    {
+        GetLogger()->error("MetalFXScale must be between 1 and 4; disabling MetalFX.\n");
+        renderDetails.output.metalFXScale = 1.0f;
+    }
     if (!std::isfinite(renderDetails.output.fsr1Scale) ||
         renderDetails.output.fsr1Scale < 1.0f || renderDetails.output.fsr1Scale > 4.0f)
     {

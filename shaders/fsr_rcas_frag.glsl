@@ -4,6 +4,7 @@ uniform sampler2D tex;
 uniform highp sampler2D depthTex;
 uniform bool preserveDepth;
 uniform float sharpness;
+uniform vec2 outputOrigin;
 
 vec4 FsrRcasLoadF(ivec2 p)
 {
@@ -19,7 +20,7 @@ void main(void)
     uvec4 con;
     FsrRcasCon(con, sharpness);
     vec3 color;
-    FsrRcasF(color.r, color.g, color.b, uvec2(gl_FragCoord.xy), con);
+    FsrRcasF(color.r, color.g, color.b, uvec2(gl_FragCoord.xy - outputOrigin), con);
     fragColor = vec4(clamp(color, vec3(0.0), vec3(1.0)), 1.0);
     if (preserveDepth)
     {
