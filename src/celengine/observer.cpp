@@ -69,7 +69,13 @@ getNearIntersectionPoint(const Eigen::ParametrizedLine<double, 3>& ray,
     double distance;
     bool intersects = math::testIntersection(ray, sphere, distance);
     if (intersects)
-        return ray.origin() + distance * ray.direction();
+    {
+        Eigen::Vector3d point = ray.origin() + distance * ray.direction();
+        // Distant rays can produce off-surface intersections through roundoff.
+        if (std::abs((point - sphere.center).norm() - sphere.radius) > sphere.radius * 1.0e-3)
+            return std::nullopt;
+        return point;
+    }
     else
         return std::nullopt;
 }
@@ -1135,18 +1141,14 @@ Observer::orbit(const Selection& selection, const Eigen::Vector3f &from, const E
     if (radius <= 0.0)
         return false;
 
-    // Get the focus position (center of rotation) in frame
-    // coordinates; in order to make this function work in all
-    // frames of reference, it's important to work in frame
-    // coordinates.
+    // Both the center and the oriented rays must use universal coordinates.
     UniversalCoord focusPosition = center.getPosition(getTime());
-    focusPosition = frame->convertFromUniversal(focusPosition, getTime());
-
-    Eigen::Vector3d objectCenter = focusPosition.offsetFromKm(position);
+    Eigen::Vector3d objectCenter = focusPosition.offsetFromKm(getPosition());
+    Eigen::Quaterniond orientation = getOrientation();
 
     // Get the rays adjusted to orientation
-    Eigen::Vector3d transformedFrom = getOrientation().conjugate() * from.cast<double>();
-    Eigen::Vector3d transformedTo = getOrientation().conjugate() * to.cast<double>();
+    Eigen::Vector3d transformedFrom = orientation.conjugate() * from.cast<double>();
+    Eigen::Vector3d transformedTo = orientation.conjugate() * to.cast<double>();
 
     // Find intersections for the rays, if no intersection, return false
     math::Sphered sphere { objectCenter, radius };
@@ -1159,8 +1161,47 @@ Observer::orbit(const Selection& selection, const Eigen::Vector3f &from, const E
         return false;
 
     orbit(selection,
-          Eigen::Quaterniond::FromTwoVectors(transformedOrientation * (orbitStartPosition.value() - objectCenter),
-                                             transformedOrientation * (orbitEndPosition.value() - objectCenter)).cast<float>());
+          Eigen::Quaterniond::FromTwoVectors(orientation * (orbitStartPosition.value() - objectCenter),
+                                             orientation * (orbitEndPosition.value() - objectCenter)).cast<float>());
+    return true;
+}
+
+bool
+Observer::orbitSurface(const Selection& selection, const Eigen::Vector3f& focus, float rotation)
+{
+    Selection center = frame->getRefObject();
+    if (center.empty())
+        center = selection;
+
+    if (center.getType() != SelectionType::Body && center.getType() != SelectionType::Star)
+        return false;
+
+    double radius = center.radius();
+    if (radius <= 0.0)
+        return false;
+
+    auto currentPosition = getPosition();
+    Eigen::Quaterniond orientation = getOrientation();
+    Eigen::Vector3d objectCenter = center.getPosition(getTime()).offsetFromKm(currentPosition);
+    // Inside the bounding sphere, the far-side hit would reverse the twist.
+    if (objectCenter.norm() <= radius)
+        return false;
+
+    Eigen::Vector3d direction = orientation.conjugate() * focus.cast<double>().normalized();
+    Eigen::ParametrizedLine<double, 3> ray(Eigen::Vector3d::Zero(), direction);
+    math::Sphered sphere{ objectCenter, radius };
+    auto intersection = getNearIntersectionPoint(ray, sphere);
+    if (!intersection.has_value())
+        return false;
+
+    Eigen::Vector3d normal = (intersection.value() - objectCenter).normalized();
+    Eigen::Vector3d offset = -intersection.value();
+    Eigen::Quaterniond transform(Eigen::AngleAxisd(static_cast<double>(rotation), normal));
+    auto pivot = currentPosition.offsetKm(intersection.value());
+    if (frame->getRefObject().empty())
+        setFrame(frame->getCoordinateSystem(), center);
+    setPosition(pivot.offsetKm(transform * offset));
+    setOrientation(Eigen::Quaterniond(orientation * transform.conjugate()).normalized());
     return true;
 }
 
@@ -1201,28 +1242,30 @@ Observer::scaleOrbitDistance(const Selection& selection, float scale, const std:
     double newDistance = minOrbitDistance + span / static_cast<double>(scale);
     positionFromCenter *= (newDistance / currentDistance);
 
-    std::optional<UniversalCoord> controlPoint1 = std::nullopt;
-    std::optional<Eigen::Vector3d> focusRay = std::nullopt;
     if (focus.has_value())
     {
-        focusRay = getOrientation().conjugate() * focus.value().cast<double>();
-        // The control points are the intersection points of the original focus ray and
-        // the sphere with radius = span (distance to center - min distance) before and
-        // after the distance change
-        controlPoint1 = currentPosition.offsetKm(focusRay.value() * span);
+        Eigen::Vector3d focusRay = getOrientation().conjugate() * focus.value().cast<double>().normalized();
+        if (currentDistance > center.radius() && center.radius() > 0.0 &&
+            (center.getType() == SelectionType::Body || center.getType() == SelectionType::Star))
+        {
+            Eigen::ParametrizedLine<double, 3> ray(Eigen::Vector3d::Zero(), focusRay);
+            math::Sphered sphere{ centerPosition.offsetFromKm(currentPosition), center.radius() };
+            auto surfacePoint = getNearIntersectionPoint(ray, sphere);
+            if (surfacePoint.has_value())
+            {
+                // Dolly along the focus ray so the actual touched surface point
+                // stays fixed, including for large, off-center scale changes.
+                auto newPosition = currentPosition.offsetKm(surfacePoint.value() * (1.0 - 1.0 / scale));
+                position = frame->convertFromUniversal(newPosition, getTime());
+                updateUniversal();
+                return;
+            }
+        }
     }
 
     auto newPosition = centerPosition.offsetKm(positionFromCenter);
     position = frame->convertFromUniversal(newPosition, getTime());
     updateUniversal();
-
-    if (controlPoint1.has_value())
-    {
-        auto controlPoint2 = newPosition.offsetKm(focusRay.value() * (newDistance - minOrbitDistance));
-        orbit(selection,
-              Eigen::Quaterniond::FromTwoVectors(transformedOrientation * controlPoint1.value().offsetFromKm(centerPosition),
-                                                 transformedOrientation * controlPoint2.offsetFromKm(centerPosition)).cast<float>());
-    }
 }
 
 void

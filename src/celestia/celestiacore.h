@@ -217,6 +217,9 @@ public:
     void joystickAxis(JoyAxis axis, float amount);
     void joystickButton(int button, bool down);
     void pinchUpdate(float focusX, float focusY, float scale, bool zoomFOV);
+    // Rotation is measured in clockwise radians.
+    void rotateUpdate(float focusX, float focusY, float rotation, bool orbit);
+    void panUpdate(float focusX, float focusY, float dx, float dy, bool orbit, bool begin);
     void resize(GLsizei w, GLsizei h);
     void draw();
     void draw(celestia::View*);
@@ -432,6 +435,8 @@ private:
     void updateSelectionFromInput();
     void renderOverlay();
     Eigen::Vector3f getPickRay(float x, float y, const celestia::View *view) const;
+    void dragUpdate(const Eigen::Vector2f &delta, const std::optional<Eigen::Vector2f> &from,
+                    bool orbit, std::optional<bool> &startFromSurface);
     void updateFOV(float fov, const std::optional<Eigen::Vector2f> &focus, const celestia::View *view);
 #ifdef CELX
     bool initLuaHook(ProgressNotifier*);
@@ -528,6 +533,7 @@ private:
 
     std::optional<Eigen::Vector2f> dragLocation { std::nullopt };
     std::optional<bool> dragStartFromSurface { std::nullopt };
+    std::optional<bool> panStartFromSurface { std::nullopt };
     std::optional<Eigen::Vector2f> dragStart{ std::nullopt };
 
     std::vector<std::unique_ptr<ViewportEffect>> viewportEffects;

@@ -680,64 +680,50 @@ void CelestiaCore::mouseMove(float dx, float dy, int modifiers)
 
             updateFOV(newFOV, is_set(interactionFlags, InteractionFlags::FocusZooming) ? dragStart : std::nullopt, view);
         }
-        else if (is_set(interactionFlags, InteractionFlags::RayBasedDragging) && proposedLocation.has_value())
-        {
-            auto view = viewManager->activeView();
-            auto oldPickRay = getPickRay(oldLocation.value().x(), oldLocation.value().y(), view);
-            auto newPickRay = getPickRay(proposedLocation.value().x(), proposedLocation.value().y(), view);
-            if ((modifiers & RightButton) != 0)
-            {
-                if (bool isDragStartDetermined = dragStartFromSurface.has_value(); !isDragStartDetermined || dragStartFromSurface.value())
-                {
-                    // The drag started from the surface or we are not sure yet, try to perform a surface drag
-                    bool surfaceDrag = sim->orbit(oldPickRay, newPickRay);
-
-                    if (!isDragStartDetermined)
-                        dragStartFromSurface = surfaceDrag;
-                }
-
-                if (!dragStartFromSurface.value())
-                {
-                    // Adjust the rotation rate based on the distance from the reference object.
-                    float coarseness = ComputeRotationCoarseness(*sim);
-
-                    Quaternionf q = math::XRotation(dy / static_cast<float>(metrics.height) * coarseness) *
-                                    math::YRotation(dx / static_cast<float>(metrics.width) * coarseness);
-                    sim->orbit(q);
-                }
-            }
-            else
-            {
-                sim->rotate(Eigen::Quaternionf::FromTwoVectors(oldPickRay, newPickRay));
-            }
-        }
         else
         {
-            // For a small field of view, rotate the camera more finely
-            float coarseness = 1.5f;
-            if ((modifiers & RightButton) == 0)
-            {
-                coarseness = math::radToDeg(sim->getActiveObserver()->getFOV()) / 30.0f;
-            }
-            else
-            {
-                // If right dragging to rotate, adjust the rotation rate
-                // based on the distance from the reference object.
-                coarseness = ComputeRotationCoarseness(*sim);
-            }
-
-            Quaternionf q = math::XRotation(dy / static_cast<float>(metrics.height) * coarseness) *
-                            math::YRotation(dx / static_cast<float>(metrics.width) * coarseness);
-            if ((modifiers & RightButton) != 0)
-                sim->orbit(q);
-            else
-                sim->rotate(q.conjugate());
+            dragUpdate(Eigen::Vector2f(dx, dy), oldLocation, (modifiers & RightButton) != 0, dragStartFromSurface);
         }
 
         mouseMotion += abs(dy) + abs(dx);
     }
 }
 
+void CelestiaCore::dragUpdate(const Eigen::Vector2f& delta, const std::optional<Eigen::Vector2f>& from,
+                             bool orbit, std::optional<bool>& startFromSurface)
+{
+    if (is_set(interactionFlags, InteractionFlags::RayBasedDragging) && from.has_value())
+    {
+        const auto* view = viewManager->activeView();
+        Eigen::Vector2f to = from.value() + delta;
+        auto oldRay = getPickRay(from.value().x(), from.value().y(), view);
+        auto newRay = getPickRay(to.x(), to.y(), view);
+        if (!orbit)
+        {
+            sim->rotate(Quaternionf::FromTwoVectors(oldRay, newRay));
+            return;
+        }
+
+        bool surfaceDrag = false;
+        if (!startFromSurface.has_value() || startFromSurface.value())
+        {
+            surfaceDrag = sim->orbit(oldRay, newRay);
+            if (!startFromSurface.has_value())
+                startFromSurface = surfaceDrag;
+        }
+        if (surfaceDrag)
+            return;
+    }
+
+    float coarseness = orbit ? ComputeRotationCoarseness(*sim)
+                            : math::radToDeg(sim->getActiveObserver()->getFOV()) / 30.0f;
+    Quaternionf q = math::XRotation(delta.y() / static_cast<float>(metrics.height) * coarseness) *
+                    math::YRotation(delta.x() / static_cast<float>(metrics.width) * coarseness);
+    if (orbit)
+        sim->orbit(q);
+    else
+        sim->rotate(q.conjugate());
+}
 
 void CelestiaCore::joystickAxis(JoyAxis axis, float amount)
 {
@@ -796,6 +782,31 @@ void CelestiaCore::pinchUpdate(float focusX, float focusY, float scale, bool zoo
     }
 }
 
+void CelestiaCore::rotateUpdate(float focusX, float focusY, float rotation, bool orbit)
+{
+    viewManager->pickView(sim.get(), metrics, focusX, focusY);
+    const View* view = viewManager->activeView();
+    auto focusRay = getPickRay(focusX, focusY, view);
+    auto& observer = sim->getObserver();
+    if (orbit && is_set(interactionFlags, InteractionFlags::RayBasedDragging) &&
+        observer.orbitSurface(sim->getSelection(), focusRay, rotation))
+        return;
+
+    Quaternionf q(AngleAxisf(rotation, focusRay.normalized()));
+    if (orbit && (!observer.getFrame()->getRefObject().empty() || !sim->getSelection().empty()))
+        sim->orbit(q);
+    else
+        sim->rotate(q);
+}
+
+void CelestiaCore::panUpdate(float focusX, float focusY, float dx, float dy, bool orbit, bool begin)
+{
+    if (begin)
+        panStartFromSurface.reset();
+    Eigen::Vector2f from(focusX - dx, focusY - dy);
+    viewManager->pickView(sim.get(), metrics, from.x(), from.y());
+    dragUpdate(Eigen::Vector2f(dx, dy), from, orbit, panStartFromSurface);
+}
 
 void CelestiaCore::keyDown(int key, int modifiers)
 {

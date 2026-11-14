@@ -171,6 +171,7 @@ public:
 
     void orbit(const Selection&, const Eigen::Quaternionf &q);
     bool orbit(const Selection&, const Eigen::Vector3f &from, const Eigen::Vector3f &to);
+    bool orbitSurface(const Selection&, const Eigen::Vector3f &focus, float rotation);
     void rotate(const Eigen::Quaternionf &q);
     void changeOrbitDistance(const Selection&, float d);
     void scaleOrbitDistance(const Selection&, float scale, const std::optional<Eigen::Vector3f> &focus);
