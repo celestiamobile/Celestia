@@ -194,6 +194,7 @@ public:
                         ProgressNotifier* progressNotifier = nullptr);
     bool initRenderer(celestia::engine::TextureResolution,
                       std::optional<bool> sRGBRendering = std::nullopt,
+                      std::optional<unsigned int> aaSamples = std::nullopt,
                       bool useMesaPackInvert = true);
     void start(double t);
     void start();
@@ -434,6 +435,7 @@ private:
     void charEnteredAutoComplete(const char*);
     void updateSelectionFromInput();
     void renderOverlay();
+    bool hasAnnotationDepthBuffer(GLuint framebuffer);
     Eigen::Vector3f getPickRay(float x, float y, const celestia::View *view) const;
     void dragUpdate(const Eigen::Vector2f &delta, const std::optional<Eigen::Vector2f> &from,
                     bool orbit, std::optional<bool> &startFromSurface);
@@ -537,6 +539,11 @@ private:
     std::optional<Eigen::Vector2f> dragStart{ std::nullopt };
 
     std::vector<std::unique_ptr<ViewportEffect>> viewportEffects;
+    PassthroughViewportEffect* sceneDisplayEffect{ nullptr };
+    int sceneSamples{ 1 };
+    std::optional<GLuint> annotationDepthFramebuffer{ std::nullopt };
+    bool annotationDepthAvailable{ false };
+    std::unique_ptr<ViewportEffect> presentationEffect;
     bool isViewportEffectUsed { false };
     bool needsUpdateFonts{ false };
 
