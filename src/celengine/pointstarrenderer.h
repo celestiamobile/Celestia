@@ -44,6 +44,9 @@ float psfSoftClip(float peakRadiance, float dimGate);
 // exposure * atmosphereBrightness over 96-DPI logical-pixel area.
 float psfPeakRadianceScale(float pointRadius, float exposure, float atmosphereBrightness);
 
+float psfMinimumIrradiance(float peakRadianceScale, float dimGate);
+float psfDimmedIrradiance(float irradiance, float minimumIrradiance);
+
 float psfAtmosphereBrightness(float faintestMagnitude,
                               float faintestMagnitudeWithoutAtmosphere);
 
@@ -87,13 +90,13 @@ public:
         // the per-star inner loop tight.  Filled in renderPointStars
         // before findVisibleStars runs.
         float peakRadScale          { 0.0f }; // psfPeakRadianceScale, before tint and dim clipping
-        float dimGate               { 0.0f }; // soft-clip threshold; peak <= dimGate culled
+        float minimumIrradiance     { 0.0f }; // source-space soft-clip threshold
         float glowA                 { 0.0f }; // optimization / r
         float glowPeakLargeThreshold{ 0.0f }; // glowPeak above which sizePhys > maxPointSize
     };
 
     PointStarRenderer();
-    void process(const Star &star, float distance, float appMag) override;
+    void process(const Star &star, float distance, float irradiance) override;
 
     Eigen::Vector3d obsPos;
     Eigen::Vector3f viewNormal;
@@ -103,6 +106,7 @@ public:
     const StarDatabase* starDB                  { nullptr };
     const ColorTemperatureTable* colorTemp      { nullptr };
     float SolarSystemMaxDistance                { 1.0f };
+    float labelThresholdIrradiance              { 0.0f };
     float cosFOV                                { 1.0f };
 
     StarStyle starStyle                         { StarStyle::FuzzyPointStars };

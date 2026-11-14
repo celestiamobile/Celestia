@@ -48,7 +48,7 @@ class ClosestStarFinder : public engine::StarHandler
 public:
     ClosestStarFinder(float _maxDistance, const Universe* _universe);
     ~ClosestStarFinder() = default;
-    void process(const Star& star, float distance, float appMag) override;
+    void process(const Star& star, float distance, float irradiance) override;
 
 public:
     float maxDistance;
@@ -86,7 +86,7 @@ class NearStarFinder : public engine::StarHandler
 public:
     NearStarFinder(float _maxDistance, std::vector<const Star*>& nearStars);
     ~NearStarFinder() = default;
-    void process(const Star& star, float distance, float appMag);
+    void process(const Star& star, float distance, float irradiance);
 
 private:
     float maxDistance;
@@ -345,7 +345,7 @@ public:
                     float _maxDistance,
                     float angle);
     ~CloseStarPicker() = default;
-    void process(const Star& star, float lowPrecDistance, float appMag) override;
+    void process(const Star& star, float lowPrecDistance, float irradiance) override;
 
 public:
     UniversalCoord pickOrigin;
@@ -832,7 +832,7 @@ Universe::pickStar(const UniversalCoord& origin,
                                   o,
                                   rotation.conjugate(),
                                   tolerance, 1.0f,
-                                  faintestMag);
+                                  celestia::astro::magToIrradiance(faintestMag));
     if (picker.pickedStar != nullptr)
         return Selection(const_cast<Star*>(picker.pickedStar));
     else

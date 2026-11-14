@@ -15,7 +15,12 @@ namespace
 struct Handler : celestia::engine::StarHandler
 {
     unsigned int count{};
-    void process(const Star&, float, float) override { ++count; }
+    float irradiance{};
+    void process(const Star&, float, float brightness) override
+    {
+        ++count;
+        irradiance = brightness;
+    }
 };
 
 struct Fixture
@@ -29,7 +34,8 @@ struct Fixture
         Processor::PlaneType(Eigen::Vector3f::UnitZ(), 1000000.0f),
     };
     Handler handler;
-    Processor processor{ &handler, Eigen::Vector3f::Zero(), planes, 4.0f };
+    const float minimumIrradiance{ celestia::astro::magToIrradiance(4.0f) };
+    Processor processor{ &handler, Eigen::Vector3f::Zero(), planes, minimumIrradiance };
 };
 
 } // namespace
@@ -43,11 +49,17 @@ TEST_CASE("Magnitude prefilter retains stars rounded onto the visibility boundar
     star.setPosition(Eigen::Vector3f(celestia::astro::LY_PER_PARSEC<float>, 0, 0));
     // At one parsec, this positive magnitude rounds onto -5 even with excess precision.
     star.setAbsoluteMagnitude(std::numeric_limits<float>::min());
-    Fixture::Processor processor{ &fixture.handler, Eigen::Vector3f::Zero(), fixture.planes, -5.0f };
+    float distance = star.getPosition().norm();
+    float minimumIrradiance = celestia::astro::absMagToIrradiance(
+        0.0f, celestia::astro::lightYearsToKilometers(distance));
+    Fixture::Processor processor{
+        &fixture.handler, Eigen::Vector3f::Zero(), fixture.planes, minimumIrradiance };
     REQUIRE(star.getApparentMagnitude(star.getPosition().norm()) == -5.0f);
+    REQUIRE(star.getApparentIrradiance(distance) == minimumIrradiance);
     REQUIRE(processor.checkNode(star.getPosition(), 0.0f, 0.0f));
     processor.process(star);
     CHECK(fixture.handler.count == 1);
+    CHECK(fixture.handler.irradiance == minimumIrradiance);
     star.setAbsoluteMagnitude(100.0f);
     processor.process(star);
     CHECK(fixture.handler.count == 1);
@@ -64,9 +76,11 @@ TEST_CASE("Magnitude prefilter does not discard extinction-brightened stars")
         star.setAbsoluteMagnitude(20.0f);
         star.setExtinction(-100.0f);
         REQUIRE(fixture.processor.checkNode(star.getPosition(), 0.01f, 0.0f));
-        REQUIRE(star.getApparentMagnitude(distance) <= 4.0f);
+        float irradiance = star.getApparentIrradiance(distance);
+        REQUIRE(irradiance >= fixture.minimumIrradiance);
         fixture.processor.process(star);
         CHECK(fixture.handler.count == 1);
+        CHECK(fixture.handler.irradiance == irradiance);
     }
 }
 

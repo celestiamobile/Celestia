@@ -537,7 +537,7 @@ class Renderer
     void renderPlanet(Body& body,
                       const Eigen::Vector3f& pos,
                       double distance,
-                      float appMag,
+                      float irradiance,
                       const Observer& observer,
                       float, float,
                       const Matrices&);
@@ -570,7 +570,7 @@ class Renderer
     void renderStar(const Star& star,
                     const Eigen::Vector3f& pos,
                     float distance,
-                    float appMag,
+                    float irradiance,
                     const Observer& observer,
                     float, float,
                     const Matrices&);
@@ -607,7 +607,7 @@ class Renderer
     };
 
     void renderObjectAsPoint(const PointObjectInfo& info,
-                             float appMag,
+                             float irradiance,
                              float discSizeInPixels,
                              const Color& color,
                              bool useHalos,
@@ -620,7 +620,7 @@ class Renderer
     // m_psfGlowLargeRenderer billboard path for oversize glows.
     void addStarAsPsfPoint(const PointObjectInfo &info,
                            const Color           &color,
-                           float                  appMag,
+                           float                  irradiance,
                            float                  pointScale,
                            float                  discSizeInPixels,
                            bool                   emissive);
@@ -736,7 +736,7 @@ class Renderer
 
     float brightnessScale{ 1.0f };
     float faintestMag{ 0.0f };
-    float faintestPlanetMag{ 0.0f };
+    float minimumPlanetIrradiance{ 0.0f };
     float starAtmosphereBrightness{ 1.0f };
     float saturationMagNight{ 1.0f };
     float saturationMag{ 1.0f };

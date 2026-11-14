@@ -1190,6 +1190,15 @@ Star::getApparentMagnitude(float ly) const
 }
 
 float
+Star::getApparentIrradiance(float ly) const
+{
+    float irradiance = astro::absMagToIrradiance(absMag, astro::lightYearsToKilometers(ly));
+    if (extinction != 0.0f)
+        irradiance *= astro::magToIrradiance(extinction * ly);
+    return irradiance;
+}
+
+float
 Star::getLuminosity() const
 {
     return astro::absMagToLum(absMag);
