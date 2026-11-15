@@ -99,6 +99,7 @@ set(CELENGINE_SOURCES
   starpipelineowner.h
   projectionmode.cpp
   projectionmode.h
+  radiometry.h
   rectangle.h
   referencemark.h
   rendcontext.cpp

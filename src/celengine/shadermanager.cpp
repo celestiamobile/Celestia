@@ -9,6 +9,7 @@
 // of the License, or (at your option) any later version.
 
 #include "shadermanager.h"
+#include "radiometry.h"
 
 #include <algorithm>
 #include <bit>
@@ -1575,6 +1576,8 @@ buildFragmentShader(const ShaderProperties& props)
     source += CommonHeader;
     source += CameraExposureDefine;
     source += FragmentHeader;
+    if (props.effects == LightingEffects::CalibratedEmission)
+        source += DeclareUniform("emissiveScale", Shader_Float);
 
     std::string diffTexCoord("diffTexCoord");
     std::string specTexCoord;
@@ -1956,7 +1959,9 @@ buildFragmentShader(const ShaderProperties& props)
     // Limb darkening
     if (props.lightModel == LightingModel::StarModel)
     {
-        source += "fragColor.rgb = fragColor.rgb * (1.0 - vec3(1.0 - NV) * vec3(0.56, 0.61, 0.72));\n";
+        const auto& limb = celestia::engine::detail::StarLimbDarkening;
+        source += fmt::format("fragColor.rgb *= 1.0 - (1.0 - NV) * vec3({}, {}, {});\n",
+                               limb[0], limb[1], limb[2]);
     }
 
     if (emitLineAA)
@@ -1969,6 +1974,8 @@ buildFragmentShader(const ShaderProperties& props)
         source += "fragColor.a *= 1.0 - smoothstep(lineEdge - lineHalfPx, lineEdge + lineHalfPx, abs(lineU));\n";
     }
 
+    if (props.effects == LightingEffects::CalibratedEmission)
+        source += "fragColor.rgb *= emissiveScale;\n";
     source += CameraExposureOutput;
     source += "}\n";
 
@@ -2366,6 +2373,8 @@ buildEmissiveFragmentShader(const ShaderProperties& props)
     source += CommonHeader;
     source += CameraExposureDefine;
     source += FragmentHeader;
+    if (props.effects == LightingEffects::CalibratedEmission)
+        source += DeclareUniform("emissiveScale", Shader_Float);
 
     if (util::is_set(props.texUsage, TexUsage::DiffuseTexture))
         source += DeclareUniform("diffTex", Shader_Sampler2D);
@@ -2401,6 +2410,8 @@ buildEmissiveFragmentShader(const ShaderProperties& props)
         source += "    fragColor = " + colorSource + " ;\n";
     }
 
+    if (props.effects == LightingEffects::CalibratedEmission)
+        source += "    fragColor.rgb *= emissiveScale;\n";
     source += CameraExposureOutput;
     source += "}\n";
     // End of main()
@@ -2934,6 +2945,11 @@ CelestiaGLProgram::CelestiaGLProgram(GLProgram&& _program,
 {
     initParameters();
     initSamplers();
+    if (props.effects == LightingEffects::CalibratedEmission)
+    {
+        emissiveScale = floatParam("emissiveScale");
+        emissiveScale = 1.0f;
+    }
 }
 
 CelestiaGLProgram::CelestiaGLProgram(GLProgram&& _program) :
@@ -3211,13 +3227,15 @@ void
 CelestiaGLProgram::setLightParameters(const LightingState& ls,
                                       Color materialDiffuse,
                                       Color materialSpecular,
-                                      Color materialEmissive)
+                                      Color materialEmissive,
+                                      bool applySurfaceReflectance)
 {
     setLightParameters(ls,
                        materialDiffuse.toVector3(),
                        materialSpecular.toVector3(),
                        materialEmissive.toVector3(),
-                       materialDiffuse.alpha());
+                       materialDiffuse.alpha(),
+                       applySurfaceReflectance);
 }
 
 void
@@ -3225,19 +3243,27 @@ CelestiaGLProgram::setLightParameters(const LightingState& ls,
                                       const Eigen::Vector3f& materialDiffuse,
                                       const Eigen::Vector3f& materialSpecular,
                                       const Eigen::Vector3f& materialEmissive,
-                                      float materialOpacity)
+                                      float materialOpacity,
+                                      bool applySurfaceReflectance)
 {
     unsigned int nLights = std::min(MaxShaderLights, ls.nLights);
+    float reflectanceScale = applySurfaceReflectance ? ls.surfaceReflectanceScale : 1.0f;
+    float totalIrradiance = 0.0f;
+    for (unsigned int i = 0; i < nLights; ++i)
+        totalIrradiance += ls.lights[i].irradiance;
 
     for (unsigned int i = 0; i < nLights; i++)
     {
         const DirectionalLight& light = ls.lights[i];
 
-        Eigen::Vector3f lightColor = light.color.toVector3() * light.irradiance;
-        lights.color[i] = light.color.toVector3();
+        Eigen::Vector3f lightColor = light.color.toVector3() * (light.irradiance * ls.radianceScale);
+        lights.color[i] = gl::sRGBRendering ? lightColor : light.color.toVector3();
         lights.direction[i] = light.direction_obj;
-        lights.diffuse[i] = lightColor.cwiseProduct(materialDiffuse);
-        lights.brightness[i] = lightColor.maxCoeff();
+        lights.diffuse[i] = lightColor.cwiseProduct(materialDiffuse) * reflectanceScale;
+        // Only the night-map mask uses relative illumination, never the emitted RGB.
+        lights.brightness[i] = gl::sRGBRendering
+            ? (totalIrradiance > 0.0f ? light.color.toVector3().maxCoeff() * light.irradiance / totalIrradiance : 0.0f)
+            : lightColor.maxCoeff();
         lights.specular[i] = lightColor.cwiseProduct(materialSpecular);
 
         Eigen::Vector3f halfAngle_obj = ls.eyeDir_obj + light.direction_obj;

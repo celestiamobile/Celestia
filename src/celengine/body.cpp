@@ -27,6 +27,7 @@
 #include "geometry.h"
 #include "location.h"
 #include "meshmanager.h"
+#include "radiometry.h"
 #include "referencemark.h"
 #include "selection.h"
 #include "star.h"
@@ -834,22 +835,8 @@ float
 Body::getLuminosity(float sunLuminosity,
                     float distanceFromSun) const
 {
-    // Compute the total power of the star in Watts
-    double power = astro::SOLAR_POWER * sunLuminosity;
-
-    // Compute the irradiance at a distance of 1au from the star in W/m^2
-    // double irradiance = power / sphereArea(astro::AUtoKilometers(1.0) * 1000);
-
-    // Compute the irradiance at the body's distance from the star
-    double satIrradiance = power / math::sphereArea(distanceFromSun * 1000);
-
-    // Compute the total energy hitting the planet
-    double incidentEnergy = satIrradiance * math::circleArea(radius * 1000);
-
-    double reflectedEnergy = incidentEnergy * getGeomAlbedo();
-
-    // Compute the luminosity (i.e. power relative to solar power)
-    return static_cast<float>(reflectedEnergy / astro::SOLAR_POWER);
+    // Isotropic-equivalent visual luminosity at opposition, not total reflected power.
+    return engine::detail::reflectedLuminosity(sunLuminosity, distanceFromSun, radius, getGeomAlbedo());
 }
 
 /*! Get the apparent magnitude of the body, neglecting the phase (as if
@@ -905,10 +892,10 @@ Body::getApparentIrradiance(float sunLuminosity,
 {
     double distanceToViewer = viewerPosition.norm();
     double distanceToSun = sunPosition.norm();
-    auto illuminatedFraction = static_cast<float>(1.0 + (viewerPosition / distanceToViewer).dot(sunPosition / distanceToSun))
-                             * 0.5f;
+    float phase = engine::detail::reflectedPhase(
+        (viewerPosition / distanceToViewer).dot(sunPosition / distanceToSun), surface.lunarLambert);
 
-    float luminosity = getLuminosity(sunLuminosity, static_cast<float>(distanceToSun)) * illuminatedFraction;
+    float luminosity = getLuminosity(sunLuminosity, static_cast<float>(distanceToSun)) * phase;
     return astro::lumToIrradiance(luminosity, static_cast<float>(distanceToViewer));
 }
 

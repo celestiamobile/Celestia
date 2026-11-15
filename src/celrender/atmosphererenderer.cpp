@@ -324,6 +324,8 @@ AtmosphereRenderer::renderLegacy(
     ShaderProperties shadprop;
     shadprop.texUsage = TexUsage::VertexColors;
     shadprop.lightModel = LightingModel::UnlitModel;
+    if (gl::sRGBRendering && lit)
+        shadprop.effects = LightingEffects::CalibratedEmission;
     auto *prog = m_renderer.getShaderManager().getShader(shadprop);
     if (prog == nullptr)
         return;
@@ -339,6 +341,7 @@ AtmosphereRenderer::renderLegacy(
 
     prog->use();
     prog->setMVPMatrices(*m.projection, *m.modelview);
+    prog->emissiveScale = ls.nLights > 0 ? ls.lights[0].irradiance * ls.radianceScale : 0.0f;
     m_vo.draw(gl::VertexObject::Primitive::TriangleStrip, static_cast<int>(m_skyIndices.size()));
 
     m_skyIndices.clear();
@@ -445,7 +448,7 @@ AtmosphereRenderer::render(
         Texture* ringShadowTex = nullptr;
 
         scatteringProg->use();
-        scatteringProg->setLightParameters(ls, ri.color, ri.specularColor, Color::Black);
+        scatteringProg->setLightParameters(ls, ri.color, ri.specularColor, Color::Black, false);
         scatteringProg->ambientColor = Eigen::Vector3f::Zero();
         setupAtmosphereProgram(scatteringProg);
         if (shadprop.hasEclipseShadows())

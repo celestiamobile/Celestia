@@ -43,6 +43,7 @@
 #include "planetgrid.h"
 #include "pointstarvertexbuffer.h"
 #include "pointstarrenderer.h"
+#include "radiometry.h"
 #include "psfstarvertexbuffer.h"
 #include "starpipelineowner.h"
 #include "orbitsampler.h"
@@ -2001,7 +2002,13 @@ static void renderSphereUnlit(const RenderInfo& ri,
 
     prog->setMVPMatrices(*m.projection, *m.modelview);
     prog->textureOffset = 0.0f;
-    prog->ambientColor = ri.color.toVector3();
+    Eigen::Vector3f emission = ri.color.toVector3() * ri.emissiveScale;
+    if (ri.isStar && gl::sRGBRendering)
+    {
+        for (int channel = 0; channel < 3; ++channel)
+            emission[channel] *= engine::detail::limbDarkeningNormalization(engine::detail::StarLimbDarkening[channel]);
+    }
+    prog->ambientColor = emission;
     prog->opacity = 1.0f;
     if (ri.isStar)
         prog->eyePosition = ri.eyePos_obj;
@@ -2214,6 +2221,7 @@ setupObjectLighting(const vector<LightSource>& suns,
                     const Vector3f& objScale,
                     const Vector3f& objPosition_eye,
                     bool isNormalized,
+                    float logicalPixelAngularWidth,
                     LightingState& ls)
 {
     unsigned int nLights = min(MaxLights, (unsigned int) suns.size());
@@ -2317,12 +2325,10 @@ setupObjectLighting(const vector<LightSource>& suns,
 
     if (gl::sRGBRendering)
     {
-        // Normalize light source irradiance so the brightest light is ~1.0.
+        ls.radianceScale = engine::detail::reflectedRadianceScale(logicalPixelAngularWidth);
         ls.nLights = 0;
         for (i = 0; i < nLights; i++)
         {
-            ls.lights[i].irradiance /= totalIrradiance;
-
             // Compute the direction of the light in object space
             ls.lights[i].direction_obj = m * ls.lights[i].direction_eye;
 
@@ -2502,9 +2508,12 @@ void Renderer::renderObject(const Vector3f& pos,
     if (ri.baseTex == nullptr ||
         util::is_set(obj.surface->appearanceFlags, Surface::Flags::BlendTexture))
     {
-        ri.color = obj.surface->color.linearize(gl::sRGBRendering);
+        ri.color = obj.isStar && gl::sRGBRendering
+            ? obj.surface->color
+            : obj.surface->color.linearize(gl::sRGBRendering);
     }
 
+    ri.emissiveScale = obj.emissiveScale;
     ri.ambientColor = ambientColor;
     ri.specularColor = obj.surface->specularColor.linearize(gl::sRGBRendering);
     ri.specularPower = obj.surface->specularPower;
@@ -3134,9 +3143,13 @@ void Renderer::setupPlanetLighting(Body& body, // NOSONAR(cpp:S107,cpp:S3776)
                             scaleFactors,
                             pos,
                             isNormalized,
+                            pixelSize * static_cast<float>(screenDpi) / 96.0f,
                             lights);
         assert(lights.nLights <= MaxLights);
 
+        if (gl::sRGBRendering)
+            lights.surfaceReflectanceScale = engine::detail::geometricAlbedoScale(body.getGeomAlbedo(),
+                                                                                  rp.surface->lunarLambert);
         lights.ambientColor = ambientColor.toVector3();
 
         // Clear out the list of eclipse shadows
@@ -3296,6 +3309,19 @@ void Renderer::renderPlanet(Body& body,
         Quaterniond q;
         setupPlanetLighting(body, pos, now, nearPlaneDistance, altitude, rp, lights, q);
 
+        if (gl::sRGBRendering && starStyle == StarStyle::PointSpreadFunction && body.isVisibleAsPoint())
+        {
+            float pointRadius = std::max(starPointRadius, 1.0e-3f);
+            float pointScale = static_cast<float>(screenDpi) / 96.0f;
+            float peakScale = engine::detail::psfPeakRadianceScale(pointRadius, cameraExposure,
+                                                                   starAtmosphereBrightness);
+            float minimum = engine::detail::psfMinimumIrradiance(peakScale,
+                                                                 astro::LOWEST_IRRADIATION_SRGB * starDimClipFactor);
+            float dimming = irradiance > 0.0f ? engine::detail::psfDimmedIrradiance(irradiance, minimum) / irradiance : 1.0f;
+            lights.surfaceReflectanceScale *= dimming * starAtmosphereBrightness
+                * (1.0f - engine::detail::psfPointFade(discSizeInPixels, pointRadius, pointScale));
+        }
+
         // Cache this lighting so the atmosphere entry can reuse it this frame;
         // only atmospheric bodies have such an entry. Copy the eclipse shadows
         // and re-point at the copies, since lights.shadows aliases the shared
@@ -3425,6 +3451,7 @@ void Renderer::renderRingSystem(const RenderListEntry& rle,
                             scaleFactors,
                             pos,
                             isNormalized,
+                            pixelSize * static_cast<float>(screenDpi) / 96.0f,
                             lights);
         assert(lights.nLights <= MaxLights);
         lights.ambientColor = ambientColor.toVector3();
@@ -3500,6 +3527,29 @@ void Renderer::renderStar(const Star& star,
             surface.baseTexture = util::TextureHandle::Invalid;
         surface.appearanceFlags |= Surface::Flags::ApplyBaseTexture;
         surface.appearanceFlags |= Surface::Flags::Emissive;
+
+        if (gl::sRGBRendering)
+        {
+            float greenScale = 1.0f;
+            surface.color = psfGreenNormalization(color, 0.1f, greenScale);
+            surface.appearanceFlags |= Surface::Flags::BlendTexture;
+            float pointScale = static_cast<float>(screenDpi) / 96.0f;
+            float discFraction = 1.0f;
+            float surfaceIrradiance = irradiance;
+            if (starStyle == StarStyle::PointSpreadFunction)
+            {
+                float pointRadius = std::max(starPointRadius, 1.0e-3f);
+                float peakScale = engine::detail::psfPeakRadianceScale(pointRadius, cameraExposure,
+                                                                      starAtmosphereBrightness);
+                float minimum = engine::detail::psfMinimumIrradiance(peakScale,
+                                                                     astro::LOWEST_IRRADIATION_SRGB * starDimClipFactor);
+                surfaceIrradiance = engine::detail::psfDimmedIrradiance(irradiance, minimum);
+                surfaceIrradiance *= starAtmosphereBrightness;
+                discFraction = 1.0f - engine::detail::psfPointFade(discSizeInPixels, pointRadius, pointScale);
+            }
+            rp.emissiveScale = engine::detail::discMeanRadiance(surfaceIrradiance, discSizeInPixels / pointScale)
+                              * greenScale * discFraction;
+        }
 
         rp.isStar = true;
         rp.surface = &surface;
@@ -3673,18 +3723,7 @@ static float luminosityAtOpposition(float sunLuminosity,
                                     float distanceFromSun,
                                     float objRadius)
 {
-    // Compute the total power of the star in Watts
-    double power = astro::SOLAR_POWER * sunLuminosity;
-
-    // Compute the irradiance at the body's distance from the star
-    double irradiance = power / math::sphereArea(distanceFromSun * 1000);
-
-    // Compute the total energy hitting the planet; assume an albedo of 1.0, so
-    // reflected energy = incident energy.
-    double incidentEnergy = irradiance * math::circleArea(objRadius * 1000);
-
-    // Compute the luminosity (i.e. power relative to solar power)
-    return (float) (incidentEnergy / astro::SOLAR_POWER);
+    return engine::detail::reflectedLuminosity(sunLuminosity, distanceFromSun, objRadius, 1.0f);
 }
 
 
@@ -3963,14 +4002,12 @@ void Renderer::buildRenderLists(const Vector3d& astrocentricObserverPos,
             // Calculate the size of the planet/moon disc in pixels
             float discSize = (body->getCullingRadius() / (float) dist_v) / pixelSize;
 
-            // Compute the irradiance; instead of summing the reflected
-            // light from all nearby stars, we just consider the one with the
-            // highest apparent brightness.
+            // Reflected light from independent sources is additive.
             float irradiance = 0.0f;
             for (const auto &lightSource : lightSourceList)
             {
                 Eigen::Vector3d sunPos = pos_v - lightSource.position;
-                irradiance = std::max(irradiance, body->getApparentIrradiance(lightSource.luminosity, sunPos, pos_v));
+                irradiance += body->getApparentIrradiance(lightSource.luminosity, sunPos, pos_v);
             }
 
             bool visibleAsPoint = irradiance > minimumPlanetIrradiance && body->isVisibleAsPoint();

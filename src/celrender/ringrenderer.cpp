@@ -179,7 +179,7 @@ RingRenderer::renderRings(const RingSystem& rings,
 
     prog->eyePosition = ls.eyePos_obj;
     prog->ambientColor = ri.ambientColor.toVector3();
-    prog->setLightParameters(ls, ri.color, ri.specularColor, Color::Black);
+    prog->setLightParameters(ls, ri.color, ri.specularColor, Color::Black, false);
 
     prog->ringRadius = inner;
     prog->ringWidth = outer - inner;

@@ -69,6 +69,10 @@ public:
     };
 
     unsigned int nLights{ 0 };
+    // Convert solar-at-1-AU irradiance to logical-pixel scene radiance.
+    float radianceScale{ 1.0f };
+    // Geometric albedo and opposition BRDF normalization, for the surface only.
+    float surfaceReflectanceScale{ 1.0f };
     std::array<DirectionalLight, MaxLights> lights;
     std::array<EclipseShadowVector*, MaxLights> shadows;
     std::array<RingShadow, MaxLights> ringShadows;

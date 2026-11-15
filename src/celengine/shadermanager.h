@@ -127,6 +127,7 @@ enum class LightingEffects : std::uint16_t
     CloudLighting             = 0x0008,
     AtmosphereTransmission    = 0x0010,
     AtmosphereDualSource      = 0x0020,
+    CalibratedEmission        = 0x0040,
 };
 
 enum class FisheyeOverrideMode : int
@@ -240,12 +241,14 @@ public:
     void setLightParameters(const LightingState& ls,
                             Color materialDiffuse,
                             Color materialSpecular,
-                            Color materialEmissive);
+                            Color materialEmissive,
+                            bool applySurfaceReflectance = true);
     void setLightParameters(const LightingState& ls,
                             const Eigen::Vector3f& materialDiffuse,
                             const Eigen::Vector3f& materialSpecular,
                             const Eigen::Vector3f& materialEmissive,
-                            float materialOpacity);
+                            float materialOpacity,
+                            bool applySurfaceReflectance = true);
     void setEclipseShadowParameters(const LightingState& ls,
                                     const Eigen::Vector3f& scale,
                                     const Eigen::Quaternionf& orientation);
@@ -285,6 +288,7 @@ public:
     FloatShaderParameter shininess;
     Vec3ShaderParameter ambientColor;
     FloatShaderParameter opacity;
+    FloatShaderParameter emissiveScale;
 
     FloatShaderParameter ringWidth;
     FloatShaderParameter ringRadius;

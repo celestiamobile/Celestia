@@ -153,6 +153,7 @@ public:
     ~GLSLUnlit_RenderContext() override;
 
     void makeCurrent(const cmod::Material&) override;
+    void setEmissiveScale(float scale) { emissiveScale = scale; }
     void drawGroup(celestia::gl::VertexObject &vao, const cmod::PrimitiveGroup& group) override;
 
 private:
@@ -160,6 +161,7 @@ private:
 
     cmod::BlendMode blendMode;
     bool diffuseTextureLoading{ false };
+    float emissiveScale{ 1.0f };
 
     ShaderProperties shaderProps;
 
