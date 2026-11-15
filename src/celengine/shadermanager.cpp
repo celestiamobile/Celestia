@@ -78,6 +78,7 @@ constexpr std::array StaticShaderBaseNames
     "text"sv,
     "tidal"sv,
     "warpmesh"sv,
+    "calibratedstar"sv,
 };
 
 static_assert(StaticShaderBaseNames.size() == static_cast<std::size_t>(StaticShader::_Count));
@@ -2911,7 +2912,10 @@ ShaderManager::loadShader(StaticShaderProperties props)
                           props.shader == StaticShader::Globular ||
                           props.shader == StaticShader::LargeStar ||
                           props.shader == StaticShader::Star ||
+                          props.shader == StaticShader::CalibratedStar ||
                           props.shader == StaticShader::Tidal;
+    bool visualOnly = util::is_set(props.options, StaticShaderOptions::VisualOnly);
+    cameraExposure = cameraExposure && !visualOnly;
     result = buildProgram(vs, fs, m_fisheyeEnabled, props.options, cameraExposure);
     if (result && cameraExposure)
         result->bindCameraExposure(m_cameraExposure);

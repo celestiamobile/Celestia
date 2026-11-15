@@ -131,6 +131,41 @@ celestia::engine::detail::psfPointFade(float discRadiusPixels,
     return smoothStep((fadeEnd - discRadiusPixels) / (fadeEnd - 1.0f));
 }
 
+float
+celestia::engine::detail::calibratedStarSize(StarStyle style, float irradiance, float pointScale)
+{
+    float size = style == StarStyle::PointStars ? 1.0f : BaseStarDiscSize;
+    if (style == StarStyle::ScaledDiscStars)
+        size *= std::clamp(std::pow(std::max(irradiance, 0.0f), 0.25f), 1.0f, MaxScaledDiscStarSize);
+    return std::max(1.0f, std::ceil(size * pointScale));
+}
+
+float
+celestia::engine::detail::calibratedStarPointFade(
+    StarStyle style, float irradiance, float discRadiusPixels, float pointScale)
+{
+    return psfPointFade(discRadiusPixels, calibratedStarSize(style, irradiance, pointScale) /
+                                            (2.0f * pointScale), pointScale);
+}
+
+float
+celestia::engine::detail::calibratedStarPeakRadiance(
+    StarStyle style, float irradiance, float pointScale)
+{
+    float size = calibratedStarSize(style, irradiance, pointScale);
+    // Match the central pixel's integrated kernel in calibratedstar_frag.glsl.
+    float mass = style == StarStyle::PointStars
+        ? 1.0f / size
+        : std::erf(std::sqrt(8.0f) / size) / 0.999936658f;
+    return irradiance * pointScale * pointScale * mass * mass;
+}
+
+float
+celestia::engine::detail::calibratedPointHaloOpacity(float peakRadiance, float pointFraction)
+{
+    return pointFraction > 0.0f ? pointFraction * psfGlowOnset(peakRadiance * pointFraction) : 0.0f;
+}
+
 // Convert a position in the universal coordinate system to astrocentric
 // coordinates, taking into account possible orbital motion of the star.
 static Vector3d astrocentricPosition(const UniversalCoord& pos,
@@ -206,6 +241,8 @@ void PointStarRenderer::process(const Star& star, float distance, float irradian
         // planets.
         if (distance > SolarSystemMaxDistance)
         {
+            bool labelStar = util::is_set(labelMode, RenderLabels::StarLabels)
+                             && irradiance > labelThresholdIrradiance;
             if (starStyle == StarStyle::PointSpreadFunction)
             {
                 // Relative linear-RGB PSF renderer. The shader receives a
@@ -262,6 +299,24 @@ void PointStarRenderer::process(const Star& star, float distance, float irradian
                     }
                 }
             }
+            else if (celestia::gl::sRGBRendering)
+            {
+                float greenScale = 1.0f;
+                Color linearStarColor = psfGreenNormalization(starColor, 0.1f, greenScale);
+                float size = celestia::engine::detail::calibratedStarSize(
+                    starStyle, irradiance, static_cast<float>(renderer->getScreenDpi()) / 96.0f);
+                starVertexBuffer->addStar(relPos, linearStarColor, size,
+                                         irradiance * greenScale * atmosphereBrightness);
+                renderer->addLegacyPointHalo(relPos, starColor, irradiance);
+                if (labelStar)
+                {
+                    float peak = celestia::engine::detail::calibratedStarPeakRadiance(
+                        starStyle, irradiance, static_cast<float>(renderer->getScreenDpi()) / 96.0f);
+                    peak *= greenScale * linearStarColor.toVector3().maxCoeff()
+                            * atmosphereBrightness * renderer->getCameraExposure();
+                    labelStar = peak > astro::LOWEST_IRRADIATION_SRGB;
+                }
+            }
             else
             {
                 float pointSize, alpha, glareSize, glareAlpha;
@@ -269,13 +324,13 @@ void PointStarRenderer::process(const Star& star, float distance, float irradian
                 renderer->calculatePointSize(irradiance, size, pointSize, alpha, glareSize, glareAlpha);
 
                 if (glareSize != 0.0f)
-                    glareVertexBuffer->addStar(relPos, Color(starColor, glareAlpha), glareSize);
+                    glareVertexBuffer->addStar(relPos, Color(starColor, glareAlpha), glareSize, 1.0f);
                 if (pointSize != 0.0f)
-                    starVertexBuffer->addStar(relPos, Color(starColor, alpha), pointSize);
+                    starVertexBuffer->addStar(relPos, Color(starColor, alpha), pointSize, 1.0f);
             }
 
             // Place labels for stars brighter than the specified label threshold brightness
-            if (util::is_set(labelMode, RenderLabels::StarLabels) && irradiance > labelThresholdIrradiance)
+            if (labelStar)
             {
                 Vector3f starDir = relPos.normalized();
                 if (starDir.dot(viewNormal) > cosFOV)

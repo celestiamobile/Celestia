@@ -17,8 +17,10 @@
 namespace celestia::render
 {
 
-LegacyLargeStarRenderer::LegacyLargeStarRenderer(const Renderer &renderer, capacity_t capacity) :
-    LargeStarRenderer(renderer, StaticShader::LargeStar, capacity, StaticShaderOptions::None)
+LegacyLargeStarRenderer::LegacyLargeStarRenderer(const Renderer &renderer, capacity_t capacity, bool calibrated) :
+    LargeStarRenderer(renderer, calibrated ? StaticShader::CalibratedStar : StaticShader::LargeStar,
+                      capacity, calibrated ? StaticShaderOptions::Billboard : StaticShaderOptions::None),
+    m_calibrated(calibrated)
 {
 }
 
@@ -27,6 +29,13 @@ LegacyLargeStarRenderer::~LegacyLargeStarRenderer() = default;
 void
 LegacyLargeStarRenderer::onMakeCurrent(const Eigen::Vector2f &viewportRcp)
 {
+    if (m_calibrated)
+    {
+        program()->floatParam("pointMode") = 0.0f;
+        program()->floatParam("pointScale") = static_cast<float>(renderer().getScreenDpi()) / 96.0f;
+        program()->vec2Param("viewportRcp") = viewportRcp;
+        return;
+    }
     if (m_texture != nullptr)
         m_texture->bind();
 

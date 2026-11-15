@@ -596,6 +596,10 @@ class Renderer
                             float &glareSize,
                             float &glareAlpha) const;
 
+    void addLegacyPointHalo(const Eigen::Vector3f& position, const Color& color,
+                            float irradiance, float discSizeInPixels = 0.0f,
+                            float pointFraction = 1.0f);
+
     // Geometric description of a renderable point-like body shared by
     // renderObjectAsPoint / addStarAsPsfPoint, so we can thread the
     // precomputed camera distance without exceeding parameter limits.
