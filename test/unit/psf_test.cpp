@@ -8,13 +8,12 @@
 // of the License, or (at your option) any later version.
 
 #include <algorithm>
+#include <celastro/astro.h>
+#include <celengine/pointstarrenderer.h>
 #include <cmath>
+#include <doctest.h>
 #include <limits>
 #include <numbers>
-
-#include <doctest.h>
-
-#include <celengine/pointstarrenderer.h>
 
 using celestia::engine::detail::psfGlowOnset;
 using celestia::engine::detail::psfPointFade;
@@ -59,6 +58,50 @@ TEST_CASE("Reflective point halos vanish as the resolved surface takes over")
     CHECK(calibratedPointHaloOpacity(1000.0f, 0.25f) == doctest::Approx(0.25f));
     CHECK(calibratedPointHaloOpacity(1000.0f, 0.0f) == 0.0f);
     CHECK(calibratedPointHaloOpacity(std::numeric_limits<float>::infinity(), 0.0f) == 0.0f);
+}
+
+TEST_CASE("PSF metering remains linear when the visual core is clipped")
+{
+    namespace detail = celestia::engine::detail;
+    namespace astro  = celestia::astro;
+    for (float magnitude : { 6.0f, 8.0f, 12.0f })
+    {
+        for (float radius : { 0.5f, 1.5f, 3.0f })
+        {
+            for (float dimClip : { 0.0f, 10.0f, 50.0f })
+            {
+                CAPTURE(magnitude);
+                CAPTURE(radius);
+                CAPTURE(dimClip);
+                float flux      = astro::magToIrradiance(magnitude);
+                float unitScale = detail::psfPeakRadianceScale(radius, 1.0f, 1.0f);
+                for (float exposure : { 0.0001f, 1.0f, 32.0f, 4096.0f })
+                {
+                    CAPTURE(exposure);
+                    float scale   = unitScale * exposure;
+                    float minimum = detail::psfMinimumIrradiance(
+                        scale,
+                        astro::LOWEST_IRRADIATION_SRGB * dimClip);
+                    auto peaks = detail::psfPeakRadiances(flux, minimum, scale);
+                    CHECK(
+                        peaks.x()
+                        == doctest::Approx(scale * detail::psfDimmedIrradiance(flux, minimum)));
+                    CHECK(peaks.y() / exposure == doctest::Approx(unitScale * flux));
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("PSF invisible stars still provide physical light to the meter")
+{
+    using celestia::engine::detail::psfPeakRadiances;
+    auto clipped = psfPeakRadiances(0.1f, 1.0f, 2.0f);
+    CHECK(clipped.x() == 0.0f);
+    CHECK(clipped.y() == doctest::Approx(0.2f));
+    auto boundary = psfPeakRadiances(1.0f, 1.0f, 2.0f);
+    CHECK(boundary.x() == 0.0f);
+    CHECK(boundary.y() == doctest::Approx(2.0f));
 }
 
 TEST_CASE("PSF glow fades in between peak radiance one and two")

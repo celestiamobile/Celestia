@@ -66,6 +66,9 @@ float calibratedStarPeakRadiance(StarStyle style, float irradiance, float pointS
 // Appearance-only halo fades with the point contribution as a body resolves.
 float calibratedPointHaloOpacity(float peakRadiance, float pointFraction);
 
+// Visual soft-clipped peak and linear metering peak, before color normalization.
+Eigen::Vector2f psfPeakRadiances(float irradiance, float minimumIrradiance, float peakScale);
+
 } // namespace celestia::engine::detail
 
 class PointStarRenderer : public ObjectRenderer<Star, float>
@@ -98,6 +101,7 @@ public:
         // before findVisibleStars runs.
         float peakRadScale          { 0.0f }; // psfPeakRadianceScale, before tint and dim clipping
         float minimumIrradiance     { 0.0f }; // source-space soft-clip threshold
+        float minimumMeterIrradiance{ 0.0f }; // exposure-independent catalog cutoff
         float glowA                 { 0.0f }; // optimization / r
         float glowPeakLargeThreshold{ 0.0f }; // glowPeak above which sizePhys > maxPointSize
     };

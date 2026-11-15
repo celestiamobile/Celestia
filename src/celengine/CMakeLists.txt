@@ -5,6 +5,8 @@ set(CELENGINE_SOURCES
   asyncresourcecache.h
   atmosphere.cpp
   atmosphere.h
+  autoexposure.cpp
+  autoexposure.h
   axisarrow.cpp
   axisarrow.h
   body.cpp

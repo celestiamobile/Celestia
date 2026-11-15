@@ -54,6 +54,12 @@ public:
 
     void addStar(const Eigen::Vector3f &center, const Color &color, float scalar,
                  float limbRadius = 0.0f, float alpha = 1.0f);
+    void addStar(
+        const Eigen::Vector3f &center,
+        const Color           &color,
+        const Eigen::Vector2f &scalar,
+        float                  limbRadius,
+        float                  alpha);
 
 protected:
     LargeStarRenderer(const Renderer &renderer, StaticShader shaderId, capacity_t capacity,
@@ -71,7 +77,7 @@ private:
     struct StarInstance
     {
         Eigen::Vector3f              center;
-        float                        scalar;  // peak radiance or pixel size
+        Eigen::Vector2f              scalar;     // visual scalar and optional metering peak
         float                        limbRadius; // resolved-body limb (px), 0 if none
         float                        alpha;   // PSF glow fade, full float precision
         std::array<unsigned char, 4> color;   // legacy shader also reads .a

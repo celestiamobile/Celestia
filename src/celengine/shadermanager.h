@@ -44,6 +44,8 @@ enum class StaticShader
     Text,
     Tidal,
     WarpMesh,
+    ExposureMeter,
+    ExposureTarget,
     CalibratedStar,
     _Count,
 };
@@ -246,6 +248,7 @@ public:
 
     void use() const;
     void bindCameraExposure(const float&);
+    void bindPhysicalLightScale(const float&);
 
     void setLightParameters(const LightingState& ls,
                             Color materialDiffuse,
@@ -292,6 +295,8 @@ public:
     Vec3ShaderParameter ambientColor;
     FloatShaderParameter opacity;
     FloatShaderParameter emissiveScale;
+    FloatShaderParameter   surfaceDimming;
+    FloatShaderParameter   emissionDimming;
 
     FloatShaderParameter ringWidth;
     FloatShaderParameter ringRadius;
@@ -389,6 +394,9 @@ private:
     const float* cameraExposure{ nullptr };
     mutable FloatShaderParameter cameraExposureParameter;
     mutable float lastCameraExposure{ -1.0f };
+    const float* physicalLightScale{ nullptr };
+    mutable FloatShaderParameter physicalLightScaleParameter;
+    mutable float lastPhysicalLightScale{ -1.0f };
 };
 
 class ShaderManager
@@ -404,6 +412,7 @@ public:
 
     void setFisheyeEnabled(bool enabled);
     void setCameraExposure(float exposure) { m_cameraExposure = exposure; }
+    void setPhysicalLightScale(float scale) { m_physicalLightScale = scale; }
 
 private:
     std::shared_ptr<CelestiaGLProgram> loadShader(StaticShaderProperties);
@@ -415,4 +424,5 @@ private:
     std::shared_ptr<CelestiaGLProgram> m_errorProgram;
     bool m_fisheyeEnabled { false };
     float m_cameraExposure{ 1.0f };
+    float m_physicalLightScale{ 1.0f };
 };

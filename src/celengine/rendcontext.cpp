@@ -620,6 +620,7 @@ GLSLUnlit_RenderContext::makeCurrent(const cmod::Material& m)
 
     prog->lights[0].diffuse = m.diffuse.toVector3();
     prog->emissiveScale = emissiveScale;
+    prog->emissionDimming   = emissionDimming;
     prog->opacity = m.opacity;
 
     if (usePointSize)

@@ -522,6 +522,7 @@ void renderGeometry_GLSL_Unlit(RenderGeometry* geometry,
 {
     GLSLUnlit_RenderContext rc(renderer, m.modelview, m.projection);
     rc.setEmissiveScale(ri.emissiveScale);
+    rc.setEmissionDimming(ri.emissionDimming);
     rc.setPointScale(ri.pointScale);
 
     Renderer::PipelineState ps;

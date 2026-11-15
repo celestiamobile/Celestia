@@ -173,15 +173,15 @@ PsfStarVertexBuffer::setupVertexArrayObject()
         sizeof(StarVertex),
         offsetof(StarVertex, position));
 
-    // peakRadiance bound to IntensityAttributeIndex (vec1 float)
+    // Both peaks share one attribute; glow shaders consume only the first.
     m_vo->addVertexBuffer(
         m_bo,
         CelestiaGLProgram::IntensityAttributeIndex,
-        1,
+        2,
         gl::VertexObject::DataType::Float,
         false,
         sizeof(StarVertex),
-        offsetof(StarVertex, peakRadiance));
+        offsetof(StarVertex, radiance));
 
     // continuous distance-derived glow fade; float for a smooth transition
     m_vo->addVertexBuffer(
@@ -232,15 +232,26 @@ PsfStarVertexBuffer::addStar(const Eigen::Vector3f &pos,
                              float limbRadius,
                              float alpha)
 {
+    addStar(pos, color, Eigen::Vector2f(peakRadiance, 0.0f), limbRadius, alpha);
+}
+
+void
+PsfStarVertexBuffer::addStar(
+    const Eigen::Vector3f &pos,
+    const Color           &color,
+    const Eigen::Vector2f &radiance,
+    float                  limbRadius,
+    float                  alpha)
+{
     if (m_useLargePoints)
     {
-        m_largePointRenderer->addStar(pos, color, peakRadiance);
+        m_largePointRenderer->addStar(pos, color, radiance, limbRadius, alpha);
         return;
     }
 
     assert(m_nStars < m_capacity);
     m_vertices[m_nStars].position = pos;
-    m_vertices[m_nStars].peakRadiance = peakRadiance;
+    m_vertices[m_nStars].radiance   = radiance;
     m_vertices[m_nStars].limbRadius = limbRadius;
     m_vertices[m_nStars].alpha = alpha;
     color.get(m_vertices[m_nStars].color.data());

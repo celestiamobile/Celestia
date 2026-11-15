@@ -114,6 +114,7 @@ private slots:
     void on_toneMappingCombo_currentIndexChanged(int index) const;
     void on_toneMappingExposureSpinBox_valueChanged(double value) const;
     void on_cameraExposureSpinBox_valueChanged(double value) const;
+    void on_autoCameraExposureCheckBox_toggled(bool enabled) const;
 
     void on_lowResolutionButton_clicked() const;
     void on_mediumResolutionButton_clicked() const;

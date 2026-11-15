@@ -38,5 +38,6 @@ struct RenderInfo
     float pixWidth{ 1.0f };
     float pointScale{ 1.0f };
     float emissiveScale{ 1.0f };
+    float           emissionDimming{ 1.0f };
     bool isStar{ false };
 };

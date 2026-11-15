@@ -191,6 +191,7 @@ AppWindow::run(const Settings& settings)
     renderer->setStarOptimization(config->renderDetails.stars.optimization);
     renderer->setStarMaxIrradiance(config->renderDetails.stars.maxIrradiance);
     renderer->setCameraExposure(config->renderDetails.output.cameraExposure);
+    renderer->setAutoExposureEnabled(config->renderDetails.output.autoCameraExposure);
     renderer->setToneMappingExposure(config->renderDetails.output.toneMappingExposure);
 
     settings.apply(m_appCore.get());

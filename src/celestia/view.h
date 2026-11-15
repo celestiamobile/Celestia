@@ -13,6 +13,7 @@
 #include <memory>
 #include <vector>
 
+class AutoExposure;
 class Color;
 class FramebufferObject;
 class Observer;
@@ -65,6 +66,7 @@ public:
     float          y;
     float          width;
     float          height;
+    std::unique_ptr<AutoExposure> autoExposure;
 
 private:
     std::vector<std::unique_ptr<FramebufferObject>> fbos;

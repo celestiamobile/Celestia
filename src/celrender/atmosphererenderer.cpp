@@ -386,7 +386,10 @@ AtmosphereRenderer::render(
 
     bool useDualSource = false;
     GLenum scatteringBlendDestination = GL_ONE;
-    useDualSource = ls.nLights > 0 && gl::dualSourceBlending;
+    // Dual-source blending generally supports only one draw buffer. The
+    // transmission/scattering path composites both HDR attachments identically.
+    useDualSource
+        = ls.nLights > 0 && gl::dualSourceBlending && !m_renderer.getAutoExposureEnabled();
     if (useDualSource)
 #ifdef GL_ES
         scatteringBlendDestination = GL_SRC1_COLOR_EXT;

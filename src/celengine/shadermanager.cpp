@@ -70,6 +70,8 @@ constexpr std::array StaticShaderBaseNames
     "text"sv,
     "tidal"sv,
     "warpmesh"sv,
+    "exposuremeter"sv,
+    "exposuretarget"sv,
     "calibratedstar"sv,
 };
 
@@ -188,10 +190,16 @@ VertexPosition(const ShaderProperties& props)
 }
 
 constexpr std::string_view FragmentHeader = R"glsl(
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
+#ifndef DUAL_SOURCE
+layout(location = 1) out vec4 meterColor;
+uniform highp float physicalLightScale;
+#endif
 #ifdef CAMERA_EXPOSURE
 uniform highp float cameraExposure;
 #endif
+uniform float surfaceDimming;
+uniform float emissionDimming;
 )glsl"sv;
 
 constexpr std::string_view CameraExposureDefine = "#define CAMERA_EXPOSURE\n"sv;
@@ -199,6 +207,9 @@ constexpr std::string_view CameraExposureOutput = R"glsl(
 #ifdef CAMERA_EXPOSURE
     fragColor.rgb *= cameraExposure;
 #endif
+    meterColor = fragColor;
+    meterColor.rgb *= physicalLightScale;
+    fragColor.rgb *= emissionDimming;
 )glsl"sv;
 
 constexpr std::string_view CommonAttribs = R"glsl(
@@ -1905,6 +1916,10 @@ buildFragmentShader(const ShaderProperties& props)
         source += "color.rgb = mix(color.rgb, overlayColor.rgb, overlayColor.a);\n";
     }
 
+    source += "vec3 physicalDiffuse = diff.rgb;\n";
+    if (props.lightModel != LightingModel::UnlitModel)
+        source += "diff.rgb = ambientColor + (diff.rgb - ambientColor) * surfaceDimming;\n";
+
     if (props.hasSpecular())
     {
         // Add in the specular color
@@ -1919,6 +1934,7 @@ buildFragmentShader(const ShaderProperties& props)
     {
         source += "fragColor = color * diff;\n";
     }
+    source += "vec3 meterDelta = color.rgb * (physicalDiffuse - diff.rgb);\n";
 
     if (util::is_set(props.texUsage, TexUsage::NightTexture))
     {
@@ -1947,6 +1963,7 @@ buildFragmentShader(const ShaderProperties& props)
         source += DeclareLocal("scatterColor", Shader_Vector3);
         source += AtmosphericEffects(props, 0);
         source += "fragColor.rgb = fragColor.rgb * scatterEx + scatterColor;\n";
+        source += "meterDelta *= scatterEx;\n";
     }
 
     // Limb darkening
@@ -1955,6 +1972,11 @@ buildFragmentShader(const ShaderProperties& props)
         const auto& limb = celestia::engine::detail::StarLimbDarkening;
         source += fmt::format("fragColor.rgb *= 1.0 - (1.0 - NV) * vec3({}, {}, {});\n",
                                limb[0], limb[1], limb[2]);
+        source += fmt::format(
+            "meterDelta *= 1.0 - (1.0 - NV) * vec3({}, {}, {});\n",
+            limb[0],
+            limb[1],
+            limb[2]);
     }
 
     if (emitLineAA)
@@ -1968,8 +1990,12 @@ buildFragmentShader(const ShaderProperties& props)
     }
 
     if (props.effects == LightingEffects::CalibratedEmission)
+    {
         source += "fragColor.rgb *= emissiveScale;\n";
+        source += "meterDelta *= emissiveScale;\n";
+    }
     source += CameraExposureOutput;
+    source += "meterColor.rgb += meterDelta * cameraExposure * physicalLightScale;\n";
     source += "}\n";
 
     DumpFSSource(source);
@@ -2212,6 +2238,8 @@ buildAtmosphereFragmentShader(const ShaderProperties& props)
         source += "#extension GL_EXT_blend_func_extended : require\n";
 #endif
     source += CommonHeader;
+    if (dualSource)
+        source += "#define DUAL_SOURCE\n";
     if (!transmissionOnly)
         source += CameraExposureDefine;
     source += FragmentHeader;
@@ -2278,7 +2306,10 @@ buildAtmosphereFragmentShader(const ShaderProperties& props)
         if (dualSource)
             source += "    atmosphereTransmission = vec4(scatterEx, 1.0);\n";
     }
-    source += CameraExposureOutput;
+    if (transmissionOnly)
+        source += "meterColor = fragColor;\n";
+    else
+        source += dualSource ? "fragColor.rgb *= cameraExposure;\n"sv : CameraExposureOutput;
     source += "}\n";
 
     DumpFSSource(source);
@@ -2614,8 +2645,13 @@ buildProgram(const ShaderProperties& props, bool fisheyeEnabled)
 }
 
 std::shared_ptr<CelestiaGLProgram>
-buildProgram(std::string_view vs, std::string_view fs, bool fisheyeEnabled,
-             StaticShaderOptions options, bool cameraExposure)
+buildProgram(
+    std::string_view    vs,
+    std::string_view    fs,
+    bool                fisheyeEnabled,
+    StaticShaderOptions options,
+    bool                cameraExposure,
+    std::string_view    meterOutput)
 {
     std::string_view toneMapDefine =
         util::is_set(options, StaticShaderOptions::ToneMap) ? "#define TONE_MAP\n"sv : ""sv;
@@ -2631,9 +2667,21 @@ buildProgram(std::string_view vs, std::string_view fs, bool fisheyeEnabled,
     std::string_view preserveDepthDefine =
         util::is_set(options, StaticShaderOptions::PreserveDepth) ? "#define PRESERVE_DEPTH\n"sv : ""sv;
     std::string vsSrc = fmt::format("{}{}{}{}{}{}\n", VersionHeader, CommonHeader, VertexHeader, billboardDefine, VPFunction(fisheyeEnabled), vs);
-    std::string fsSrc = fmt::format("{}{}{}{}{}{}{}{}{}{}\n", VersionHeader, CommonHeader,
-                                    cameraExposure ? CameraExposureDefine : ""sv,
-                                    FragmentHeader, toneMapDefine, toneMapCurveDefine, billboardDefine, convertToSRGBDefine, preserveDepthDefine, fs);
+    std::string fsSrc = fmt::format(
+        "{}{}{}{}{}{}{}{}{}{}\n",
+        VersionHeader,
+        CommonHeader,
+        cameraExposure ? CameraExposureDefine : ""sv,
+        FragmentHeader,
+        toneMapDefine,
+        toneMapCurveDefine,
+        billboardDefine,
+        convertToSRGBDefine,
+        preserveDepthDefine,
+        fmt::format(
+            "#define main sceneMain\n{}\n#undef main\nvoid main() {{ sceneMain(); {} meterColor.rgb *= physicalLightScale; }}\n",
+            fs,
+            meterOutput));
 
     DumpVSSource(vsSrc);
     DumpFSSource(fsSrc);
@@ -2872,7 +2920,10 @@ ShaderManager::getShader(const ShaderProperties& props)
         if (!it->second)
             it->second = getErrorProgram();
         else if (props.effects != LightingEffects::AtmosphereTransmission)
+        {
             it->second->bindCameraExposure(m_cameraExposure);
+            it->second->bindPhysicalLightScale(m_physicalLightScale);
+        }
     }
 
     return it->second.get();
@@ -2892,14 +2943,17 @@ ShaderManager::getShader(StaticShader staticShader, StaticShaderOptions options)
 std::shared_ptr<CelestiaGLProgram>
 ShaderManager::loadShader(StaticShaderProperties props)
 {
+    // Metering must fail explicitly, not consume the visual error program.
+    bool requiresValidShader = props.shader == StaticShader::ExposureMeter ||
+                               props.shader == StaticShader::ExposureTarget;
     auto name = StaticShaderBaseNames[static_cast<std::size_t>(props.shader)];
     auto vs = ReadShaderFile(ShaderDirectory / util::U8Path(fmt::format("{}_vert.glsl", name)));
     if (vs.empty())
-        return getErrorProgram();
+        return requiresValidShader ? nullptr : getErrorProgram();
 
     auto fs = ReadShaderFile(ShaderDirectory / util::U8Path(fmt::format("{}_frag.glsl", name)));
     if (fs.empty())
-        return getErrorProgram();
+        return requiresValidShader ? nullptr : getErrorProgram();
 
     std::shared_ptr<CelestiaGLProgram> result;
     // PSFs already use camera exposure for their nonlinear shape and cutoff.
@@ -2913,11 +2967,20 @@ ShaderManager::loadShader(StaticShaderProperties props)
                           props.shader == StaticShader::Tidal;
     bool visualOnly = util::is_set(props.options, StaticShaderOptions::VisualOnly);
     cameraExposure = cameraExposure && !visualOnly;
-    result = buildProgram(vs, fs, m_fisheyeEnabled, props.options, cameraExposure);
+    std::string_view meterOutput = "meterColor = fragColor;"sv;
+    if (props.shader == StaticShader::PsfStarPoint)
+        meterOutput = ""sv; // The point shader writes its unclipped radiance.
+    else if (
+        visualOnly ||
+        props.shader == StaticShader::PsfStarGlow || props.shader == StaticShader::PsfStarGlowLarge)
+        meterOutput = "meterColor = vec4(0.0);"sv;
+    result = buildProgram(vs, fs, m_fisheyeEnabled, props.options, cameraExposure, meterOutput);
     if (result && cameraExposure)
         result->bindCameraExposure(m_cameraExposure);
+    if (result)
+        result->bindPhysicalLightScale(m_physicalLightScale);
 
-    return result ? result : getErrorProgram();
+    return result || requiresValidShader ? result : getErrorProgram();
 }
 
 std::shared_ptr<CelestiaGLProgram>
@@ -2965,6 +3028,12 @@ void CelestiaGLProgram::bindCameraExposure(const float& exposure)
     cameraExposureParameter = floatParam("cameraExposure");
 }
 
+void CelestiaGLProgram::bindPhysicalLightScale(const float& scale)
+{
+    physicalLightScale = &scale;
+    physicalLightScaleParameter = floatParam("physicalLightScale");
+}
+
 void CelestiaGLProgram::use() const
 {
     program.use();
@@ -2972,6 +3041,11 @@ void CelestiaGLProgram::use() const
     {
         cameraExposureParameter = *cameraExposure;
         lastCameraExposure = *cameraExposure;
+    }
+    if (physicalLightScale != nullptr && *physicalLightScale != lastPhysicalLightScale)
+    {
+        physicalLightScaleParameter = *physicalLightScale;
+        lastPhysicalLightScale = *physicalLightScale;
     }
 }
 
@@ -3032,9 +3106,14 @@ CelestiaGLProgram::attribIndex(const char *paramName) const
 void
 CelestiaGLProgram::initCommonParameters()
 {
+    program.use();
     ModelViewMatrix = mat4Param("ModelViewMatrix");
     ProjectionMatrix = mat4Param("ProjectionMatrix");
     MVPMatrix = mat4Param("MVPMatrix");
+    surfaceDimming   = floatParam("surfaceDimming");
+    surfaceDimming   = 1.0f;
+    emissionDimming  = floatParam("emissionDimming");
+    emissionDimming  = 1.0f;
     lineWidthX = floatParam("lineWidthX");
     lineWidthY = floatParam("lineWidthY");
 }
@@ -3241,6 +3320,8 @@ CelestiaGLProgram::setLightParameters(const LightingState& ls,
     Eigen::Vector3f diffuseColor = materialDiffuse.toVector3();
     Eigen::Vector3f specularColor = materialSpecular.toVector3();
     float reflectanceScale = applySurfaceReflectance ? ls.surfaceReflectanceScale : 1.0f;
+    surfaceDimming                   = applySurfaceReflectance ? ls.surfaceDimming : 1.0f;
+    emissionDimming                  = 1.0f;
     float totalIrradiance = 0.0f;
     for (unsigned int i = 0; i < nLights; ++i)
         totalIrradiance += ls.lights[i].irradiance;

@@ -1098,6 +1098,16 @@
              </layout>
             </item>
             <item>
+             <widget class="QCheckBox" name="autoCameraExposureCheckBox">
+              <property name="text">
+               <string>Automatic camera exposure</string>
+              </property>
+              <property name="toolTip">
+               <string>Adjust camera exposure from scene light, including atmospheric sky, independently of decorative star glow, bloom, tone mapping and annotations. Dark adaptation is limited to 32 times unit exposure. Requires sRGB rendering. Turning this off restores manual exposure; exposure shortcuts switch to manual control.</string>
+              </property>
+             </widget>
+            </item>
+            <item>
              <layout class="QHBoxLayout" name="horizontalLayout_cameraExposure">
               <item>
                <widget class="QLabel" name="cameraExposureLabel">
