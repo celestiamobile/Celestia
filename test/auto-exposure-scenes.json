@@ -1,0 +1,81 @@
+{
+  "reference_capture": {
+    "width": 2048,
+    "height": 1536,
+    "dpi": 192,
+    "srgb": true,
+    "automatic_exposure": true,
+    "initial_exposure": 1.0,
+    "settle_seconds": 8,
+    "scene_samples": 4,
+    "star_style": "PointSpreadFunction",
+    "star_point_radius": 1.5,
+    "star_dim_clip_factor": 10,
+    "ambient_light": 0,
+    "tone_mapping": "None",
+    "bloom": false,
+    "note": "Freeze simulation time at the URL timestamp while exposure settles. URLs do not encode exposure or all rendering preferences."
+  },
+  "scenes": [
+    {
+      "name": "bright-reflective-points",
+      "purpose": "With bloom disabled, unresolved Mercury and Venus should receive the same brightness-dependent halo treatment as background stars in calibrated point styles, without changing physical exposure.",
+      "url": "cel://Freeflight/2026-11-15T20:51:47.99164Z?x=&y=&z=&ow=1&ox=0&oy=0&oz=0&fov=41.58124&ts=1&ltd=0&p=0&rf=69260691&nrf=255&lm=2070&tsrc=0&ver=3"
+    },
+    {
+      "name": "dusk",
+      "purpose": "Atmospheric metering near sunset; check sky color and horizon clipping.",
+      "url": "cel://SyncOrbit/Sol:Earth/2026-11-15T13:43:17.77294Z?x=ShEeOjCVDA&y=8ZX1M+7/8f///////////w&z=Q5YuuPQF2P///////////w&ow=0.61844987&ox=0.7327717&oy=0.24013251&oz=-0.15133317&select=Sol:Earth&fov=41.58124&ts=10000&ltd=0&p=1&rf=69260675&nrf=255&lm=2051&tsrc=0&ver=3"
+    },
+    {
+      "name": "day-zenith",
+      "purpose": "Daytime atmospheric light must be metered even without surface depth; sky should not wash out white.",
+      "url": "cel://SyncOrbit/Sol:Earth/2026-11-15T10:03:51.25904Z?x=UBEeOjCVDA&y=7pX1M+7/8f///////////w&z=MZYuuPQF2P///////////w&ow=0.84736085&ox=0.44878933&oy=0.16624221&oz=-0.23006797&select=Sol:Earth&fov=41.58124&ts=-10000&ltd=0&p=1&rf=69260675&nrf=255&lm=2051&tsrc=0&ver=3"
+    },
+    {
+      "name": "night",
+      "purpose": "Bounded dark adaptation should reveal stars without making unlit ground bright.",
+      "url": "cel://SyncOrbit/Sol:Earth/2026-11-15T19:58:28.69940Z?x=41I4G9eB+P///////////w&y=6nWBmZlK7P///////////w&z=lC7rwRQr2f///////////w&ow=0.4726786&ox=0.62356794&oy=0.24984376&oz=-0.57036483&select=Sol:Earth&fov=41.58124&ts=-1000&ltd=0&p=1&rf=69260675&nrf=255&lm=2051&tsrc=0&ver=3"
+    },
+    {
+      "name": "orientation-a",
+      "purpose": "Compare settled exposure with orientation-b at the same observer position and time.",
+      "url": "cel://SyncOrbit/Sol:Earth/2026-11-15T15:05:47.95880Z?x=Z6d1URZ0CQ&y=E8hyhCn78f///////////w&z=koFuOiEt1////////////w&ow=0.6042648&ox=0.71022594&oy=0.25342402&oz=-0.2573313&select=Sol:Earth&fov=41.58124&ts=1000&ltd=0&p=1&rf=69260675&nrf=255&lm=2051&tsrc=0&ver=3"
+    },
+    {
+      "name": "orientation-b",
+      "purpose": "Compare settled exposure with orientation-a at the same observer position and time.",
+      "url": "cel://SyncOrbit/Sol:Earth/2026-11-15T15:05:47.95880Z?x=Z6d1URZ0CQ&y=E8hyhCn78f///////////w&z=koFuOiEt1////////////w&ow=-0.64736074&ox=-0.63654053&oy=0.10716096&oz=-0.40528595&select=Sol:Earth&fov=41.58124&ts=1000&ltd=0&p=1&rf=69260675&nrf=255&lm=2051&tsrc=0&ver=3"
+    },
+    {
+      "name": "earth-overview",
+      "purpose": "Black space around the resolved Earth must not drive exposure high enough to clip the planet.",
+      "url": "cel://SyncOrbit/Sol:Earth/2026-11-16T00:39:57.60397Z?x=7JivKevaLv///////////w&y=9Vw+Yi3puv///////////w&z=QSRE9k3yEA&ow=-0.6014005&ox=0.5442696&oy=-0.40671217&oz=-0.42032516&select=Sol:Earth&fov=41.58124&ts=10000&ltd=0&p=1&rf=69260675&nrf=255&lm=2051&tsrc=0&ver=3"
+    },
+    {
+      "name": "earth-overview-wide",
+      "purpose": "Derived from earth-overview with a 60-degree field of view; increasing black coverage should not wash out Earth.",
+      "url": "cel://SyncOrbit/Sol:Earth/2026-11-16T00:39:57.60397Z?x=7JivKevaLv///////////w&y=9Vw+Yi3puv///////////w&z=QSRE9k3yEA&ow=-0.6014005&ox=0.5442696&oy=-0.40671217&oz=-0.42032516&select=Sol:Earth&fov=60&ts=10000&ltd=0&p=1&rf=69260675&nrf=255&lm=2051&tsrc=0&ver=3"
+    },
+    {
+      "name": "sun-zenith",
+      "purpose": "The resolved Sun should remain bright without duplicate daylight dimming or underexposing the surrounding sky.",
+      "url": "cel://SyncOrbit/Sol:Earth/2026-11-15T07:50:13.60283Z?x=wjeuz4WxFQ&y=a8OUJhr+8f///////////w&z=+dm249Yk3P///////////w&ow=-0.08550374&ox=0.24095951&oy=-0.1602558&oz=-0.9533864&select=Sol:Earth&fov=41.58124&ts=1&ltd=0&p=0&rf=69260675&nrf=255&lm=2051&tsrc=0&ver=3"
+    },
+    {
+      "name": "earth-sun-transition-overview",
+      "purpose": "Starting view for the small-Sun transition; Earth must remain correctly exposed.",
+      "url": "cel://Follow/Sol:Earth/2026-11-15T17:38:21.64068Z?x=pT8n3Hj46v///////////w&y=pC2EL3eF0P///////////w&z=+JPKQt+41g&ow=0.9637001&ox=-0.1165838&oy=0.020438248&oz=0.23931691&select=Sol:Earth&fov=41.58124&ts=1&ltd=0&p=0&rf=69260675&nrf=255&lm=2051&tsrc=0&ver=3"
+    },
+    {
+      "name": "earth-sun-transition-starfield",
+      "purpose": "Near 1 AU, a visible Sun must lower exposure and suppress faint stars rather than being discarded as an outlier; verify convergence from both Earth and dark-sky views.",
+      "url": "cel://Follow/Sol:Earth/2026-11-15T17:38:41.81357Z?x=pT8n3Hj46v///////////w&y=pC2EL3eF0P///////////w&z=+JPKQt+41g&ow=0.15895286&ox=-0.25302318&oy=-0.95058954&oz=-0.08421901&select=Antares&fov=41.58124&ts=1&ltd=0&p=0&rf=69260675&nrf=255&lm=2051&tsrc=0&ver=3"
+    },
+    {
+      "name": "earth-sun-transition-clear-starfield",
+      "purpose": "With the Sun outside the view, dark adaptation should recover the starfield independently of the preceding view; exposure need not match the Sun-containing view.",
+      "url": "cel://Follow/Sol:Earth/2026-11-15T17:39:21.14379Z?x=pT8n3Hj46v///////////w&y=pC2EL3eF0P///////////w&z=+JPKQt+41g&ow=0.33484474&ox=-0.056474715&oy=-0.69927585&oz=-0.6290492&select=Antares&fov=41.58124&ts=1&ltd=0&p=0&rf=69260675&nrf=255&lm=2051&tsrc=0&ver=3"
+    }
+  ]
+}

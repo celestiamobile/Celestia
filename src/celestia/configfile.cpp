@@ -259,6 +259,7 @@ applyRenderDetails(CelestiaConfig::RenderDetails& renderDetails, const Associati
     // Read the old key for existing configurations; the shared setting wins.
     applyNumber(renderDetails.output.cameraExposure, hash, "StarExposure"sv);
     applyNumber(renderDetails.output.cameraExposure, hash, "CameraExposure"sv);
+    applyBoolean(renderDetails.output.autoCameraExposure, hash, "AutoCameraExposure"sv);
     renderDetails.output.cameraExposure = std::clamp(renderDetails.output.cameraExposure, 1.0e-12f, 1.0e12f);
 }
 

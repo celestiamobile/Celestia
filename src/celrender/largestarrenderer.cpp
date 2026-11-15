@@ -174,7 +174,7 @@ LargeStarRenderer::setupVertexArrayObject()
     m_vo->addInstanceBuffer(
         m_bo,
         CelestiaGLProgram::IntensityAttributeIndex,
-        1,
+        2,
         gl::VertexObject::DataType::Float,
         false,
         sizeof(StarInstance),
@@ -207,6 +207,17 @@ LargeStarRenderer::addStar(const Eigen::Vector3f &center,
                            float                  scalar,
                            float                  limbRadius,
                            float                  alpha)
+{
+    addStar(center, color, Eigen::Vector2f(scalar, 0.0f), limbRadius, alpha);
+}
+
+void
+LargeStarRenderer::addStar(
+    const Eigen::Vector3f &center,
+    const Color           &color,
+    const Eigen::Vector2f &scalar,
+    float                  limbRadius,
+    float                  alpha)
 {
     assert(m_nStars < m_capacity);
     std::array<std::uint8_t, 4> packedColor{};

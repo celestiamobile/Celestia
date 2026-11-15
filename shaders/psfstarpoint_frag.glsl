@@ -17,6 +17,7 @@ uniform float pointScale;
 
 in vec3  v_color;
 in float v_peakRadiance;
+in float v_meterRadiance;
 in float v_pointSize;
 
 #ifdef BILLBOARD
@@ -38,4 +39,5 @@ void main(void)
     vec3  radiance = v_color * (falloff * height);
 
     fragColor = vec4(radiance, 1.0);
+    meterColor = vec4(v_color * (falloff * v_meterRadiance), 1.0);
 }

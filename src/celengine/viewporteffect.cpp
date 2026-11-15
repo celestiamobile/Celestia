@@ -78,9 +78,11 @@ void PassthroughViewportEffect::setPreserveDepth(bool enabled)
 
 FramebufferObject::Attachment PassthroughViewportEffect::sourceAttachments() const
 {
-    return util::is_set(m_baseOptions, StaticShaderOptions::PreserveDepth)
-        ? FramebufferObject::Attachment::Color | FramebufferObject::Attachment::Depth
-        : FramebufferObject::Attachment::Color;
+    auto attachments
+        = util::is_set(m_baseOptions, StaticShaderOptions::PreserveDepth) ?
+              FramebufferObject::Attachment::Color | FramebufferObject::Attachment::Depth :
+              FramebufferObject::Attachment::Color;
+    return m_metering ? attachments | FramebufferObject::Attachment::Meter : attachments;
 }
 
 bool PassthroughViewportEffect::render(Renderer* renderer, FramebufferObject* fbo, int width, int height)

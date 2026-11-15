@@ -57,6 +57,12 @@ public:
 
     void addStar(const Eigen::Vector3f &pos, const Color &color, float peakRadiance,
                  float limbRadius = 0.0f, float alpha = 1.0f);
+    void addStar(
+        const Eigen::Vector3f &pos,
+        const Color           &color,
+        const Eigen::Vector2f &radiance,
+        float                  limbRadius,
+        float                  alpha);
 
     void setPointRadius(float r)      { m_pointRadius = r; }
     void setOptimization(float opt)   { m_optimization = opt; }
@@ -66,7 +72,7 @@ private:
     struct StarVertex
     {
         Eigen::Vector3f        position;
-        float                  peakRadiance;
+        Eigen::Vector2f        radiance;     // visual and unclipped metering peaks
         float                  limbRadius;   // resolved-body limb (px), 0 if none
         float                  alpha;        // glow fade, full float precision
         std::array<GLubyte, 4> color;      // rgb only; alpha byte unused

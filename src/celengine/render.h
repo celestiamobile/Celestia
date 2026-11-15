@@ -324,8 +324,14 @@ class Renderer
     float getStarMaxIrradiance() const;
     void  setStarDimClipFactor(float v);
     float getStarDimClipFactor() const;
+    // Setting manual exposure also leaves automatic mode.
     void  setCameraExposure(float e);
     float getCameraExposure() const;
+    bool  setAutoExposureEnabled(bool enabled);
+    bool  getAutoExposureEnabled() const;
+    float getEffectiveCameraExposure() const;
+    // Transient per-view value; does not change the saved manual setting.
+    void  setAutoCameraExposure(float e);
     // Compatibility aliases; stars no longer have an independent exposure.
     void  setStarExposure(float e);
     float getStarExposure() const;
@@ -455,6 +461,7 @@ class Renderer
         float radius{ 1.0f };
         float geometryScale{ 1.0f };
         float emissiveScale{ 1.0f };
+        float                            emissionDimming{ 1.0f };
         celestia::engine::GeometryHandle geometry{ celestia::engine::GeometryHandle::Invalid };
 	bool isStar{ false };
     };
@@ -750,6 +757,8 @@ class Renderer
     float starMaxIrradiance{ 100.0f };
     float starDimClipFactor{ 10.0f };
     float cameraExposure{ 1.0f };
+    float autoCameraExposure{ 1.0f };
+    bool autoExposureEnabled{ false };
     float toneMappingExposure{ 1.0f };
     ToneMappingMode toneMappingMode{ ToneMappingMode::None };
 

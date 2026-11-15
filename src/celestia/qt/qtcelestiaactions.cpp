@@ -460,8 +460,8 @@ CelestiaActions::slotAdjustLimitingMagnitude()
         QString notification;
         if (renderer->getStarStyle() == StarStyle::PointSpreadFunction)
         {
-            float exposure = change > 0.0f ? renderer->getCameraExposure() * 1.1f
-                                           : renderer->getCameraExposure() / 1.1f;
+            float exposure = change > 0.0f ? renderer->getEffectiveCameraExposure() * 1.1f
+                                           : renderer->getEffectiveCameraExposure() / 1.1f;
             renderer->setCameraExposure(exposure);
 
             notification = QString(_("Camera exposure: %L1")).arg(renderer->getCameraExposure(), 0, 'g', 3);

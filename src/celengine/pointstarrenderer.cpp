@@ -166,6 +166,16 @@ celestia::engine::detail::calibratedPointHaloOpacity(float peakRadiance, float p
     return pointFraction > 0.0f ? pointFraction * psfGlowOnset(peakRadiance * pointFraction) : 0.0f;
 }
 
+Eigen::Vector2f
+celestia::engine::detail::psfPeakRadiances(
+    float irradiance,
+    float minimumIrradiance,
+    float peakScale)
+{
+    return { peakScale * psfSoftClip(irradiance, minimumIrradiance),
+             peakScale * irradiance };
+}
+
 // Convert a position in the universal coordinate system to astrocentric
 // coordinates, taking into account possible orbital motion of the star.
 static Vector3d astrocentricPosition(const UniversalCoord& pos,
@@ -253,10 +263,12 @@ void PointStarRenderer::process(const Star& star, float distance, float irradian
                 // precomputed in renderPointStars so the inner loop only
                 // does the per-star dimming and green normalisation.
 
-                float dimmedIrradiance = celestia::engine::detail::psfSoftClip(irradiance, psf.minimumIrradiance);
-                if (dimmedIrradiance <= 0.0f)
+                Eigen::Vector2f peaks = celestia::engine::detail::psfPeakRadiances(
+                    irradiance, psf.minimumIrradiance, psf.peakRadScale);
+                if (irradiance < psf.minimumMeterIrradiance)
+                    peaks.y() = 0.0f;
+                if (peaks.x() <= 0.0f && !renderer->getAutoExposureEnabled())
                     return;
-                float peakRad = psf.peakRadScale * dimmedIrradiance;
 
                 // Normalise the star colour against its green channel
                 // (with a saturation floor) so the brightest channel
@@ -266,10 +278,11 @@ void PointStarRenderer::process(const Star& star, float distance, float irradian
                 // unnormalised (color * peak).
                 float greenScale = 1.0f;
                 Color linearStarColor = psfGreenNormalization(starColor, 0.1f, greenScale);
-                float peakRadCol = peakRad * greenScale;
+                peaks *= greenScale;
+                float peakRadCol = peaks.x();
 
                 // Point (cone) contribution
-                psf.pointBuffer->addStar(relPos, linearStarColor, peakRadCol);
+                psf.pointBuffer->addStar(relPos, linearStarColor, peaks, 0.0f, 1.0f);
 
                 // Glow (eye-PSF) contribution, additive on top of the point cone
                 if (peakRadCol > 1.0f && psf.optimization > 0.0f)
@@ -298,6 +311,10 @@ void PointStarRenderer::process(const Star& star, float distance, float irradian
                         psf.glowBuffer->addStar(relPos, linearStarColor, glowPeak, 0.0f, alpha);
                     }
                 }
+
+                // Meter-only stars must not gain labels that manual exposure suppresses.
+                if (peakRadCol <= 0.0f)
+                    return;
             }
             else if (celestia::gl::sRGBRendering)
             {
@@ -313,7 +330,7 @@ void PointStarRenderer::process(const Star& star, float distance, float irradian
                     float peak = celestia::engine::detail::calibratedStarPeakRadiance(
                         starStyle, irradiance, static_cast<float>(renderer->getScreenDpi()) / 96.0f);
                     peak *= greenScale * linearStarColor.toVector3().maxCoeff()
-                            * atmosphereBrightness * renderer->getCameraExposure();
+                            * atmosphereBrightness * renderer->getEffectiveCameraExposure();
                     labelStar = peak > astro::LOWEST_IRRADIATION_SRGB;
                 }
             }

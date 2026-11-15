@@ -1415,7 +1415,7 @@ void Renderer::renderScene(const Observer& observer,
                            const Selection& sel)
 {
     assert(!annotationsPending);
-    shaderManager->setCameraExposure(cameraExposure);
+    shaderManager->setCameraExposure(getEffectiveCameraExposure());
 
     // Get the observer's time
     double now = observer.getTime();
@@ -1498,12 +1498,10 @@ void Renderer::renderScene(const Observer& observer,
 
     setupSecondaryLightSources(secondaryIlluminators, lightSourceList);
 
-    // Scan through the render list to see if we're inside a planetary
-    // atmosphere.  If so, we need to adjust the sky color as well as the
-    // limiting magnitude of stars (so stars aren't visible in the daytime
-    // on planets with thick atmospheres.)
+    // Legacy rendering hides daylight stars by adjusting their limiting magnitude.
+    // Calibrated HDR light instead adapts through exposure and atmospheric compositing.
     float faintestMagWithoutAtmosphere = faintestMag;
-    if (util::is_set(renderFlags, RenderFlags::ShowAtmospheres))
+    if (!gl::sRGBRendering && util::is_set(renderFlags, RenderFlags::ShowAtmospheres))
     {
         adjustMagnitudeInsideAtmosphere(faintestMag, saturationMag, now);
     }
@@ -1753,7 +1751,7 @@ void Renderer::addLegacyPointHalo(const Vector3f& position, const Color& color,
         return;
 
     float scale = static_cast<float>(screenDpi) / 96.0f;
-    float exposure = getCameraExposure() * starAtmosphereBrightness;
+    float exposure = getEffectiveCameraExposure() * starAtmosphereBrightness;
     float greenScale = 1.0f;
     Color linearColor = psfGreenNormalization(color, 0.1f, greenScale);
     float peak = engine::detail::calibratedStarPeakRadiance(starStyle, irradiance, scale)
@@ -1934,7 +1932,7 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
     ps.depthTest = true;
     setPipelineState(ps);
 
-    float exposureFactor = cameraExposure;
+    float exposureFactor = getEffectiveCameraExposure();
     float r              = std::max(starPointRadius, 1.0e-3f);
     float peakRadScale = celestia::engine::detail::psfPeakRadianceScale(r, exposureFactor, starAtmosphereBrightness);
     float dimGate = (celestia::gl::sRGBRendering
@@ -1943,21 +1941,23 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
                     * starDimClipFactor;
 
     float minimumIrradiance = celestia::engine::detail::psfMinimumIrradiance(peakRadScale, dimGate);
-    float dimmedIrradiance = celestia::engine::detail::psfSoftClip(irradiance, minimumIrradiance);
-    if (dimmedIrradiance <= 0.0f)
+    Eigen::Vector2f peaks
+        = celestia::engine::detail::psfPeakRadiances(irradiance, minimumIrradiance, peakRadScale);
+    if (peaks.x() <= 0.0f && !getAutoExposureEnabled())
         return;
-    float peakRad = peakRadScale * dimmedIrradiance;
 
     float greenScale = 1.0f;
     Color linearStarColor = psfGreenNormalization(color, 0.1f, greenScale);
-    float peakRadCol = peakRad * greenScale;
+    peaks *= greenScale;
+    float peakRadCol = peaks.x();
 
     Eigen::Vector3f frontPos = calculateQuadCenter(getCameraOrientationf(), position, radius);
 
     // Fade the cone as the mesh takes over, without changing the glow's peak.
     if (float pointFade = celestia::engine::detail::psfPointFade(discSizeInPixels, r, pointScale);
         pointFade > 0.0f)
-        psfPointBuffer->addStar(frontPos, linearStarColor, peakRadCol * pointFade);
+        psfPointBuffer
+            ->addStar(frontPos, linearStarColor, Eigen::Vector2f(peaks * pointFade), 0.0f, 1.0f);
 
     // Gate on the irradiance-based peak so the linked term only
     // enhances an already-firing glow, never starts one (keeps
@@ -2076,6 +2076,8 @@ static void renderSphereUnlit(const RenderInfo& ri,
             emission[channel] *= engine::detail::limbDarkeningNormalization(engine::detail::StarLimbDarkening[channel]);
     }
     prog->ambientColor = emission;
+    prog->surfaceDimming  = 1.0f;
+    prog->emissionDimming = ri.emissionDimming;
     prog->opacity = 1.0f;
     if (ri.isStar)
         prog->eyePosition = ri.eyePos_obj;
@@ -2581,6 +2583,7 @@ void Renderer::renderObject(const Vector3f& pos,
     }
 
     ri.emissiveScale = obj.emissiveScale;
+    ri.emissionDimming = obj.emissionDimming;
     ri.ambientColor = ambientColor;
     ri.specularColor = obj.surface->specularColor.linearize(gl::sRGBRendering);
     ri.specularPower = obj.surface->specularPower;
@@ -3381,13 +3384,16 @@ void Renderer::renderPlanet(Body& body,
         {
             float pointRadius = std::max(starPointRadius, 1.0e-3f);
             float pointScale = static_cast<float>(screenDpi) / 96.0f;
-            float peakScale = engine::detail::psfPeakRadianceScale(pointRadius, cameraExposure,
+            float peakScale = engine::detail::psfPeakRadianceScale(pointRadius, getEffectiveCameraExposure(),
                                                                    starAtmosphereBrightness);
             float minimum = engine::detail::psfMinimumIrradiance(peakScale,
                                                                  astro::LOWEST_IRRADIATION_SRGB * starDimClipFactor);
-            float dimming = irradiance > 0.0f ? engine::detail::psfDimmedIrradiance(irradiance, minimum) / irradiance : 1.0f;
-            lights.surfaceReflectanceScale *= dimming * starAtmosphereBrightness
-                * (1.0f - engine::detail::psfPointFade(discSizeInPixels, pointRadius, pointScale));
+            float dimming = irradiance > 0.0f ? engine::detail::psfSoftClip(irradiance, minimum) / irradiance : 1.0f;
+            lights.surfaceDimming = dimming;
+            lights.surfaceReflectanceScale
+                *= starAtmosphereBrightness
+                   * (1.0f
+                      - engine::detail::psfPointFade(discSizeInPixels, pointRadius, pointScale));
         }
         else if (gl::sRGBRendering && body.isVisibleAsPoint())
         {
@@ -3613,11 +3619,14 @@ void Renderer::renderStar(const Star& star,
             if (starStyle == StarStyle::PointSpreadFunction)
             {
                 float pointRadius = std::max(starPointRadius, 1.0e-3f);
-                float peakScale = engine::detail::psfPeakRadianceScale(pointRadius, cameraExposure,
+                float peakScale = engine::detail::psfPeakRadianceScale(pointRadius, getEffectiveCameraExposure(),
                                                                       starAtmosphereBrightness);
                 float minimum = engine::detail::psfMinimumIrradiance(peakScale,
                                                                      astro::LOWEST_IRRADIATION_SRGB * starDimClipFactor);
-                surfaceIrradiance = engine::detail::psfDimmedIrradiance(irradiance, minimum);
+                rp.emissionDimming
+                    = irradiance > 0.0f ?
+                          engine::detail::psfSoftClip(irradiance, minimum) / irradiance :
+                          1.0f;
                 surfaceIrradiance *= starAtmosphereBrightness;
                 discFraction = 1.0f - engine::detail::psfPointFade(discSizeInPixels, pointRadius, pointScale);
             }
@@ -4547,7 +4556,7 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     starRenderer.psf.pointScale    = static_cast<float>(screenDpi) / 96.0f;
     starRenderer.psf.optimization  = starOptimization;
     starRenderer.psf.maxIrradiance = starMaxIrradiance;
-    starRenderer.psf.exposure      = cameraExposure;
+    starRenderer.psf.exposure      = getEffectiveCameraExposure();
 
     // = 1.0 at startup
     float effDistanceToScreen = mmToInches((float) REF_DISTANCE_TO_SCREEN) * pixelSize * getScreenDpi();
@@ -4571,6 +4580,7 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     starRenderer.glareVertexBuffer->setPointScale(scale);
 
     float minimumStarIrradiance = astro::magToIrradiance(faintestMagNight);
+    starRenderer.psf.minimumMeterIrradiance = minimumStarIrradiance;
     Renderer::PipelineState ps;
     ps.blending = true;
 
@@ -4584,7 +4594,7 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
         //   minimumIrradiance = dimGate / peakRadScale, in source units
         //   a       = optimization / r  (Spencer eye-PSF coefficient)
         //   sizePhys > maxPointSize  <=>  glowPeak > (maxPointSize*a/(2*pointScale))^2.5
-        float exposureFactor = cameraExposure;
+        float exposureFactor = getEffectiveCameraExposure();
         float rLog           = std::max(starPointRadius, 1.0e-3f);
         float dimGate        = (celestia::gl::sRGBRendering
                                     ? astro::LOWEST_IRRADIATION_SRGB
@@ -5209,12 +5219,49 @@ void Renderer::setCameraExposure(float e)
         return;
     }
     cameraExposure = std::clamp(e, 1.0e-12f, 1.0e12f);
+    autoExposureEnabled = false;
     markSettingsChanged();
 }
 
 float Renderer::getCameraExposure() const
 {
     return cameraExposure;
+}
+
+bool Renderer::setAutoExposureEnabled(bool enabled)
+{
+    if (enabled && (!gl::sRGBRendering || !gl::colorBufferHalfFloat))
+    {
+        GetLogger()->error("Auto camera exposure requires linear rendering and half-float color buffers.\n");
+        return false;
+    }
+    if (autoExposureEnabled != enabled)
+    {
+        autoExposureEnabled = enabled;
+        autoCameraExposure = cameraExposure;
+        markSettingsChanged();
+    }
+    return true;
+}
+
+bool Renderer::getAutoExposureEnabled() const
+{
+    return autoExposureEnabled;
+}
+
+float Renderer::getEffectiveCameraExposure() const
+{
+    return autoExposureEnabled ? autoCameraExposure : cameraExposure;
+}
+
+void Renderer::setAutoCameraExposure(float e)
+{
+    if (!std::isfinite(e) || e <= 0.0f)
+    {
+        GetLogger()->error("Auto camera exposure must be finite and positive.\n");
+        return;
+    }
+    autoCameraExposure = std::clamp(e, 1.0e-12f, 1.0e12f);
 }
 
 

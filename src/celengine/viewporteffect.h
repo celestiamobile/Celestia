@@ -56,12 +56,17 @@ public:
     bool needsFloatSource() const override { return m_needsFloatSource; }
     bool isIdentity() const override { return m_baseOptions == StaticShaderOptions::None; }
     void setPreserveDepth(bool);
+    void setMetering(bool enabled)
+    {
+        m_metering = enabled;
+    }
     FramebufferObject::Attachment sourceAttachments() const override;
     bool render(Renderer*, FramebufferObject*, int width, int height) override;
 
 private:
     bool m_needsFloatSource;
     StaticShaderOptions m_baseOptions;
+    bool                m_metering{ false };
 
     celestia::gl::VertexObject vo;
 

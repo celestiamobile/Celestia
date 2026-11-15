@@ -21,19 +21,21 @@ out vec2 v_uv;
 layout(location = 0) in vec4 in_Position;
 #endif
 layout(location = 8) in vec3 in_Color;        // green-normalised, linear-space, 8-bit per channel
-layout(location = 9) in float in_Intensity;   // exposed peak after dim clipping and tint normalization
+layout(location = 9) in vec2 in_Intensity;    // visual and unclipped metering peaks
 
 uniform float pointRadius; // 96-DPI logical pixels
 uniform float pointScale;  // DPI scale
 
 out vec3  v_color;
 out float v_peakRadiance;
+out float v_meterRadiance;
 out float v_pointSize;
 
 void main(void)
 {
     v_color = in_Color;
-    v_peakRadiance = in_Intensity;
+    v_peakRadiance = in_Intensity.x;
+    v_meterRadiance = in_Intensity.y;
 
     float size = 2.0 * pointRadius * pointScale;
     v_pointSize = size;

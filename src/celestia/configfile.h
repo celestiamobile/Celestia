@@ -109,6 +109,7 @@ struct CelestiaConfig
             unsigned int presentAaSamples{ 1 };
             bool sRGB{ false };
             float cameraExposure{ 1.0f };
+            bool autoCameraExposure{ false };
             float toneMappingExposure{ 1.0f };
             ToneMappingMode toneMapping{ ToneMappingMode::None };
         };

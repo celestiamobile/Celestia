@@ -41,6 +41,7 @@
 #include <celastro/astro.h>
 #include <celastro/date.h>
 #include <celengine/asterism.h>
+#include <celengine/autoexposure.h>
 #include <celengine/axisarrow.h>
 #include <celengine/body.h>
 #include <celengine/boundaries.h>
@@ -1504,7 +1505,7 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
     case '[':
         if (renderer->getStarStyle() == StarStyle::PointSpreadFunction)
         {
-            renderer->setCameraExposure(renderer->getCameraExposure() / 1.1f);
+            renderer->setCameraExposure(renderer->getEffectiveCameraExposure() / 1.1f);
             auto buf = fmt::format(loc, fmt::runtime(_("Camera exposure: {:.3g}")), renderer->getCameraExposure());
             flash(buf);
         }
@@ -1533,7 +1534,7 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
     case ']':
         if (renderer->getStarStyle() == StarStyle::PointSpreadFunction)
         {
-            renderer->setCameraExposure(renderer->getCameraExposure() * 1.1f);
+            renderer->setCameraExposure(renderer->getEffectiveCameraExposure() * 1.1f);
             auto buf = fmt::format(loc, fmt::runtime(_("Camera exposure: {:.3g}")), renderer->getCameraExposure());
             flash(buf);
         }
@@ -1976,6 +1977,9 @@ void CelestiaCore::draw()
     for (const auto view : viewManager->views())
         draw(view);
 
+    if (renderer->getAutoExposureEnabled() && viewManager->activeView()->autoExposure != nullptr)
+        renderer->setAutoCameraExposure(viewManager->activeView()->autoExposure->exposure());
+
     // Reset to render to the main window
     if (viewManager->views().size() > 1)
         renderer->setRenderRegion(0, 0, metrics.width, metrics.height, false);
@@ -2068,16 +2072,10 @@ void CelestiaCore::draw(View* view)
     }
 
     auto screenFbo = FramebufferObject::wrapCurrentBinding();
+    sceneDisplayEffect->setMetering(renderer->getAutoExposureEnabled());
     bool needsComposition = !presentationEffect->isIdentity() || !hasAnnotationDepthBuffer(screenFbo.id());
     if (!view->updateFBOs(viewportEffects, metrics.width, metrics.height, needsComposition, sceneSamples))
         return;
-
-    if (!presentationEffect->preprocess(renderer, view->getFBO(0)))
-    {
-        GetLogger()->error("Unable to prepare scene framebuffer.\n");
-        screenFbo.bind();
-        return;
-    }
 
     auto x = static_cast<int>(view->x * static_cast<float>(metrics.width));
     auto y = static_cast<int>(view->y * static_cast<float>(metrics.height));
@@ -2085,10 +2083,44 @@ void CelestiaCore::draw(View* view)
     auto viewHeight = static_cast<int>(view->height * static_cast<float>(metrics.height));
     renderer->setRenderRegion(0, 0, viewWidth, viewHeight, false);
 
+    double exposureTime = timer->getTime();
+    if (renderer->getAutoExposureEnabled())
+    {
+        if (view->autoExposure == nullptr)
+            view->autoExposure = std::make_unique<AutoExposure>(renderer->getCameraExposure());
+        if (!view->autoExposure->advance(exposureTime))
+        {
+            renderer->setAutoExposureEnabled(false);
+            view->autoExposure.reset();
+            screenFbo.bind();
+            return;
+        }
+        else
+            renderer->setAutoCameraExposure(view->autoExposure->exposure());
+    }
+    if (!renderer->getAutoExposureEnabled())
+        view->autoExposure.reset();
+
+    bool meterScene
+        = view->autoExposure != nullptr && view->autoExposure->needsMetering(exposureTime);
+    if (!presentationEffect->preprocess(renderer, view->getFBO(0)))
+    {
+        GetLogger()->error("Unable to prepare scene framebuffer.\n");
+        screenFbo.bind();
+        return;
+    }
+    // Keep the allocation stable, but write and resolve physical light only at the meter's cadence.
+    constexpr std::array<GLenum, 2> sceneBuffers{ GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+    glDrawBuffers(meterScene ? sceneBuffers.size() : 1, sceneBuffers.data());
+    sceneDisplayEffect->setMetering(meterScene);
+    renderer->getShaderManager().setPhysicalLightScale(
+        meterScene ? view->autoExposure->meterExposure() / renderer->getEffectiveCameraExposure() : 1.0f);
+
     if (view->isRootView())
         sim->renderScene(*renderer);
     else
         sim->renderScene(*renderer, *view->observer);
+    renderer->getShaderManager().setPhysicalLightScale(1.0f);
 
     bool preserveDepth = renderer->annotationsRequireDepth();
     sceneDisplayEffect->setPreserveDepth(preserveDepth);
@@ -2103,8 +2135,22 @@ void CelestiaCore::draw(View* view)
             renderer->setRenderRegion(x, y, viewWidth, viewHeight);
         FramebufferObject* dst = toScreen ? &screenFbo : view->getFBO(i + 1);
         FramebufferObject* src = view->getFBO(i);
-        if (!viewportEffects[i]->prerender(renderer, src, dst) ||
-            !viewportEffects[i]->render(renderer, src, viewWidth, viewHeight))
+        bool prepared = viewportEffects[i]->prerender(renderer, src, dst);
+        if (prepared && i == 0 && meterScene)
+        {
+            std::array<int, 4> viewport;
+            renderer->getViewport(viewport);
+            if (!view->autoExposure->meter(*renderer, *src, exposureTime))
+            {
+                renderer->setAutoExposureEnabled(false);
+                view->autoExposure.reset();
+            }
+            prepared = dst->bind();
+            renderer->setViewport(viewport);
+            if (toScreen)
+                renderer->setScissor(x, y, viewWidth, viewHeight);
+        }
+        if (!prepared || !viewportEffects[i]->render(renderer, src, viewWidth, viewHeight))
         {
             GetLogger()->error("Unable to render viewport effect.\n");
             ok = false;
@@ -2871,6 +2917,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
     m_scriptMaps.initColorMaps(renderer->colors);
     renderer->setToneMappingMode(config->renderDetails.output.toneMapping);
     renderer->setCameraExposure(config->renderDetails.output.cameraExposure);
+    renderer->setAutoExposureEnabled(config->renderDetails.output.autoCameraExposure);
 
     if (util::is_set(renderer->getRenderFlags(), RenderFlags::ShowAutoMag))
     {

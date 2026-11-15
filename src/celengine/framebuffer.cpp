@@ -95,10 +95,12 @@ FramebufferObject::FramebufferObject(FramebufferObject &&other) noexcept:
     m_height(other.m_height),
     m_colorTexId(other.m_colorTexId),
     m_depthTexId(other.m_depthTexId),
+    m_meterTexId(other.m_meterTexId),
     m_fboId(other.m_fboId),
     m_msaaFboId(other.m_msaaFboId),
     m_colorRboId(other.m_colorRboId),
     m_depthRboId(other.m_depthRboId),
+    m_meterRboId(other.m_meterRboId),
     m_samples(other.m_samples),
     m_requestedSamples(other.m_requestedSamples),
     m_useFloatColor(other.m_useFloatColor),
@@ -119,10 +121,12 @@ FramebufferObject& FramebufferObject::operator=(FramebufferObject &&other) noexc
     m_height        = other.m_height;
     m_colorTexId    = other.m_colorTexId;
     m_depthTexId    = other.m_depthTexId;
+    m_meterTexId    = other.m_meterTexId;
     m_fboId         = other.m_fboId;
     m_msaaFboId     = other.m_msaaFboId;
     m_colorRboId    = other.m_colorRboId;
     m_depthRboId    = other.m_depthRboId;
+    m_meterRboId    = other.m_meterRboId;
     m_samples       = other.m_samples;
     m_requestedSamples = other.m_requestedSamples;
     m_useFloatColor = other.m_useFloatColor;
@@ -164,11 +168,11 @@ FramebufferObject::depthTexture() const
 }
 
 void
-FramebufferObject::generateColorTexture()
+FramebufferObject::generateColorTexture(GLuint &texture)
 {
     // Create and bind the texture
-    glGenTextures(1, &m_colorTexId);
-    glBindTexture(GL_TEXTURE_2D, m_colorTexId);
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -247,8 +251,21 @@ FramebufferObject::generateFbo(Attachment attachments)
 
     if (celestia::util::is_set(attachments, Attachment::Color))
     {
-        generateColorTexture();
+        generateColorTexture(m_colorTexId);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_colorTexId, 0);
+
+        if (celestia::util::is_set(attachments, Attachment::Meter))
+        {
+            generateColorTexture(m_meterTexId);
+            glFramebufferTexture2D(
+                GL_FRAMEBUFFER,
+                GL_COLOR_ATTACHMENT1,
+                GL_TEXTURE_2D,
+                m_meterTexId,
+                0);
+            constexpr std::array<GLenum, 2> buffers{ GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+            glDrawBuffers(buffers.size(), buffers.data());
+        }
 
         m_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
         if (m_status != GL_FRAMEBUFFER_COMPLETE)
@@ -316,6 +333,19 @@ FramebufferObject::generateMSAAFbo(Attachment attachments)
 #endif
         glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, fmt, m_width, m_height);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, m_colorRboId);
+        if (celestia::util::is_set(attachments, Attachment::Meter))
+        {
+            glGenRenderbuffers(1, &m_meterRboId);
+            glBindRenderbuffer(GL_RENDERBUFFER, m_meterRboId);
+            glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, fmt, m_width, m_height);
+            glFramebufferRenderbuffer(
+                GL_FRAMEBUFFER,
+                GL_COLOR_ATTACHMENT1,
+                GL_RENDERBUFFER,
+                m_meterRboId);
+            constexpr std::array<GLenum, 2> buffers{ GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+            glDrawBuffers(buffers.size(), buffers.data());
+        }
     }
 
     if (celestia::util::is_set(attachments, Attachment::Depth))
@@ -349,6 +379,11 @@ FramebufferObject::generateMSAAFbo(Attachment attachments)
             m_depthRboId = 0;
         }
         m_samples = 1;
+        if (m_meterRboId != 0)
+        {
+            glDeleteRenderbuffers(1, &m_meterRboId);
+            m_meterRboId = 0;
+        }
 
         // The single-sample color and depth textures are already attached.
         glBindFramebuffer(GL_FRAMEBUFFER, m_fboId);
@@ -380,6 +415,16 @@ FramebufferObject::cleanup()
     {
         glDeleteRenderbuffers(1, &m_depthRboId);
         m_depthRboId = 0;
+    }
+    if (m_meterRboId != 0)
+    {
+        glDeleteRenderbuffers(1, &m_meterRboId);
+        m_meterRboId = 0;
+    }
+    if (m_meterTexId != 0)
+    {
+        glDeleteTextures(1, &m_meterTexId);
+        m_meterTexId = 0;
     }
 
     if (m_fboId != 0)
@@ -442,6 +487,9 @@ FramebufferObject::resolve(Attachment attachments) const
     // desktop GL (via ARB_framebuffer_object, which is required) and GLES 3.0+.
     glBindFramebuffer(GL_READ_FRAMEBUFFER, m_msaaFboId);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fboId);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    constexpr GLenum colorBuffer = GL_COLOR_ATTACHMENT0;
+    glDrawBuffers(1, &colorBuffer);
     GLbitfield mask = 0;
     if (celestia::util::is_set(attachments, Attachment::Color))
         mask |= GL_COLOR_BUFFER_BIT;
@@ -450,14 +498,40 @@ FramebufferObject::resolve(Attachment attachments) const
     glBlitFramebuffer(0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height),
                       0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height),
                       mask, GL_NEAREST);
+    if (m_meterTexId != 0)
+    {
+        if (celestia::util::is_set(attachments, Attachment::Meter))
+        {
+            glReadBuffer(GL_COLOR_ATTACHMENT1);
+            // GLES requires draw-buffer indices to match attachment indices.
+            constexpr std::array<GLenum, 2> meterBuffers{ GL_NONE, GL_COLOR_ATTACHMENT1 };
+            glDrawBuffers(meterBuffers.size(), meterBuffers.data());
+            glBlitFramebuffer(
+                0,
+                0,
+                m_width,
+                m_height,
+                0,
+                0,
+                m_width,
+                m_height,
+                GL_COLOR_BUFFER_BIT,
+                GL_NEAREST);
+        }
+        constexpr std::array<GLenum, 2> buffers{ GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+        glDrawBuffers(buffers.size(), buffers.data());
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+    }
 
     // The effect chain samples the resolved textures, not these renderbuffers.
-    std::array<GLenum, 2> msaaAttachments{};
+    std::array<GLenum, 3> msaaAttachments{};
     GLsizei count = 0;
     if (m_colorRboId != 0)
         msaaAttachments[count++] = GL_COLOR_ATTACHMENT0;
     if (m_depthRboId != 0)
         msaaAttachments[count++] = GL_DEPTH_ATTACHMENT;
+    if (m_meterRboId != 0)
+        msaaAttachments[count++] = GL_COLOR_ATTACHMENT1;
     invalidateAttachments(GL_READ_FRAMEBUFFER, count, msaaAttachments.data());
 
     if (scissorEnabled)
@@ -468,11 +542,13 @@ FramebufferObject::resolve(Attachment attachments) const
 void
 FramebufferObject::discard(Attachment attachments) const
 {
-    std::array<GLenum, 2> tokens{};
+    std::array<GLenum, 3> tokens{};
     GLsizei count = 0;
     if (celestia::util::is_set(attachments, Attachment::Color))
         tokens[count++] = GL_COLOR_ATTACHMENT0;
     if (celestia::util::is_set(attachments, Attachment::Depth))
         tokens[count++] = GL_DEPTH_ATTACHMENT;
+    if (celestia::util::is_set(attachments, Attachment::Meter))
+        tokens[count++] = GL_COLOR_ATTACHMENT1;
     invalidateAttachments(GL_FRAMEBUFFER, count, tokens.data());
 }

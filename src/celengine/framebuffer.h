@@ -21,6 +21,7 @@ class FramebufferObject
         None  = 0,
         Color = 0x1,
         Depth = 0x2,
+        Meter = 0x4,
     };
 
     FramebufferObject() = delete;
@@ -70,6 +71,10 @@ class FramebufferObject
 
     GLuint colorTexture() const;
     GLuint depthTexture() const;
+    GLuint meterTexture() const
+    {
+        return m_meterTexId;
+    }
 
     bool bind();
     bool unbind(GLint oldfboId);
@@ -85,7 +90,7 @@ class FramebufferObject
  private:
     explicit FramebufferObject(GLuint fboId); // non-owning wrapper; only id() and bind() are valid
 
-    void generateColorTexture();
+    void generateColorTexture(GLuint &texture);
     void generateDepthTexture();
     void generateFbo(Attachment attachments);
     void generateMSAAFbo(Attachment attachments);
@@ -96,10 +101,12 @@ class FramebufferObject
     GLuint m_height;
     GLuint m_colorTexId;
     GLuint m_depthTexId;
+    GLuint m_meterTexId{ 0 };
     GLuint m_fboId;
     GLuint m_msaaFboId{ 0 };
     GLuint m_colorRboId{ 0 };
     GLuint m_depthRboId{ 0 };
+    GLuint m_meterRboId{ 0 };
     int    m_samples;
     int    m_requestedSamples;
     bool   m_useFloatColor;

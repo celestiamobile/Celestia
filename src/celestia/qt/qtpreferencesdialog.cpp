@@ -29,6 +29,7 @@
 
 #include <celastro/date.h>
 #include <celengine/body.h>
+#include <celengine/glsupport.h>
 #include <celengine/location.h>
 #include <celengine/observer.h>
 #include <celengine/render.h>
@@ -263,6 +264,12 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
             static_cast<int>(renderer->getToneMappingMode()));
     }
     ui.toneMappingExposureSpinBox->setValue(renderer->getToneMappingExposure());
+    {
+        QSignalBlocker blocker(ui.autoCameraExposureCheckBox);
+        ui.autoCameraExposureCheckBox->setChecked(renderer->getAutoExposureEnabled());
+        ui.autoCameraExposureCheckBox->setEnabled(gl::sRGBRendering && gl::colorBufferHalfFloat);
+        ui.cameraExposureSpinBox->setEnabled(!renderer->getAutoExposureEnabled());
+    }
     {
         QSignalBlocker blocker(ui.cameraExposureSpinBox);
         ui.cameraExposureSpinBox->setValue(std::log2(renderer->getCameraExposure()));
@@ -1031,6 +1038,16 @@ void
 PreferencesDialog::on_cameraExposureSpinBox_valueChanged(double value) const
 {
     appCore->getRenderer()->setCameraExposure(static_cast<float>(std::exp2(value)));
+}
+
+void
+PreferencesDialog::on_autoCameraExposureCheckBox_toggled(bool enabled) const
+{
+    auto* renderer = appCore->getRenderer();
+    renderer->setAutoExposureEnabled(enabled);
+    QSignalBlocker blocker(ui.autoCameraExposureCheckBox);
+    ui.autoCameraExposureCheckBox->setChecked(renderer->getAutoExposureEnabled());
+    ui.cameraExposureSpinBox->setEnabled(!renderer->getAutoExposureEnabled());
 }
 
 void

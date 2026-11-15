@@ -9,6 +9,7 @@
 
 #include "view.h"
 
+#include <celengine/autoexposure.h>
 #include <celengine/framebuffer.h>
 #include <celengine/glsupport.h>
 #include <celengine/overlay.h>
@@ -300,18 +301,29 @@ View::updateFBOs(const std::vector<std::unique_ptr<ViewportEffect>>& effects, in
             samples = samplesToRequest;
 
         auto& fbo = fbos[i];
+        bool  needsMeter = i == 0
+                           && celestia::util::is_set(
+                               effects[0]->sourceAttachments(),
+                               FramebufferObject::Attachment::Meter);
 
         if (fbo
             && fbo->width()            == newWidth
             && fbo->height()           == newHeight
             && fbo->requestedSamples() == samples
-            && fbo->useFloatColor()    == useFloat)
+            && fbo->useFloatColor()    == useFloat
+            && (fbo->meterTexture() != 0) == needsMeter)
             continue;
 
-        fbo = std::make_unique<FramebufferObject>(newWidth, newHeight,
-                                                  FramebufferObject::Attachment::Color | FramebufferObject::Attachment::Depth,
-                                                  samples,
-                                                  useFloat);
+        auto attachments
+            = FramebufferObject::Attachment::Color | FramebufferObject::Attachment::Depth;
+        if (needsMeter)
+            attachments |= FramebufferObject::Attachment::Meter;
+        fbo = std::make_unique<FramebufferObject>(
+            newWidth,
+            newHeight,
+            attachments,
+            samples,
+            useFloat);
         if (!fbo->isValid())
         {
             GetLogger()->error("Error creating view FBO {}.\n", i);

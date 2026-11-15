@@ -73,6 +73,7 @@ public:
     float radianceScale{ 1.0f };
     // Geometric albedo and opposition BRDF normalization, for the surface only.
     float surfaceReflectanceScale{ 1.0f };
+    float                                       surfaceDimming{ 1.0f };
     std::array<DirectionalLight, MaxLights> lights;
     std::array<EclipseShadowVector*, MaxLights> shadows;
     std::array<RingShadow, MaxLights> ringShadows;
