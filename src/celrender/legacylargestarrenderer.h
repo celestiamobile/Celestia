@@ -21,7 +21,7 @@ namespace celestia::render
 class LegacyLargeStarRenderer : public LargeStarRenderer
 {
 public:
-    LegacyLargeStarRenderer(const Renderer &renderer, capacity_t capacity);
+    LegacyLargeStarRenderer(const Renderer &renderer, capacity_t capacity, bool calibrated);
     ~LegacyLargeStarRenderer() override;
 
     void setTexture(Texture *texture) { m_texture = texture; }
@@ -31,6 +31,7 @@ protected:
 
 private:
     Texture *m_texture { nullptr };
+    bool m_calibrated;
 };
 
 } // namespace celestia::render

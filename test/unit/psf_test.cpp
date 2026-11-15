@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 
 #include <doctest.h>
 
@@ -39,6 +40,25 @@ TEST_CASE("PSF soft clipping preserves its curve without overflowing finite peak
     double p = peak;
     double g = gate;
     CHECK(psfSoftClip(peak, gate) == doctest::Approx(std::sqrt((p - g) * (p + g))));
+}
+
+TEST_CASE("Calibrated point halos share the same onset for unresolved sources")
+{
+    using celestia::engine::detail::calibratedPointHaloOpacity;
+    CHECK(calibratedPointHaloOpacity(0.5f, 1.0f) == 0.0f);
+    CHECK(calibratedPointHaloOpacity(1.0f, 1.0f) == 0.0f);
+    CHECK(calibratedPointHaloOpacity(1.5f, 1.0f) == doctest::Approx(0.5f));
+    CHECK(calibratedPointHaloOpacity(2.0f, 1.0f) == 1.0f);
+}
+
+TEST_CASE("Reflective point halos vanish as the resolved surface takes over")
+{
+    using celestia::engine::detail::calibratedPointHaloOpacity;
+    CHECK(calibratedPointHaloOpacity(2.0f, 0.75f) == doctest::Approx(0.375f));
+    CHECK(calibratedPointHaloOpacity(2.0f, 0.5f) == 0.0f);
+    CHECK(calibratedPointHaloOpacity(1000.0f, 0.25f) == doctest::Approx(0.25f));
+    CHECK(calibratedPointHaloOpacity(1000.0f, 0.0f) == 0.0f);
+    CHECK(calibratedPointHaloOpacity(std::numeric_limits<float>::infinity(), 0.0f) == 0.0f);
 }
 
 TEST_CASE("PSF glow fades in between peak radiance one and two")
@@ -151,6 +171,60 @@ TEST_CASE("PSF point fade is continuous and monotonic across radii and DPI scale
                 CHECK(fade >= 0.0f);
                 CHECK(fade <= 1.0f);
                 previous = fade;
+            }
+        }
+    }
+}
+
+TEST_CASE("Calibrated legacy star sizes use source flux and physical pixels")
+{
+    using celestia::engine::detail::calibratedStarSize;
+    CHECK(calibratedStarSize(StarStyle::PointStars, 100.0f, 2.0f) == 2.0f);
+    CHECK(calibratedStarSize(StarStyle::PointStars, 0.001f, 0.5f) == 1.0f);
+    CHECK(calibratedStarSize(StarStyle::FuzzyPointStars, 100.0f, 1.25f) == 7.0f);
+    CHECK(calibratedStarSize(StarStyle::ScaledDiscStars, 0.001f, 2.0f) == 10.0f);
+    CHECK(calibratedStarSize(StarStyle::ScaledDiscStars, 16.0f, 2.0f) == 20.0f);
+    CHECK(calibratedStarSize(StarStyle::ScaledDiscStars, 1.0e12f, 2.0f) == 80.0f);
+}
+
+TEST_CASE("Calibrated legacy cores yield to resolved surfaces across their footprint")
+{
+    using celestia::engine::detail::calibratedStarPointFade;
+    CHECK(calibratedStarPointFade(StarStyle::PointStars, 16.0f, 1.0f, 2.0f) == 1.0f);
+    CHECK(calibratedStarPointFade(StarStyle::PointStars, 16.0f, 2.0f, 2.0f) == 0.0f);
+    CHECK(calibratedStarPointFade(StarStyle::FuzzyPointStars, 16.0f, 3.0f, 2.0f) == doctest::Approx(0.5f));
+    CHECK(calibratedStarPointFade(StarStyle::FuzzyPointStars, 16.0f, 5.0f, 2.0f) == 0.0f);
+    CHECK(calibratedStarPointFade(StarStyle::ScaledDiscStars, 16.0f, 5.5f, 2.0f) == doctest::Approx(0.5f));
+    CHECK(calibratedStarPointFade(StarStyle::ScaledDiscStars, 16.0f, 10.0f, 2.0f) == 0.0f);
+}
+
+TEST_CASE("Calibrated label peaks match the pixel-integrated point kernels")
+{
+    namespace detail = celestia::engine::detail;
+    for (auto style : { StarStyle::PointStars, StarStyle::FuzzyPointStars, StarStyle::ScaledDiscStars })
+    {
+        for (float scale : { 0.5f, 1.25f, 2.0f })
+        {
+            for (float flux : { 0.01f, 1.0f, 16.0f })
+            {
+                CAPTURE(style);
+                CAPTURE(scale);
+                CAPTURE(flux);
+                double size = detail::calibratedStarSize(style, flux, scale);
+                double mass = 1.0 / size;
+                if (style != StarStyle::PointStars)
+                {
+                    mass = 0;
+                    for (int sample = 0; sample < 1024; ++sample)
+                    {
+                        double x = (sample + 0.5) / 1024.0 - 0.5;
+                        mass += std::sqrt(32.0 / std::numbers::pi)
+                                * std::exp(-32.0 * x * x / (size * size))
+                                / (1024.0 * size * std::erf(std::sqrt(8.0)));
+                    }
+                }
+                CHECK(detail::calibratedStarPeakRadiance(style, flux, scale)
+                      == doctest::Approx(flux * scale * scale * mass * mass).epsilon(0.00001));
             }
         }
     }

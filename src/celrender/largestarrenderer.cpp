@@ -61,7 +61,13 @@ LargeStarRenderer::~LargeStarRenderer() = default;
 void
 LargeStarRenderer::start()
 {
-    m_prog   = m_renderer.getShaderManager().getShader(m_shaderId, m_shaderOptions);
+    start(StaticShaderOptions::None);
+}
+
+void
+LargeStarRenderer::start(StaticShaderOptions additionalOptions)
+{
+    m_prog   = m_renderer.getShaderManager().getShader(m_shaderId, m_shaderOptions | additionalOptions);
     m_nStars = 0;
 }
 

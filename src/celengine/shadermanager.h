@@ -44,10 +44,11 @@ enum class StaticShader
     Text,
     Tidal,
     WarpMesh,
+    CalibratedStar,
     _Count,
 };
 
-// Compile-time options that select variants of a static shader via #define injection.
+// Compile-time options that select variants of a static shader.
 enum class StaticShaderOptions : std::uint16_t
 {
     None            = 0,
@@ -55,6 +56,7 @@ enum class StaticShaderOptions : std::uint16_t
     Billboard       = 0x02,
     ConvertToSRGB   = 0x04,
     PreserveDepth   = 0x08,
+    VisualOnly      = 0x80, // Already exposed; excluded from physical metering.
     ToneMapACES     = 0x100,
     ToneMapReinhard = 0x200,
 };

@@ -28,6 +28,8 @@ namespace celestia::gl
 class VertexObject;
 }
 
+namespace celestia::render { class LegacyLargeStarRenderer; }
+
 // PointStarVertexBuffer is used when hardware supports point sprites.
 class PointStarVertexBuffer : public celestia::render::StarPipelineFlushable,
                               private celestia::util::NoMove
@@ -36,14 +38,14 @@ public:
     using capacity_t = unsigned int;
 
     PointStarVertexBuffer(const Renderer &renderer, capacity_t capacity);
-    ~PointStarVertexBuffer() override = default;
+    ~PointStarVertexBuffer() override;
     PointStarVertexBuffer() = delete;
 
-    void startBasicPoints();
-    void startSprites();
+    void startBasicPoints(bool calibrated);
+    void startSprites(bool calibrated, bool visualOnly = false);
     void render();
     void finish() override;
-    void addStar(const Eigen::Vector3f &pos, const Color &color, float size);
+    void addStar(const Eigen::Vector3f &pos, const Color &color, float size, float irradiance);
     void setTexture(Texture* texture);
     void setPointScale(float);
 
@@ -52,6 +54,7 @@ private:
     {
         Eigen::Vector3f position;
         float size;
+        float irradiance;
         unsigned char color[4];
     };
 
@@ -61,6 +64,9 @@ private:
     std::unique_ptr<StarVertex[]>   m_vertices;
     Texture                        *m_texture               { nullptr };
     bool                            m_pointSizeFromVertex   { false };
+    bool                            m_calibrated            { false };
+    bool                            m_largeActive           { false };
+    std::unique_ptr<celestia::render::LegacyLargeStarRenderer> m_largeRenderer;
     float                           m_pointScale            { 1.0f };
     CelestiaGLProgram              *m_prog                  { nullptr };
 
@@ -72,19 +78,3 @@ private:
     void makeCurrent();
     void setupVertexArrayObject();
 };
-
-inline void
-PointStarVertexBuffer::addStar(const Eigen::Vector3f &pos,
-                               const Color &color,
-                               float size)
-{
-    assert(m_nStars < m_capacity);
-
-    m_vertices[m_nStars].position = pos;
-    m_vertices[m_nStars].size = size;
-    color.get(m_vertices[m_nStars].color);
-    ++m_nStars;
-
-    if (m_nStars == m_capacity)
-        render();
-}

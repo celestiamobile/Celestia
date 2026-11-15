@@ -229,8 +229,8 @@ Renderer::Renderer() :
     m_eclipticLineRenderer(std::make_unique<EclipticLineRenderer>(*this)),
     m_galaxyRenderer(std::make_unique<GalaxyRenderer>(*this)),
     m_globularRenderer(std::make_unique<GlobularRenderer>(*this)),
-    m_legacyLargeStarRenderer(std::make_unique<LegacyLargeStarRenderer>(*this, LegacyLargeStarCapacity)),
-    m_legacyLargeGlareRenderer(std::make_unique<LegacyLargeStarRenderer>(*this, LegacyLargeStarCapacity)),
+    m_legacyLargeStarRenderer(std::make_unique<LegacyLargeStarRenderer>(*this, LegacyLargeStarCapacity, false)),
+    m_legacyLargeGlareRenderer(std::make_unique<LegacyLargeStarRenderer>(*this, LegacyLargeStarCapacity, false)),
     m_psfGlowLargeRenderer(std::make_unique<PsfGlowLargeRenderer>(*this, StarBufferCapacity)),
     m_hollowMarkerRenderer(std::make_unique<LineRenderer>(*this, 1.0f, LineRenderer::PrimType::Lines, LineRenderer::StorageType::Static)),
     m_nebulaRenderer(std::make_unique<NebulaRenderer>(*this)),
@@ -1508,7 +1508,7 @@ void Renderer::renderScene(const Observer& observer,
         adjustMagnitudeInsideAtmosphere(faintestMag, saturationMag, now);
     }
     starAtmosphereBrightness =
-        starStyle == StarStyle::PointSpreadFunction
+        (gl::sRGBRendering || starStyle == StarStyle::PointSpreadFunction)
             ? celestia::engine::detail::psfAtmosphereBrightness(
                   faintestMag,
                   faintestMagWithoutAtmosphere)
@@ -1557,6 +1557,14 @@ void Renderer::renderScene(const Observer& observer,
     // Planets also use PSF buffers, even when stars are hidden.
     if (starStyle == StarStyle::PointSpreadFunction)
         preparePsfStarBuffers();
+    else if (gl::sRGBRendering)
+    {
+        pointStarVertexBuffer->setPointScale(static_cast<float>(screenDpi) / 96.0f);
+        if (starStyle == StarStyle::PointStars)
+            pointStarVertexBuffer->startBasicPoints(true);
+        else
+            pointStarVertexBuffer->startSprites(true);
+    }
 
     // Render stars
     if (util::is_set(renderFlags, RenderFlags::ShowStars) && universe.getStarCatalog() != nullptr)
@@ -1770,6 +1778,41 @@ Renderer::calculatePointSize(float appMag,
     }
 }
 
+void Renderer::addLegacyPointHalo(const Vector3f& position, const Color& color,
+                                  float irradiance, float discSizeInPixels, float pointFraction)
+{
+    if (starStyle == StarStyle::PointSpreadFunction || !(irradiance > 0.0f))
+        return;
+
+    float scale = static_cast<float>(screenDpi) / 96.0f;
+    float exposure = getCameraExposure() * starAtmosphereBrightness;
+    float greenScale = 1.0f;
+    Color linearColor = psfGreenNormalization(color, 0.1f, greenScale);
+    float peak = engine::detail::calibratedStarPeakRadiance(starStyle, irradiance, scale)
+                 * exposure * greenScale * linearColor.toVector3().maxCoeff();
+    float onset = engine::detail::calibratedPointHaloOpacity(peak, pointFraction);
+    if (onset <= 0.0f)
+        return;
+
+    float pointSize, alpha, glareSize, glareAlpha;
+    calculatePointSize(astro::irradianceToMag(irradiance * exposure), BaseStarDiscSize * scale,
+                       pointSize, alpha, glareSize, glareAlpha);
+    if (starStyle == StarStyle::ScaledDiscStars && discSizeInPixels > MaxScaledDiscStarSize)
+        glareAlpha = std::min(glareAlpha,
+                             (MaxScaledDiscStarSize - discSizeInPixels) / MaxScaledDiscStarSize + 1.0f);
+    glareAlpha *= onset;
+    if (glareSize <= 0.0f || glareAlpha <= 0.0f)
+        return;
+    glareSize = std::max(glareSize, pointSize * discSizeInPixels / scale * 3.0f);
+
+    // The legacy halo is display-space decoration, not physical scene light.
+    Color haloColor(color.linearize(), glareAlpha);
+    if (glareSize > gl::maxPointSize)
+        m_legacyLargeGlareRenderer->addStar(position, haloColor, glareSize);
+    else
+        glareVertexBuffer->addStar(position, haloColor, glareSize, 1.0f);
+}
+
 // If the an object occupies a pixel or less of screen space, we don't
 // render its mesh at all and just display a starlike point instead.
 // Switching between the particle and mesh renderings of an object is
@@ -1791,6 +1834,30 @@ void Renderer::renderObjectAsPoint(const PointObjectInfo& info,
     {
         float pointScale = static_cast<float>(screenDpi) / 96.0f;
         addStarAsPsfPoint(info, color, irradiance, pointScale, discSizeInPixels, emissive);
+        return;
+    }
+
+    if (gl::sRGBRendering)
+    {
+        float scale = static_cast<float>(screenDpi) / 96.0f;
+        float fade = engine::detail::calibratedStarPointFade(starStyle, irradiance, discSizeInPixels, scale);
+        if (fade <= 0.0f && (!useHalos || !emissive))
+            return;
+        PipelineState ps;
+        ps.blending = true;
+        ps.blendFunc = {GL_SRC_ALPHA, GL_ONE};
+        ps.depthTest = true;
+        setPipelineState(ps);
+        auto frontPos = calculateQuadCenter(getCameraOrientationf(), position, radius);
+        if (useHalos)
+            addLegacyPointHalo(frontPos, color, irradiance, discSizeInPixels, emissive ? 1.0f : fade);
+        if (fade <= 0.0f)
+            return;
+        float greenScale = 1.0f;
+        Color linearColor = psfGreenNormalization(color, 0.1f, greenScale);
+        float size = engine::detail::calibratedStarSize(starStyle, irradiance, scale);
+        pointStarVertexBuffer->addStar(frontPos, linearColor, size,
+                                      irradiance * greenScale * starAtmosphereBrightness * fade);
         return;
     }
 
@@ -1836,7 +1903,7 @@ void Renderer::renderObjectAsPoint(const PointObjectInfo& info,
     if (pointSize > gl::maxPointSize)
         m_legacyLargeStarRenderer->addStar(frontPos, {color, alpha}, pointSize);
     else
-        pointStarVertexBuffer->addStar(frontPos, {color, alpha}, pointSize);
+        pointStarVertexBuffer->addStar(frontPos, {color, alpha}, pointSize, 1.0f);
 
     // If the object is brighter than magnitude 1, add a halo around it to
     // make it appear more brilliant.  This is a hack to compensate for the
@@ -1850,7 +1917,7 @@ void Renderer::renderObjectAsPoint(const PointObjectInfo& info,
         if (glareSize > gl::maxPointSize)
             m_legacyLargeGlareRenderer->addStar(frontPos, {color, glareAlpha}, glareSize);
         else
-            glareVertexBuffer->addStar(frontPos, {color, glareAlpha}, glareSize);
+            glareVertexBuffer->addStar(frontPos, {color, glareAlpha}, glareSize, 1.0f);
     }
 }
 
@@ -3330,7 +3397,8 @@ void Renderer::renderPlanet(Body& body,
     float discSizeInPixels = body.getRadius() /
         (max(nearPlaneDistance, altitude) * pixelSize);
 
-    float maxDiscSize = (starStyle == StarStyle::ScaledDiscStars) ? MaxScaledDiscStarSize : 1.0f;
+    float maxDiscSize = !gl::sRGBRendering && starStyle == StarStyle::ScaledDiscStars
+        ? MaxScaledDiscStarSize : 1.0f;
     if (discSizeInPixels >= maxDiscSize && body.hasVisibleGeometry())
     {
         auto bodyFeaturesManager = GetBodyFeaturesManager();
@@ -3351,6 +3419,12 @@ void Renderer::renderPlanet(Body& body,
             float dimming = irradiance > 0.0f ? engine::detail::psfDimmedIrradiance(irradiance, minimum) / irradiance : 1.0f;
             lights.surfaceReflectanceScale *= dimming * starAtmosphereBrightness
                 * (1.0f - engine::detail::psfPointFade(discSizeInPixels, pointRadius, pointScale));
+        }
+        else if (gl::sRGBRendering && body.isVisibleAsPoint())
+        {
+            float scale = static_cast<float>(screenDpi) / 96.0f;
+            lights.surfaceReflectanceScale *= starAtmosphereBrightness *
+                (1.0f - engine::detail::calibratedStarPointFade(starStyle, irradiance, discSizeInPixels, scale));
         }
 
         // Cache this lighting so the atmosphere entry can reuse it this frame;
@@ -3401,7 +3475,7 @@ void Renderer::renderPlanet(Body& body,
                                 irradiance,
                                 discSizeInPixels,
                                 surfaceColor * (1.0f / maxCoeff), // normalize point color; 'darkness' is handled by size of point determined by GeomAlbedo.
-                                false, false);
+                                gl::sRGBRendering, false);
         }
     }
 }
@@ -3577,6 +3651,12 @@ void Renderer::renderStar(const Star& star,
                 surfaceIrradiance = engine::detail::psfDimmedIrradiance(irradiance, minimum);
                 surfaceIrradiance *= starAtmosphereBrightness;
                 discFraction = 1.0f - engine::detail::psfPointFade(discSizeInPixels, pointRadius, pointScale);
+            }
+            else
+            {
+                surfaceIrradiance *= starAtmosphereBrightness;
+                discFraction = 1.0f - engine::detail::calibratedStarPointFade(
+                    starStyle, irradiance, discSizeInPixels, pointScale);
             }
             rp.emissiveScale = engine::detail::discMeanRadiance(surfaceIrradiance, discSizeInPixels / pointScale)
                               * greenScale * discFraction;
@@ -4494,6 +4574,7 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     starRenderer.labelMode         = labelMode;
     starRenderer.SolarSystemMaxDistance = SolarSystemMaxDistance;
     starRenderer.starStyle         = starStyle;
+    starRenderer.atmosphereBrightness = starAtmosphereBrightness;
     starRenderer.psf.pointRadius   = starPointRadius;
     starRenderer.psf.pointScale    = static_cast<float>(screenDpi) / 96.0f;
     starRenderer.psf.optimization  = starOptimization;
@@ -4563,11 +4644,13 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     }
     else
     {
-        starRenderer.glareVertexBuffer->startSprites();
+        starRenderer.glareVertexBuffer->startSprites(false, gl::sRGBRendering);
+        m_legacyLargeGlareRenderer->start(
+            gl::sRGBRendering ? StaticShaderOptions::VisualOnly : StaticShaderOptions::None);
         if (starStyle == StarStyle::PointStars)
-            starRenderer.starVertexBuffer->startBasicPoints();
+            starRenderer.starVertexBuffer->startBasicPoints(gl::sRGBRendering);
         else
-            starRenderer.starVertexBuffer->startSprites();
+            starRenderer.starVertexBuffer->startSprites(gl::sRGBRendering);
 
         ps.blendFunc = {GL_SRC_ALPHA, GL_ONE};
     }
@@ -4591,6 +4674,7 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     {
         starRenderer.starVertexBuffer->finish();
         starRenderer.glareVertexBuffer->finish();
+        m_legacyLargeGlareRenderer->finish();
     }
 
 #ifndef GL_ES
@@ -5172,7 +5256,6 @@ void Renderer::setToneMappingExposure(float e)
     toneMappingExposure = std::clamp(e, 1.0e-3f, 1.0e6f);
     markSettingsChanged();
 }
-
 
 float Renderer::getToneMappingExposure() const
 {
@@ -6283,7 +6366,8 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
     float intervalSize = 1.0f / static_cast<float>(max(1, nIntervals));
     int i = static_cast<int>(renderList.size()) - 1;
     m_legacyLargeStarRenderer->start();
-    m_legacyLargeGlareRenderer->start();
+    m_legacyLargeGlareRenderer->start(
+        gl::sRGBRendering ? StaticShaderOptions::VisualOnly : StaticShaderOptions::None);
     for (int interval = 0; interval < nIntervals; interval++)
     {
         currentIntervalIndex = interval;
@@ -6363,13 +6447,13 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
         ps.depthTest = true;
         setPipelineState(ps);
 
-        glareVertexBuffer->startSprites();
+        glareVertexBuffer->startSprites(false, gl::sRGBRendering);
         glareVertexBuffer->render();
         glareVertexBuffer->finish();
         if (starStyle == StarStyle::PointStars)
-            pointStarVertexBuffer->startBasicPoints();
+            pointStarVertexBuffer->startBasicPoints(gl::sRGBRendering);
         else
-            pointStarVertexBuffer->startSprites();
+            pointStarVertexBuffer->startSprites(gl::sRGBRendering && starStyle != StarStyle::PointSpreadFunction);
         pointStarVertexBuffer->render();
         pointStarVertexBuffer->finish();
 

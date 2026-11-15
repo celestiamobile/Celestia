@@ -48,6 +48,7 @@ public:
     LargeStarRenderer() = delete;
 
     void start();
+    void start(StaticShaderOptions additionalOptions);
     void render();
     void finish() override;
 

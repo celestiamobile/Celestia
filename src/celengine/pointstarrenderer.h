@@ -59,6 +59,13 @@ float psfReflectiveGlowOnset(float glowPeak, float linkedGlowPeak);
 // Fade the cone after the mesh resolves, using physical pixels for the disc radius.
 float psfPointFade(float discRadiusPixels, float pointRadius, float pointScale);
 
+float calibratedStarSize(StarStyle style, float irradiance, float pointScale);
+float calibratedStarPointFade(StarStyle style, float irradiance, float discRadiusPixels, float pointScale);
+float calibratedStarPeakRadiance(StarStyle style, float irradiance, float pointScale);
+
+// Appearance-only halo fades with the point contribution as a body resolves.
+float calibratedPointHaloOpacity(float peakRadiance, float pointFraction);
+
 } // namespace celestia::engine::detail
 
 class PointStarRenderer : public ObjectRenderer<Star, float>
@@ -110,5 +117,6 @@ public:
     float cosFOV                                { 1.0f };
 
     StarStyle starStyle                         { StarStyle::FuzzyPointStars };
+    float atmosphereBrightness                  { 1.0f };
     PsfState  psf;
 };
