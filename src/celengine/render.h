@@ -452,6 +452,7 @@ class Renderer
         Eigen::Vector3f semiAxes{ Eigen::Vector3f::Ones() };
         float radius{ 1.0f };
         float geometryScale{ 1.0f };
+        float emissiveScale{ 1.0f };
         celestia::engine::GeometryHandle geometry{ celestia::engine::GeometryHandle::Invalid };
 	bool isStar{ false };
     };

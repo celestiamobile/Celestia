@@ -573,6 +573,9 @@ GLSLUnlit_RenderContext::makeCurrent(const cmod::Material& m)
     Texture* baseTex = nullptr;
 
     shaderProps.lightModel = LightingModel::EmissiveModel;
+    shaderProps.effects = emissiveScale == 1.0f
+        ? LightingEffects::None
+        : LightingEffects::CalibratedEmission;
     shaderProps.texUsage = TexUsage::SharedTextureCoords;
 
     if (util::TextureHandle diffuseMap = m.getMap(cmod::TextureSemantic::DiffuseMap);
@@ -616,6 +619,7 @@ GLSLUnlit_RenderContext::makeCurrent(const cmod::Material& m)
     }
 
     prog->lights[0].diffuse = m.diffuse.toVector3();
+    prog->emissiveScale = emissiveScale;
     prog->opacity = m.opacity;
 
     if (usePointSize)

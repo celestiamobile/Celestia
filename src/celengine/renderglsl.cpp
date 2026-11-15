@@ -521,6 +521,7 @@ void renderGeometry_GLSL_Unlit(RenderGeometry* geometry,
                                Renderer* renderer)
 {
     GLSLUnlit_RenderContext rc(renderer, m.modelview, m.projection);
+    rc.setEmissiveScale(ri.emissiveScale);
     rc.setPointScale(ri.pointScale);
 
     Renderer::PipelineState ps;
@@ -624,7 +625,7 @@ void renderClouds_GLSL(const RenderInfo& ri,
     prog->use();
     prog->setMVPMatrices(*m.projection, *m.modelview);
 
-    prog->setLightParameters(ls, ri.color, ri.specularColor, Color::Black);
+    prog->setLightParameters(ls, ri.color, ri.specularColor, Color::Black, false);
     prog->eyePosition = ls.eyePos_obj;
     prog->ambientColor = ri.ambientColor.toVector3();
     prog->textureOffset = texOffset;
