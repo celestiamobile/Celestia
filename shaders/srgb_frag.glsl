@@ -2,6 +2,11 @@ in vec2 texCoord;
 
 uniform sampler2D tex;
 
+#ifdef BLOOM
+uniform sampler2D bloomTex;
+uniform float bloomStrength;
+#endif
+
 #ifdef PRESERVE_DEPTH
 uniform highp sampler2D depthTex;
 #endif
@@ -29,6 +34,12 @@ vec3 linearToSRGB(vec3 c)
 void main(void)
 {
     vec4 color = texture(tex, texCoord);
+#ifdef BLOOM
+    // Keep the blend finite even at strength one when the HDR scene overflows.
+    color.rgb = mix(color.rgb, vec3(0.0), isnan(color.rgb));
+    color.rgb = clamp(color.rgb, vec3(0.0), vec3(65504.0));
+    color.rgb = mix(color.rgb, texture(bloomTex, texCoord).rgb, bloomStrength);
+#endif
 #ifdef TONE_MAP
     vec3 x = exposure * clamp(color.rgb, vec3(0.0), vec3(65504.0));
     x = mix(x, vec3(0.0), isnan(x));

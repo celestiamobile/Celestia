@@ -60,12 +60,14 @@ public:
     {
         m_metering = enabled;
     }
+    void setBloomTexture(GLuint texture) { m_bloomTexture = texture; }
     FramebufferObject::Attachment sourceAttachments() const override;
     bool render(Renderer*, FramebufferObject*, int width, int height) override;
 
 private:
     bool m_needsFloatSource;
     StaticShaderOptions m_baseOptions;
+    GLuint m_bloomTexture{ 0 };
     bool                m_metering{ false };
 
     celestia::gl::VertexObject vo;

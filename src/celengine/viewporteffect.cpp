@@ -98,6 +98,9 @@ bool PassthroughViewportEffect::render(Renderer* renderer, FramebufferObject* fb
         else if (renderer->getToneMappingMode() == ToneMappingMode::Reinhard)
             options |= StaticShaderOptions::ToneMapReinhard;
     }
+    bool bloom = m_bloomTexture != 0 && util::is_set(options, StaticShaderOptions::ConvertToSRGB);
+    if (bloom)
+        options |= StaticShaderOptions::Bloom;
     auto *prog = renderer->getShaderManager().getShader(StaticShader::sRGB, options);
     if (prog == nullptr)
         return false;
@@ -107,6 +110,13 @@ bool PassthroughViewportEffect::render(Renderer* renderer, FramebufferObject* fb
     prog->use();
     if (toneMap)
         prog->floatParam("exposure") = renderer->getToneMappingExposure();
+    if (bloom)
+    {
+        prog->samplerParam("bloomTex") = 2;
+        prog->floatParam("bloomStrength") = renderer->getBloomStrength();
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, m_bloomTexture);
+    }
     bool preserveDepth = util::is_set(m_baseOptions, StaticShaderOptions::PreserveDepth);
     Renderer::PipelineState pipelineState;
     pipelineState.depthTest = preserveDepth;
@@ -120,6 +130,12 @@ bool PassthroughViewportEffect::render(Renderer* renderer, FramebufferObject* fb
     glBindTexture(GL_TEXTURE_2D, fbo->colorTexture());
     vo.draw();
     glBindTexture(GL_TEXTURE_2D, 0);
+    if (bloom)
+    {
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture(GL_TEXTURE0);
+    }
 
     return true;
 }

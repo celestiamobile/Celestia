@@ -265,6 +265,11 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
     }
     ui.toneMappingExposureSpinBox->setValue(renderer->getToneMappingExposure());
     {
+        QSignalBlocker blocker(ui.bloomStrengthSpinBox);
+        ui.bloomStrengthSpinBox->setValue(renderer->getBloomStrength());
+        ui.bloomStrengthSpinBox->setEnabled(gl::sRGBRendering && gl::colorBufferHalfFloat);
+    }
+    {
         QSignalBlocker blocker(ui.autoCameraExposureCheckBox);
         ui.autoCameraExposureCheckBox->setChecked(renderer->getAutoExposureEnabled());
         ui.autoCameraExposureCheckBox->setEnabled(gl::sRGBRendering && gl::colorBufferHalfFloat);
@@ -880,6 +885,12 @@ void
 PreferencesDialog::on_toneMappingExposureSpinBox_valueChanged(double value) const
 {
     appCore->getRenderer()->setToneMappingExposure(static_cast<float>(value));
+}
+
+void
+PreferencesDialog::on_bloomStrengthSpinBox_valueChanged(double value) const
+{
+    appCore->getRenderer()->setBloomStrength(static_cast<float>(value));
 }
 
 // Texture resolution

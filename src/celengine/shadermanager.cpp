@@ -81,6 +81,8 @@ constexpr std::array StaticShaderBaseNames
     "exposuremeter"sv,
     "exposuretarget"sv,
     "calibratedstar"sv,
+    "bloomdownsample"sv,
+    "bloomupsample"sv,
 };
 
 static_assert(StaticShaderBaseNames.size() == static_cast<std::size_t>(StaticShader::_Count));
@@ -2677,9 +2679,16 @@ buildProgram(
         util::is_set(options, StaticShaderOptions::ConvertToSRGB) ? "#define CONVERT_TO_SRGB\n"sv : ""sv;
     std::string_view preserveDepthDefine =
         util::is_set(options, StaticShaderOptions::PreserveDepth) ? "#define PRESERVE_DEPTH\n"sv : ""sv;
+    std::string_view bloomDefine =
+        util::is_set(options, StaticShaderOptions::Bloom) ? "#define BLOOM\n"sv : ""sv;
+    std::string_view bloomPrefilterDefine =
+        util::is_set(options, StaticShaderOptions::BloomPrefilter) ? "#define BLOOM_PREFILTER\n"sv : ""sv;
+    std::string_view bloomCoarseDefine = util::is_set(options, StaticShaderOptions::BloomCoarse) ?
+                                             "#define BLOOM_COARSE\n"sv :
+                                             ""sv;
     std::string vsSrc = fmt::format("{}{}{}{}{}{}\n", VersionHeader, CommonHeader, VertexHeader, billboardDefine, VPFunction(fisheyeEnabled), vs);
     std::string fsSrc = fmt::format(
-        "{}{}{}{}{}{}{}{}{}{}\n",
+        "{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
         VersionHeader,
         CommonHeader,
         cameraExposure ? CameraExposureDefine : ""sv,
@@ -2689,6 +2698,9 @@ buildProgram(
         billboardDefine,
         convertToSRGBDefine,
         preserveDepthDefine,
+        bloomDefine,
+        bloomPrefilterDefine,
+        bloomCoarseDefine,
         fmt::format(
             "#define main sceneMain\n{}\n#undef main\nvoid main() {{ sceneMain(); {} meterColor.rgb *= physicalLightScale; }}\n",
             fs,
@@ -2948,7 +2960,9 @@ ShaderManager::loadShader(StaticShaderProperties props)
 {
     // Metering must fail explicitly, not consume the visual error program.
     bool requiresValidShader = props.shader == StaticShader::ExposureMeter ||
-                               props.shader == StaticShader::ExposureTarget;
+                               props.shader == StaticShader::ExposureTarget ||
+                               props.shader == StaticShader::BloomDownsample ||
+                               props.shader == StaticShader::BloomUpsample;
     auto name = StaticShaderBaseNames[static_cast<std::size_t>(props.shader)];
     auto vs = ReadShaderFile(ShaderDirectory / util::U8Path(fmt::format("{}_vert.glsl", name)));
     if (vs.empty())

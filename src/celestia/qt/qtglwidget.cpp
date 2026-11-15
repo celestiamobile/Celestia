@@ -199,6 +199,9 @@ CelestiaGlWidget::initializeGL()
     int toneMapMode = settings.value("ToneMappingMode", defaultToneMapMode).toInt();
     toneMapMode = std::clamp(toneMapMode, 0, static_cast<int>(ToneMappingMode::Reinhard));
     appRenderer->setToneMappingMode(static_cast<ToneMappingMode>(toneMapMode));
+    appRenderer->setBloomStrength(
+        static_cast<float>(settings.value("BloomStrength",
+                                          appCore->getConfig()->renderDetails.output.bloomStrength).toDouble()));
 }
 
 void

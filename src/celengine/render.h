@@ -339,6 +339,8 @@ class Renderer
     float getToneMappingExposure() const;
     void  setToneMappingMode(ToneMappingMode mode);
     ToneMappingMode getToneMappingMode() const;
+    void setBloomStrength(float strength);
+    float getBloomStrength() const { return bloomStrength; }
     void setResolution(celestia::engine::TextureResolution resolution);
     celestia::engine::TextureResolution getResolution() const;
     void enableSelectionPointer();
@@ -761,6 +763,7 @@ class Renderer
     bool autoExposureEnabled{ false };
     float toneMappingExposure{ 1.0f };
     ToneMappingMode toneMappingMode{ ToneMappingMode::None };
+    float bloomStrength{ 0.0f };
 
     Color ambientColor;
     std::string displayedSurface;

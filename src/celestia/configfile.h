@@ -111,6 +111,7 @@ struct CelestiaConfig
             float cameraExposure{ 1.0f };
             bool autoCameraExposure{ false };
             float toneMappingExposure{ 1.0f };
+            float bloomStrength{ 0.0f };
             ToneMappingMode toneMapping{ ToneMappingMode::None };
         };
         OutputRendering output{ };

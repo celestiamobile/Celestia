@@ -6,7 +6,7 @@
     "srgb": true,
     "automatic_exposure": true,
     "initial_exposure": 1.0,
-    "settle_seconds": 8,
+    "settle_seconds": 12,
     "scene_samples": 4,
     "star_style": "PointSpreadFunction",
     "star_point_radius": 1.5,
@@ -15,6 +15,55 @@
     "tone_mapping": "None",
     "bloom": false,
     "note": "Freeze simulation time at the URL timestamp while exposure settles. URLs do not encode exposure or all rendering preferences."
+  },
+  "regression_matrix": {
+    "star_styles": ["PointSpreadFunction", "FuzzyPointStars"],
+    "stability_window_seconds": 2,
+    "maximum_settled_drift_ev": 0.01,
+    "scene_capture": "Capture all scenes below with the reference settings, then repeat both history sequences without resetting adaptation.",
+    "history_sequences": [
+      [
+        "earth-sun-transition-overview",
+        "earth-sun-transition-starfield",
+        "earth-sun-transition-clear-starfield"
+      ],
+      [
+        "earth-sun-transition-clear-starfield",
+        "earth-sun-transition-starfield",
+        "earth-sun-transition-overview"
+      ]
+    ],
+    "sun_distance_capture": {
+      "seed_scene": "earth-sun-transition-starfield",
+      "observer_frame": "Universal",
+      "direction_from_sun": [0.3, 1.0, 0.2],
+      "normalize_direction": true,
+      "vertical_fov_degrees": 41.58124,
+      "freeze_time": true,
+      "clear_selection": true,
+      "bloom_strength": 0.2,
+      "distances_au": [
+        1000, 100, 10, 1.6, 1.5, 1.0, 0.8, 0.6, 0.5, 0.4,
+        0.3, 0.2, 0.15, 0.12, 0.11, 0.1, 0.098, 0.096,
+        0.095, 0.094, 0.092, 0.09, 0.08, 0.05, 0.02
+      ],
+      "reverse_distances_au": [0.8, 1.0, 1.5, 1.6],
+      "checks": [
+        "Verify the Sun is centered and the actual distance matches each requested AU value.",
+        "Measure final composed output, scene HDR luminance, exposure and bloom independently; do not normalize screenshot brightness.",
+        "The settled central bloom peak must not decrease between 1.6 and 0.8 AU because of sparse sampling or display-exposure feedback.",
+        "Crossing 0.095 to 0.094 AU must not reproduce the former approximately 40x exposure jump.",
+        "Verify convergence from both approach directions; halo brightness at Sun-relative offsets is not expected to be distance-invariant.",
+        "Unresolved distant sources must not fall through holes in the metering grid."
+      ]
+    },
+    "gpu_regressions": [
+      "Physical metering covers isolated pixels and non-power-of-two edges",
+      "Highlight rejection remains continuous as retained light appears",
+      "Clipped sparse light recovers sensor range without adapting to censored values",
+      "Physical measurements do not depend on display exposure"
+    ],
+    "gpu_test_command": "ctest --test-dir build-annotations -R '^Automatic exposure GPU/' --output-on-failure"
   },
   "scenes": [
     {
@@ -69,7 +118,7 @@
     },
     {
       "name": "earth-sun-transition-starfield",
-      "purpose": "Near 1 AU, a visible Sun must lower exposure and suppress faint stars rather than being discarded as an outlier; verify convergence from both Earth and dark-sky views.",
+      "purpose": "Near 1 AU, a visible Sun must lower exposure and suppress faint stars rather than being discarded as an outlier; verify convergence from both Earth and dark-sky views. In both PSF and fuzzy-point modes, invisible stars must not retain labels.",
       "url": "cel://Follow/Sol:Earth/2026-11-15T17:38:41.81357Z?x=pT8n3Hj46v///////////w&y=pC2EL3eF0P///////////w&z=+JPKQt+41g&ow=0.15895286&ox=-0.25302318&oy=-0.95058954&oz=-0.08421901&select=Antares&fov=41.58124&ts=1&ltd=0&p=0&rf=69260675&nrf=255&lm=2051&tsrc=0&ver=3"
     },
     {

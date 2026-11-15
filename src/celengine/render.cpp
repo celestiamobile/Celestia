@@ -5271,6 +5271,23 @@ void Renderer::setToneMappingExposure(float e)
     markSettingsChanged();
 }
 
+void Renderer::setBloomStrength(float strength)
+{
+    if (!std::isfinite(strength))
+    {
+        GetLogger()->warn("Bloom strength must be finite.\n");
+        return;
+    }
+    if (strength > 0.0f && (!gl::sRGBRendering || !gl::colorBufferHalfFloat))
+    {
+        GetLogger()->warn("Bloom requires linear rendering and half-float color buffers.\n");
+        return;
+    }
+    bloomStrength = std::clamp(strength, 0.0f, 1.0f);
+    markSettingsChanged();
+}
+
+
 float Renderer::getToneMappingExposure() const
 {
     return toneMappingExposure;
