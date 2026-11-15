@@ -42,6 +42,7 @@
 #include <celastro/date.h>
 #include <celengine/asterism.h>
 #include <celengine/autoexposure.h>
+#include <celengine/bloom.h>
 #include <celengine/axisarrow.h>
 #include <celengine/body.h>
 #include <celengine/boundaries.h>
@@ -2128,6 +2129,9 @@ void CelestiaCore::draw(View* view)
         needsComposition = false;
 
     bool ok = true;
+    sceneDisplayEffect->setBloomTexture(0);
+    if (renderer->getBloomStrength() <= 0.0f)
+        view->bloom.reset();
     for (int i = 0; i < nEffects; i++)
     {
         bool toScreen = !needsComposition && i == nEffects - 1;
@@ -2144,6 +2148,24 @@ void CelestiaCore::draw(View* view)
             {
                 renderer->setAutoExposureEnabled(false);
                 view->autoExposure.reset();
+            }
+            prepared = dst->bind();
+            renderer->setViewport(viewport);
+            if (toScreen)
+                renderer->setScissor(x, y, viewWidth, viewHeight);
+        }
+        if (prepared && i == 0 && renderer->getBloomStrength() > 0.0f)
+        {
+            std::array<int, 4> viewport;
+            renderer->getViewport(viewport);
+            if (view->bloom == nullptr)
+                view->bloom = std::make_unique<Bloom>();
+            if (view->bloom->render(*renderer, *src))
+                sceneDisplayEffect->setBloomTexture(view->bloom->texture());
+            else
+            {
+                renderer->setBloomStrength(0.0f);
+                view->bloom.reset();
             }
             prepared = dst->bind();
             renderer->setViewport(viewport);
@@ -2918,6 +2940,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
     renderer->setToneMappingMode(config->renderDetails.output.toneMapping);
     renderer->setCameraExposure(config->renderDetails.output.cameraExposure);
     renderer->setAutoExposureEnabled(config->renderDetails.output.autoCameraExposure);
+    renderer->setBloomStrength(config->renderDetails.output.bloomStrength);
 
     if (util::is_set(renderer->getRenderFlags(), RenderFlags::ShowAutoMag))
     {

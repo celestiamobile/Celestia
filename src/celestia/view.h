@@ -14,6 +14,7 @@
 #include <vector>
 
 class AutoExposure;
+class Bloom;
 class Color;
 class FramebufferObject;
 class Observer;
@@ -67,6 +68,7 @@ public:
     float          width;
     float          height;
     std::unique_ptr<AutoExposure> autoExposure;
+    std::unique_ptr<Bloom> bloom;
 
 private:
     std::vector<std::unique_ptr<FramebufferObject>> fbos;

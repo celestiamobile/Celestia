@@ -10,6 +10,7 @@
 #include "view.h"
 
 #include <celengine/autoexposure.h>
+#include <celengine/bloom.h>
 #include <celengine/framebuffer.h>
 #include <celengine/glsupport.h>
 #include <celengine/overlay.h>

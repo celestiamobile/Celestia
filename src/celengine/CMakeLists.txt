@@ -7,6 +7,8 @@ set(CELENGINE_SOURCES
   atmosphere.h
   autoexposure.cpp
   autoexposure.h
+  bloom.cpp
+  bloom.h
   axisarrow.cpp
   axisarrow.h
   body.cpp
