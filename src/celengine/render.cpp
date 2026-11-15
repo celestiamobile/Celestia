@@ -1414,6 +1414,7 @@ void Renderer::renderScene(const Observer& observer,
                            const Selection& sel)
 {
     assert(!annotationsPending);
+    shaderManager->setCameraExposure(cameraExposure);
 
     // Get the observer's time
     double now = observer.getTime();
@@ -1628,6 +1629,7 @@ void Renderer::renderScene(const Observer& observer,
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
     annotationsPending = true;
+    shaderManager->setCameraExposure(1.0f);
 }
 
 
@@ -1864,7 +1866,7 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
     ps.depthTest = true;
     setPipelineState(ps);
 
-    float exposureFactor = std::max(starExposure, 1.0e-6f);
+    float exposureFactor = cameraExposure;
     float r              = std::max(starPointRadius, 1.0e-3f);
     float peakRadScale = celestia::engine::detail::psfPeakRadianceScale(r, exposureFactor, starAtmosphereBrightness);
     float dimGate = (celestia::gl::sRGBRendering
@@ -4427,7 +4429,7 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     starRenderer.psf.pointScale    = static_cast<float>(screenDpi) / 96.0f;
     starRenderer.psf.optimization  = starOptimization;
     starRenderer.psf.maxIrradiance = starMaxIrradiance;
-    starRenderer.psf.exposure      = starExposure;
+    starRenderer.psf.exposure      = cameraExposure;
 
     // = 1.0 at startup
     float effDistanceToScreen = mmToInches((float) REF_DISTANCE_TO_SCREEN) * pixelSize * getScreenDpi();
@@ -4464,7 +4466,7 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
         //   minimumIrradiance = dimGate / peakRadScale, in source units
         //   a       = optimization / r  (Spencer eye-PSF coefficient)
         //   sizePhys > maxPointSize  <=>  glowPeak > (maxPointSize*a/(2*pointScale))^2.5
-        float exposureFactor = std::max(starExposure, 1.0e-6f);
+        float exposureFactor = cameraExposure;
         float rLog           = std::max(starPointRadius, 1.0e-3f);
         float dimGate        = (celestia::gl::sRGBRendering
                                     ? astro::LOWEST_IRRADIATION_SRGB
@@ -5069,14 +5071,29 @@ float Renderer::getStarDimClipFactor() const
 
 void Renderer::setStarExposure(float e)
 {
-    starExposure = std::clamp(e, 1.0e-3f, 1.0e6f);
-    markSettingsChanged();
+    setCameraExposure(e);
 }
 
 
 float Renderer::getStarExposure() const
 {
-    return starExposure;
+    return getCameraExposure();
+}
+
+void Renderer::setCameraExposure(float e)
+{
+    if (!std::isfinite(e) || e <= 0.0f)
+    {
+        GetLogger()->warn("Camera exposure must be finite and positive.\n");
+        return;
+    }
+    cameraExposure = std::clamp(e, 1.0e-12f, 1.0e12f);
+    markSettingsChanged();
+}
+
+float Renderer::getCameraExposure() const
+{
+    return cameraExposure;
 }
 
 

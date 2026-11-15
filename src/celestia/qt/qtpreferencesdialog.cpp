@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 
 #include <Qt>
@@ -263,6 +264,10 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
     }
     ui.toneMappingExposureSpinBox->setValue(renderer->getToneMappingExposure());
     {
+        QSignalBlocker blocker(ui.cameraExposureSpinBox);
+        ui.cameraExposureSpinBox->setValue(std::log2(renderer->getCameraExposure()));
+    }
+    {
         bool toneMapping = ui.toneMappingCombo->currentIndex() > 0;
         ui.toneMappingExposureLabel->setVisible(toneMapping);
         ui.toneMappingExposureSpinBox->setVisible(toneMapping);
@@ -319,7 +324,6 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
     ui.psfOptimizationSpinBox->setValue(renderer->getStarOptimization());
     ui.psfMaxIrradianceSpinBox->setValue(renderer->getStarMaxIrradiance());
     ui.psfDimClipFactorSpinBox->setValue(renderer->getStarDimClipFactor());
-    ui.psfExposureSpinBox->setValue(renderer->getStarExposure());
 
     updatePsfControlsVisibility();
 
@@ -1024,9 +1028,9 @@ PreferencesDialog::on_psfDimClipFactorSpinBox_valueChanged(double value) const
 }
 
 void
-PreferencesDialog::on_psfExposureSpinBox_valueChanged(double value) const
+PreferencesDialog::on_cameraExposureSpinBox_valueChanged(double value) const
 {
-    appCore->getRenderer()->setStarExposure(static_cast<float>(value));
+    appCore->getRenderer()->setCameraExposure(static_cast<float>(std::exp2(value)));
 }
 
 void

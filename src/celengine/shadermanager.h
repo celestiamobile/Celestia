@@ -234,7 +234,8 @@ public:
     CelestiaGLProgram(GLProgram&& _program, const ShaderProperties&);
     ~CelestiaGLProgram() = default;
 
-    void use() const { program.use(); }
+    void use() const;
+    void bindCameraExposure(const float&);
 
     void setLightParameters(const LightingState& ls,
                             Color materialDiffuse,
@@ -380,6 +381,9 @@ private:
 
     GLProgram program;
     const ShaderProperties props;
+    const float* cameraExposure{ nullptr };
+    mutable FloatShaderParameter cameraExposureParameter;
+    mutable float lastCameraExposure{ -1.0f };
 };
 
 class ShaderManager
@@ -387,11 +391,14 @@ class ShaderManager
 public:
     ShaderManager();
     ~ShaderManager() = default;
+    ShaderManager(const ShaderManager&) = delete;
+    ShaderManager& operator=(const ShaderManager&) = delete;
 
     CelestiaGLProgram* getShader(const ShaderProperties&);
     CelestiaGLProgram* getShader(StaticShader, StaticShaderOptions = StaticShaderOptions::None);
 
     void setFisheyeEnabled(bool enabled);
+    void setCameraExposure(float exposure) { m_cameraExposure = exposure; }
 
 private:
     std::shared_ptr<CelestiaGLProgram> loadShader(StaticShaderProperties);
@@ -402,4 +409,5 @@ private:
 
     std::shared_ptr<CelestiaGLProgram> m_errorProgram;
     bool m_fisheyeEnabled { false };
+    float m_cameraExposure{ 1.0f };
 };

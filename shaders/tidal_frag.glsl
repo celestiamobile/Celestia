@@ -6,4 +6,7 @@ in vec4 color;
 void main(void)
 {
     fragColor = vec4(color.rgb, color.a * texture(tidalTex, texCoord).r);
+#ifdef CAMERA_EXPOSURE
+    fragColor.rgb *= cameraExposure;
+#endif
 }

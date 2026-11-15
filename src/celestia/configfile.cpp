@@ -256,8 +256,10 @@ applyRenderDetails(CelestiaConfig::RenderDetails& renderDetails, const Associati
         renderDetails.stars.maxIrradiance = std::clamp(renderDetails.stars.maxIrradiance, 1.0f, 1.0e6f);
     applyNumber(renderDetails.stars.dimClipFactor, hash, "StarDimClipFactor"sv);
     renderDetails.stars.dimClipFactor = std::clamp(renderDetails.stars.dimClipFactor, 1.0f, 100.0f);
-    applyNumber(renderDetails.stars.exposure, hash, "StarExposure"sv);
-    renderDetails.stars.exposure = std::clamp(renderDetails.stars.exposure, 1.0e-3f, 1.0e6f);
+    // Read the old key for existing configurations; the shared setting wins.
+    applyNumber(renderDetails.output.cameraExposure, hash, "StarExposure"sv);
+    applyNumber(renderDetails.output.cameraExposure, hash, "CameraExposure"sv);
+    renderDetails.output.cameraExposure = std::clamp(renderDetails.output.cameraExposure, 1.0e-12f, 1.0e12f);
 }
 
 void

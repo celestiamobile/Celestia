@@ -195,6 +195,16 @@ VertexPosition(const ShaderProperties& props)
 
 constexpr std::string_view FragmentHeader = R"glsl(
 out vec4 fragColor;
+#ifdef CAMERA_EXPOSURE
+uniform highp float cameraExposure;
+#endif
+)glsl"sv;
+
+constexpr std::string_view CameraExposureDefine = "#define CAMERA_EXPOSURE\n"sv;
+constexpr std::string_view CameraExposureOutput = R"glsl(
+#ifdef CAMERA_EXPOSURE
+    fragColor.rgb *= cameraExposure;
+#endif
 )glsl"sv;
 
 constexpr std::string_view CommonAttribs = R"glsl(
@@ -1563,6 +1573,7 @@ buildFragmentShader(const ShaderProperties& props)
 
     std::string source(VersionHeader);
     source += CommonHeader;
+    source += CameraExposureDefine;
     source += FragmentHeader;
 
     std::string diffTexCoord("diffTexCoord");
@@ -1958,6 +1969,7 @@ buildFragmentShader(const ShaderProperties& props)
         source += "fragColor.a *= 1.0 - smoothstep(lineEdge - lineHalfPx, lineEdge + lineHalfPx, abs(lineU));\n";
     }
 
+    source += CameraExposureOutput;
     source += "}\n";
 
     DumpFSSource(source);
@@ -2026,6 +2038,7 @@ buildRingsFragmentShader(const ShaderProperties& props)
 {
     std::string source(VersionHeader);
     source += CommonHeader;
+    source += CameraExposureDefine;
     source += FragmentHeader;
 
     source += DeclareUniform("ambientColor", Shader_Vector3);
@@ -2144,6 +2157,7 @@ buildRingsFragmentShader(const ShaderProperties& props)
     source += "if (dropFragment) opticalDepth = 0.0;\n";
     source += "fragColor = vec4(color.rgb * diff.rgb, opticalDepth);\n";
 
+    source += CameraExposureOutput;
     source += "}\n";
 
     DumpFSSource(source);
@@ -2203,6 +2217,8 @@ buildAtmosphereFragmentShader(const ShaderProperties& props)
         source += "#extension GL_EXT_blend_func_extended : require\n";
 #endif
     source += CommonHeader;
+    if (!transmissionOnly)
+        source += CameraExposureDefine;
     source += FragmentHeader;
     if (dualSource)
         source += DeclareOutput("atmosphereTransmission", Shader_Vector4);
@@ -2267,6 +2283,7 @@ buildAtmosphereFragmentShader(const ShaderProperties& props)
         if (dualSource)
             source += "    atmosphereTransmission = vec4(scatterEx, 1.0);\n";
     }
+    source += CameraExposureOutput;
     source += "}\n";
 
     DumpFSSource(source);
@@ -2347,6 +2364,7 @@ buildEmissiveFragmentShader(const ShaderProperties& props)
 {
     std::string source(VersionHeader);
     source += CommonHeader;
+    source += CameraExposureDefine;
     source += FragmentHeader;
 
     if (util::is_set(props.texUsage, TexUsage::DiffuseTexture))
@@ -2383,6 +2401,7 @@ buildEmissiveFragmentShader(const ShaderProperties& props)
         source += "    fragColor = " + colorSource + " ;\n";
     }
 
+    source += CameraExposureOutput;
     source += "}\n";
     // End of main()
 
@@ -2480,6 +2499,7 @@ buildParticleFragmentShader(const ShaderProperties& props)
 
     source += VersionHeader;
     source += CommonHeader;
+    source += CameraExposureDefine;
     source += FragmentHeader;
 
     if (util::is_set(props.texUsage, TexUsage::DiffuseTexture))
@@ -2519,6 +2539,7 @@ buildParticleFragmentShader(const ShaderProperties& props)
     else
         source += "    fragColor = v_Color;\n";
 
+    source += CameraExposureOutput;
     source += "}\n";
     // End of main()
 
@@ -2593,7 +2614,7 @@ buildProgram(const ShaderProperties& props, bool fisheyeEnabled)
 
 std::shared_ptr<CelestiaGLProgram>
 buildProgram(std::string_view vs, std::string_view fs, bool fisheyeEnabled,
-             StaticShaderOptions options = StaticShaderOptions::None)
+             StaticShaderOptions options, bool cameraExposure)
 {
     std::string_view toneMapDefine =
         util::is_set(options, StaticShaderOptions::ToneMap) ? "#define TONE_MAP\n"sv : ""sv;
@@ -2609,7 +2630,9 @@ buildProgram(std::string_view vs, std::string_view fs, bool fisheyeEnabled,
     std::string_view preserveDepthDefine =
         util::is_set(options, StaticShaderOptions::PreserveDepth) ? "#define PRESERVE_DEPTH\n"sv : ""sv;
     std::string vsSrc = fmt::format("{}{}{}{}{}{}\n", VersionHeader, CommonHeader, VertexHeader, billboardDefine, VPFunction(fisheyeEnabled), vs);
-    std::string fsSrc = fmt::format("{}{}{}{}{}{}{}{}{}\n", VersionHeader, CommonHeader, FragmentHeader, toneMapDefine, toneMapCurveDefine, billboardDefine, convertToSRGBDefine, preserveDepthDefine, fs);
+    std::string fsSrc = fmt::format("{}{}{}{}{}{}{}{}{}{}\n", VersionHeader, CommonHeader,
+                                    cameraExposure ? CameraExposureDefine : ""sv,
+                                    FragmentHeader, toneMapDefine, toneMapCurveDefine, billboardDefine, convertToSRGBDefine, preserveDepthDefine, fs);
 
     DumpVSSource(vsSrc);
     DumpFSSource(fsSrc);
@@ -2839,6 +2862,8 @@ ShaderManager::getShader(const ShaderProperties& props)
         it->second = buildProgram(props, m_fisheyeEnabled);
         if (!it->second)
             it->second = getErrorProgram();
+        else if (props.effects != LightingEffects::AtmosphereTransmission)
+            it->second->bindCameraExposure(m_cameraExposure);
     }
 
     return it->second.get();
@@ -2868,7 +2893,17 @@ ShaderManager::loadShader(StaticShaderProperties props)
         return getErrorProgram();
 
     std::shared_ptr<CelestiaGLProgram> result;
-    result = buildProgram(vs, fs, m_fisheyeEnabled, props.options);
+    // PSFs already use camera exposure for their nonlinear shape and cutoff.
+    // Display passes and annotations must not receive it a second time.
+    bool cameraExposure = props.shader == StaticShader::Comet ||
+                          props.shader == StaticShader::Galaxy ||
+                          props.shader == StaticShader::Globular ||
+                          props.shader == StaticShader::LargeStar ||
+                          props.shader == StaticShader::Star ||
+                          props.shader == StaticShader::Tidal;
+    result = buildProgram(vs, fs, m_fisheyeEnabled, props.options, cameraExposure);
+    if (result && cameraExposure)
+        result->bindCameraExposure(m_cameraExposure);
 
     return result ? result : getErrorProgram();
 }
@@ -2905,6 +2940,22 @@ CelestiaGLProgram::CelestiaGLProgram(GLProgram&& _program) :
     program(std::move(_program))
 {
     initCommonParameters();
+}
+
+void CelestiaGLProgram::bindCameraExposure(const float& exposure)
+{
+    cameraExposure = &exposure;
+    cameraExposureParameter = floatParam("cameraExposure");
+}
+
+void CelestiaGLProgram::use() const
+{
+    program.use();
+    if (cameraExposure != nullptr && *cameraExposure != lastCameraExposure)
+    {
+        cameraExposureParameter = *cameraExposure;
+        lastCameraExposure = *cameraExposure;
+    }
 }
 
 FloatShaderParameter

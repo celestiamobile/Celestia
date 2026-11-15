@@ -599,7 +599,8 @@ CelestiaAppWindow::writeSettings()
     settings.setValue("StarOptimization", renderer->getStarOptimization());
     settings.setValue("StarMaxIrradiance", renderer->getStarMaxIrradiance());
     settings.setValue("StarDimClipFactor", renderer->getStarDimClipFactor());
-    settings.setValue("StarExposure", renderer->getStarExposure());
+    settings.setValue("CameraExposure", renderer->getCameraExposure());
+    settings.remove("StarExposure");
     settings.setValue("SeparateRayleighMieScaleHeights", renderer->getSeparateRayleighMieScaleHeights());
     settings.setValue("AtmosphereSegmentCount", renderer->getAtmosphereSegmentCount());
     settings.setValue("CloudSegmentCount", renderer->getCloudSegmentCount());
