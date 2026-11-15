@@ -6,4 +6,7 @@ uniform sampler2D galaxyTex;
 void main(void)
 {
     fragColor = vec4(color.rgb, color.a * texture(galaxyTex, texCoord).r);
+#ifdef CAMERA_EXPOSURE
+    fragColor.rgb *= cameraExposure;
+#endif
 }

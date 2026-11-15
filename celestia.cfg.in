@@ -276,13 +276,6 @@ StarTextures
 # washes out the screen.  Valid range: 1.0 to 1.0e6.
 # Default: 500.0.  Set to 0 to disable the clamp entirely.
 #
-# StarExposure (Point Spread Function star style only) is a per-star
-# brightness multiplier applied to the irradiance prior to peak
-# computation:  peak = StarExposure * 3 * irradiance / (pi * r^2)
-# Larger values brighten every star uniformly (and extend the visible
-# magnitude limit via the minPeak cutoff).  Valid range: 1e-3 to 1e6.
-# Default: 20.0.
-#
 # StarDimClipFactor (Point Spread Function star style only) sets the
 # threshold below which very dim stars are soft-clipped to zero.  The
 # cutoff is StarDimClipFactor × the 1-code sRGB irradiance level, so
@@ -292,7 +285,6 @@ StarTextures
 #  StarPointRadius   1.5
 #  StarOptimization  0.1
 #  StarMaxIrradiance 500.0
-#  StarExposure      20.0
 #  StarDimClipFactor 10.0
 
 
@@ -556,6 +548,11 @@ StarTextures
 # available the setting is ignored.
 # The default value is false.
 #
+# CameraExposure multiplies all scene brightness before framebuffer storage.
+# It also controls PSF visibility and glow, replacing independent star exposure.
+# Labels and annotations are unaffected. Valid range: 1e-12 to 1e12.
+# Default: 1.0. The legacy StarExposure key is read if CameraExposure is absent.
+#
 # ToneMappingExposure controls the exponential tone-mapping operator
 # (1 - exp(-ToneMappingExposure * L)) applied to the linear HDR scene
 # during the sRGB output post-process.  It softly rolls off highlights
@@ -571,6 +568,7 @@ StarTextures
 # Only takes effect when SRGBRendering is enabled. The default is Off.
 #------------------------------------------------------------------------
 # SRGBRendering       true
+# CameraExposure      1.0
 # ToneMappingExposure 1.0
 # ToneMappingMode     "Manual"
 

@@ -1504,8 +1504,8 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
     case '[':
         if (renderer->getStarStyle() == StarStyle::PointSpreadFunction)
         {
-            renderer->setStarExposure(renderer->getStarExposure() / 1.1f);
-            auto buf = fmt::format(loc, fmt::runtime(_("Star exposure: {:.3f}")), renderer->getStarExposure());
+            renderer->setCameraExposure(renderer->getCameraExposure() / 1.1f);
+            auto buf = fmt::format(loc, fmt::runtime(_("Camera exposure: {:.3g}")), renderer->getCameraExposure());
             flash(buf);
         }
         else if (!util::is_set(renderer->getRenderFlags(), RenderFlags::ShowAutoMag))
@@ -1533,8 +1533,8 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
     case ']':
         if (renderer->getStarStyle() == StarStyle::PointSpreadFunction)
         {
-            renderer->setStarExposure(renderer->getStarExposure() * 1.1f);
-            auto buf = fmt::format(loc, fmt::runtime(_("Star exposure: {:.3f}")), renderer->getStarExposure());
+            renderer->setCameraExposure(renderer->getCameraExposure() * 1.1f);
+            auto buf = fmt::format(loc, fmt::runtime(_("Camera exposure: {:.3g}")), renderer->getCameraExposure());
             flash(buf);
         }
         else if (!util::is_set(renderer->getRenderFlags(), RenderFlags::ShowAutoMag))
@@ -2870,6 +2870,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
     renderer->colors = renderer->colors.linearizeSceneColors(gl::sRGBRendering);
     m_scriptMaps.initColorMaps(renderer->colors);
     renderer->setToneMappingMode(config->renderDetails.output.toneMapping);
+    renderer->setCameraExposure(config->renderDetails.output.cameraExposure);
 
     if (util::is_set(renderer->getRenderFlags(), RenderFlags::ShowAutoMag))
     {

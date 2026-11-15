@@ -108,6 +108,7 @@ struct CelestiaConfig
             std::optional<unsigned int> sceneAaSamples;
             unsigned int presentAaSamples{ 1 };
             bool sRGB{ false };
+            float cameraExposure{ 1.0f };
             float toneMappingExposure{ 1.0f };
             ToneMappingMode toneMapping{ ToneMappingMode::None };
         };
@@ -126,7 +127,6 @@ struct CelestiaConfig
             float optimization{ 0.1f };
             float maxIrradiance{ 500.0f };
             float dimClipFactor{ 10.0f };
-            float exposure{ 20.0f };
         };
         StarRendering stars{ };
     };

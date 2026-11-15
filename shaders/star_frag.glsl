@@ -4,4 +4,7 @@ in vec4 color;
 void main(void)
 {
     fragColor = texture(starTex, gl_PointCoord) * color;
+#ifdef CAMERA_EXPOSURE
+    fragColor.rgb *= cameraExposure;
+#endif
 }

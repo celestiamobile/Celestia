@@ -6,4 +6,7 @@ in vec4 v_color;
 void main(void)
 {
     fragColor = texture(starTex, texCoord) * v_color;
+#ifdef CAMERA_EXPOSURE
+    fragColor.rgb *= cameraExposure;
+#endif
 }
