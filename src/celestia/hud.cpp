@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -25,7 +26,6 @@
 #include <fmt/format.h>
 #endif
 
-#include <celcompat/numbers.h>
 #include <celengine/body.h>
 #include <celengine/location.h>
 #include <celengine/observer.h>
@@ -157,27 +157,26 @@ DistanceKmToStr(const util::NumberFormatter& formatter, double distance, int dig
 void
 displayRotationPeriod(const util::NumberFormatter& formatter, Overlay& overlay, double days)
 {
-    double unitValue;
+    double unitValue = std::abs(days);
     const char *unitStr;
 
-    if (days > 1.0)
+    if (unitValue > 1.0)
     {
-        unitValue = days;
         unitStr = _("days");
     }
-    else if (days > 1.0 / 24.0)
+    else if (unitValue > 1.0 / 24.0)
     {
-        unitValue = days * 24.0;
+        unitValue *= 24.0;
         unitStr = _("hours");
     }
-    else if (days > 1.0 / (24.0 * 60.0))
+    else if (unitValue > 1.0 / (24.0 * 60.0))
     {
-        unitValue = days * 24.0 * 60.0;
+        unitValue *= 24.0 * 60.0;
         unitStr = _("minutes");
     }
     else
     {
-        unitValue = days * 24.0 * 60.0 * 60.0;
+        unitValue *= 24.0 * 60.0 * 60.0;
         unitStr = _("seconds");
     }
 
@@ -325,7 +324,7 @@ displayApparentMagnitude(Overlay& overlay,
 {
     if (distance > astro::LY_PER_10PARSEC)
     {
-        float appMag = astro::absToAppMag(absMag, static_cast<float>(distance));
+        float appMag = astro::absToAppMag(absMag, distance);
         overlay.print(loc, fmt::runtime(_("Apparent magnitude: {:.1f}\n")), appMag);
     }
     else
@@ -337,15 +336,15 @@ displayApparentMagnitude(Overlay& overlay,
 void
 displayRADec(Overlay& overlay, const Eigen::Vector3d& v, const std::locale& loc)
 {
-    double phi = std::atan2(v.x(), v.z()) - celestia::numbers::pi / 2;
+    double phi = std::atan2(v.x(), v.z()) - std::numbers::pi / 2;
     if (phi < 0.0)
-        phi = phi + 2.0 * celestia::numbers::pi;
+        phi = phi + 2.0 * std::numbers::pi;
 
     double theta = std::atan2(std::hypot(v.x(), v.z()), v.y());
     if (theta > 0)
-        theta = celestia::numbers::pi * 0.5 - theta;
+        theta = std::numbers::pi * 0.5 - theta;
     else
-        theta = -celestia::numbers::pi * 0.5 - theta;
+        theta = -std::numbers::pi * 0.5 - theta;
 
 
     displayRightAscension(overlay, math::radToDeg(phi), loc);
@@ -513,7 +512,7 @@ void displayDSOinfo(const util::NumberFormatter& formatter,
     }
 
     displayApparentDiameter(overlay, dso.getRadius(), distance, loc);
-    
+
     if (dso.getAbsoluteMagnitude() > DSO_DEFAULT_ABS_MAGNITUDE)
     {
         displayApparentMagnitude(overlay,
@@ -521,7 +520,7 @@ void displayDSOinfo(const util::NumberFormatter& formatter,
                                  distance,
                                  loc);
     }
-    
+
     overlay.printf(_("Radius: %s\n"),
                  DistanceLyToStr(formatter, dso.getRadius(), 5, measurement));
 }
@@ -765,13 +764,8 @@ HudFonts::update()
 
 Hud::Hud(const std::locale& loc) :
     loc(loc),
-#ifdef USE_ICU
     m_dateFormatter(std::make_unique<celestia::engine::DateFormatter>()),
     m_numberFormatter(std::make_unique<util::NumberFormatter>())
-#else
-    m_dateFormatter(std::make_unique<celestia::engine::DateFormatter>(loc)),
-    m_numberFormatter(std::make_unique<util::NumberFormatter>(loc))
-#endif
 {
 }
 
@@ -887,7 +881,6 @@ Hud::updateFonts()
     m_dateStrWidth = 0;
 }
 
-#ifdef USE_ICU
 MeasurementSystem
 defaultMeasurementSystem()
 {
@@ -914,7 +907,6 @@ defaultMeasurementSystem()
         return MeasurementSystem::Metric;
     }
 }
-#endif
 
 void
 Hud::renderOverlay(const WindowMetrics& metrics,
@@ -925,10 +917,8 @@ Hud::renderOverlay(const WindowMetrics& metrics,
                    bool isScriptRunning,
                    bool editMode)
 {
-#ifdef USE_ICU
     if (m_hudSettings.measurementSystem == MeasurementSystem::System)
         m_hudSettings.measurementSystem = defaultMeasurementSystem();
-#endif
 
     m_overlay->setFont(m_hudFonts.font());
 

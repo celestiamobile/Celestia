@@ -10,11 +10,11 @@ namespace celestia::gl
 
 #ifdef GL_ES
 CELAPI bool OES_texture_border_clamp          = false; //NOSONAR
-CELAPI bool OES_geometry_shader               = false; //NOSONAR
 #else
 CELAPI bool ARB_invalidate_subdata             = false; //NOSONAR
 #endif
 CELAPI bool dualSourceBlending                 = false; //NOSONAR
+CELAPI bool colorBufferHalfFloat               = false; //NOSONAR
 CELAPI bool ARB_texture_compression_bptc      = false; //NOSONAR
 CELAPI bool EXT_texture_compression_s3tc      = false; //NOSONAR
 CELAPI bool EXT_texture_compression_s3tc_srgb = false; //NOSONAR
@@ -30,60 +30,27 @@ CELAPI bool sRGBRendering                     = false; //NOSONAR
 namespace
 {
 
-bool EnableGeomShaders = true;
-
 inline bool has_extension(const char *name) noexcept
 {
     return epoxy_has_gl_extension(name);
 }
 
-bool check_extension(util::array_view<std::string> list, const char *name) noexcept
+bool check_extension(std::span<const std::string> list, const char *name) noexcept
 {
     return std::find(list.begin(), list.end(), std::string(name)) == list.end()
            && has_extension(name);
 }
 
-void enable_workarounds()
-{
-    bool isMesa = false;
-    bool isAMD = false;
-    bool isNavi = false;
-
-    const char* s;
-    s = reinterpret_cast<const char*>(glGetString(GL_VERSION));
-    // "4.6 (Compatibility Profile) Mesa 22.3.6"
-    // "OpenGL ES 3.2 Mesa 22.3.6"
-    if (s != nullptr)
-        isMesa = std::strstr(s, "Mesa") != nullptr;
-
-    s = reinterpret_cast<const char*>(glGetString(GL_VENDOR));
-    // "AMD" for radeonsi
-    // "Mesa/X.org" for llvmpipe
-    // "Collabora Ltd" for zink
-    if (s != nullptr)
-        isAMD = std::strcmp(s, "AMD") == 0;
-
-    s = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
-    // "AMD Radeon RX 6600 (navi23, LLVM 15.0.6, DRM 3.52, 6.4.0-0.deb12.2-amd64)"" for radeonsi
-    // "llvmpipe (LLVM 15.0.6, 256 bits)""
-    // "zink (llvmpipe (LLVM 15.0.6, 256 bits))""
-    // "zink (AMD Radeon RX 6600 (RADV NAVI23))""
-    if (s != nullptr)
-        isNavi = std::strstr(s, "navi") != nullptr;
-
-    // https://gitlab.freedesktop.org/mesa/mesa/-/issues/9971
-    if (isMesa && isAMD && isNavi)
-        EnableGeomShaders = false;
-}
-
 } // namespace
 
-bool init(util::array_view<std::string> ignore) noexcept
+bool init(std::span<const std::string> ignore) noexcept
 {
 #ifdef GL_ES
     OES_texture_border_clamp           = check_extension(ignore, "GL_OES_texture_border_clamp") || check_extension(ignore, "GL_EXT_texture_border_clamp");
-    OES_geometry_shader                = check_extension(ignore, "GL_OES_geometry_shader") || check_extension(ignore, "GL_EXT_geometry_shader");
     dualSourceBlending                 = check_extension(ignore, "GL_EXT_blend_func_extended");
+    colorBufferHalfFloat               = checkVersion(GLES_3_2)
+                                         || check_extension(ignore, "GL_EXT_color_buffer_half_float")
+                                         || check_extension(ignore, "GL_EXT_color_buffer_float");
     if (dualSourceBlending)
     {
         GLint maxDualSourceDrawBuffers = 0;
@@ -99,6 +66,7 @@ bool init(util::array_view<std::string> ignore) noexcept
     ARB_invalidate_subdata         = check_extension(ignore, "GL_ARB_invalidate_subdata");
     ARB_texture_compression_bptc   = check_extension(ignore, "GL_ARB_texture_compression_bptc");
     dualSourceBlending             = true;
+    colorBufferHalfFloat           = true;
 #endif
     EXT_texture_compression_s3tc   = check_extension(ignore, "GL_EXT_texture_compression_s3tc");
 #ifdef GL_ES
@@ -131,8 +99,6 @@ bool init(util::array_view<std::string> ignore) noexcept
     if (gl::EXT_texture_filter_anisotropic)
         glGetIntegerv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxTextureAnisotropy);
 
-    enable_workarounds();
-
     return true;
 }
 
@@ -142,25 +108,6 @@ bool checkVersion(int v) noexcept
     if (version == 0)
         version = epoxy_gl_version(); // this function always queries GL
     return version >= v;
-}
-
-bool hasGeomShader() noexcept
-{
-#ifdef GL_ES
-    return EnableGeomShaders && checkVersion(celestia::gl::GLES_3_2);
-#else
-    return EnableGeomShaders && checkVersion(celestia::gl::GL_3_2);
-#endif
-}
-
-void enableGeomShaders() noexcept
-{
-    EnableGeomShaders = true;
-}
-
-void disableGeomShaders() noexcept
-{
-    EnableGeomShaders = false;
 }
 
 } // end namespace celestia::gl

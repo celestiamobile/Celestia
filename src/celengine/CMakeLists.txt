@@ -3,6 +3,7 @@ set(CELENGINE_SOURCES
   asterism.h
   astroobj.h
   asyncresourcecache.h
+  atmosphere.cpp
   atmosphere.h
   axisarrow.cpp
   axisarrow.h
@@ -22,6 +23,8 @@ set(CELENGINE_SOURCES
   curveplot.h
   deepskyobj.cpp
   deepskyobj.h
+  dsobrowser.cpp
+  dsobrowser.h
   dsodb.cpp
   dsodb.h
   dsodbbuilder.cpp

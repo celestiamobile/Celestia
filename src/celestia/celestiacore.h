@@ -15,6 +15,7 @@
 #include <locale>
 #include <string>
 #include <functional>
+#include <span>
 #include <string_view>
 #include <tuple>
 #include <optional>
@@ -51,7 +52,6 @@
 #include <celscript/legacy/legacyscript.h>
 #include <celscript/common/scriptmaps.h>
 
-class Url;
 class Console;
 class ProgressNotifier;
 
@@ -194,21 +194,16 @@ public:
                         ProgressNotifier* progressNotifier = nullptr);
     bool initRenderer(celestia::engine::TextureResolution,
                       std::optional<bool> sRGBRendering = std::nullopt,
+                      std::optional<unsigned int> aaSamples = std::nullopt,
                       bool useMesaPackInvert = true);
     void start(double t);
     void start();
     void getLightTravelDelay(double distanceKm, int&, int&, float&);
     void setLightTravelDelay(double distanceKm);
 
-    // URLs and history navigation
+    // URL handling
     void setStartURL(const std::string& url);
     bool goToUrl(std::string_view urlStr);
-    void addToHistory();
-    void back();
-    void forward();
-    const std::vector<Url>& getHistory() const;
-    std::vector<Url>::size_type getHistoryCurrent() const;
-    void setHistoryCurrent(std::vector<Url>::size_type curr);
 
     // event processing methods
     void charEntered(const char*, int modifiers = 0);
@@ -393,8 +388,8 @@ public:
     void setScriptHook(std::unique_ptr<celestia::scripts::IScriptHook> &&hook) { m_scriptHook = std::move(hook); }
     celestia::scripts::ScriptMaps& scriptMaps() { return m_scriptMaps; }
 
-    void getCaptureInfo(std::array<int, 4>& viewport, celestia::engine::PixelFormat& format) const;
-    bool captureImage(std::uint8_t* buffer, const std::array<int, 4>& viewport, celestia::engine::PixelFormat format) const;
+    void getCaptureInfo(std::span<int, 4> viewport, celestia::engine::PixelFormat& format) const;
+    bool captureImage(std::uint8_t* buffer, std::span<const int, 4> viewport, celestia::engine::PixelFormat format) const;
     bool saveScreenShot(const std::filesystem::path&, ContentType = ContentType::Unknown) const;
 
     void loadAsterismsFile(const std::filesystem::path &path);
@@ -437,6 +432,7 @@ private:
     void charEnteredAutoComplete(const char*);
     void updateSelectionFromInput();
     void renderOverlay();
+    bool hasAnnotationDepthBuffer(GLuint framebuffer);
     Eigen::Vector3f getPickRay(float x, float y, const celestia::View *view) const;
     void updateFOV(float fov, const std::optional<Eigen::Vector2f> &focus, const celestia::View *view);
 #ifdef CELX
@@ -522,8 +518,6 @@ private:
     ContextMenuHandler* contextMenuHandler{ nullptr };
     std::optional<std::function<ScriptSystemAccessPolicy()>> scriptSystemAccessHandler{ std::nullopt };
 
-    std::vector<Url> history;
-    std::vector<Url>::size_type historyCurrent{ 0 };
     std::string startURL;
 
     std::unique_ptr<celestia::ViewManager> viewManager;
@@ -539,6 +533,11 @@ private:
     std::optional<Eigen::Vector2f> dragStart{ std::nullopt };
 
     std::vector<std::unique_ptr<ViewportEffect>> viewportEffects;
+    PassthroughViewportEffect* sceneDisplayEffect{ nullptr };
+    int sceneSamples{ 1 };
+    std::optional<GLuint> annotationDepthFramebuffer{ std::nullopt };
+    bool annotationDepthAvailable{ false };
+    std::unique_ptr<ViewportEffect> presentationEffect;
     bool isViewportEffectUsed { false };
     bool needsUpdateFonts{ false };
 

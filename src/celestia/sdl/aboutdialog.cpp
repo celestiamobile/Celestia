@@ -15,9 +15,9 @@
 #include "config.h"
 
 #include <algorithm>
+#include <concepts>
 #include <csetjmp>
 #include <string>
-#include <type_traits>
 #include <utility>
 
 #include <celengine/glsupport.h>
@@ -49,9 +49,7 @@ extern "C"
 }
 #endif
 
-#ifdef USE_ICU
 #include <celutil/includeicu.h>
-#endif
 
 #ifdef USE_LIBAVIF
 #include <avif/avif.h>
@@ -144,7 +142,6 @@ getMiniaudioVersion()
 }
 #endif
 
-#ifdef USE_ICU
 std::string
 getICUVersion()
 {
@@ -152,7 +149,6 @@ getICUVersion()
     u_getVersion(versionInfo);
     return fmt::format("{}.{}.{}.{}", +versionInfo[0], +versionInfo[1], +versionInfo[2], +versionInfo[3]);
 }
-#endif
 
 #ifdef USE_SPICE
 std::string
@@ -176,13 +172,13 @@ struct AboutDialog::LibraryInfo
 {
     LibraryInfo(std::string&&, std::string&&, std::string&&);
 
-    template<typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
+    template<std::integral T>
     LibraryInfo(std::string&& _name, std::string&& _license, T major, T minor) :
         LibraryInfo(std::move(_name), std::move(_license), fmt::format("{}.{}", major, minor))
     {
     }
 
-    template<typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
+    template<std::integral T>
     LibraryInfo(std::string&& _name, std::string&& _license, T major, T minor, T patch) :
         LibraryInfo(std::move(_name), std::move(_license), fmt::format("{}.{}.{}", major, minor, patch))
     {
@@ -234,9 +230,7 @@ AboutDialog::AboutDialog()
     m_libraries.emplace_back("libavutil", avutil_license(), getFFMpegVersion(avutil_version()));
     m_libraries.emplace_back("libswscale", swscale_license(), getFFMpegVersion(swscale_version()));
 #endif
-#ifdef USE_ICU
     m_libraries.emplace_back("icu", "ICU", getICUVersion());
-#endif
 #ifdef USE_LIBAVIF
     m_libraries.emplace_back("libavif", "BSD", AVIF_VERSION_MAJOR, AVIF_VERSION_MINOR, AVIF_VERSION_PATCH);
 #endif

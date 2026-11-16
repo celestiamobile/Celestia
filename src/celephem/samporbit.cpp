@@ -14,11 +14,13 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <istream>
+#include <span>
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
@@ -28,7 +30,6 @@
 #include <Eigen/Core>
 
 #include <celastro/date.h>
-#include <celcompat/bit.h>
 #include <celmath/mathlib.h>
 #include <celutil/filetype.h>
 #include <celutil/fsutils.h>
@@ -123,8 +124,8 @@ public:
 
 private:
     std::shared_ptr<const Samples<SampleXYZ<T>>> samples;
-    util::array_view<double> sampleTimes;
-    util::array_view<SampleXYZ<T>> positions;
+    std::span<const double> sampleTimes;
+    std::span<const SampleXYZ<T>> positions;
     double boundingRadius;
     mutable std::uint32_t lastSample{ 0 };
 
@@ -216,9 +217,9 @@ SampledOrbit<T>::computePositionLinear(double jd, std::uint32_t n) const
 
     const Eigen::Matrix<T, 3, 1>& s0 = positions[n - 1];
     const Eigen::Matrix<T, 3, 1>& s1 = positions[n];
-    return Eigen::Vector3d(math::lerp(t, static_cast<double>(s0.x()), static_cast<double>(s1.x())),
-                           math::lerp(t, static_cast<double>(s0.y()), static_cast<double>(s1.y())),
-                           math::lerp(t, static_cast<double>(s0.z()), static_cast<double>(s1.z())));
+    return Eigen::Vector3d(math::lerp(static_cast<double>(s0.x()), static_cast<double>(s1.x()), t),
+                           math::lerp(static_cast<double>(s0.y()), static_cast<double>(s1.y()), t),
+                           math::lerp(static_cast<double>(s0.z()), static_cast<double>(s1.z()), t));
 }
 
 template<typename T>
@@ -370,8 +371,8 @@ private:
     void initializeCubic(double, std::uint32_t, InterpolationParameters&) const;
 
     std::shared_ptr<const Samples<SampleXYZV<T>>> samples;
-    util::array_view<double> sampleTimes;
-    util::array_view<SampleXYZV<T>> posvels;
+    std::span<const double> sampleTimes;
+    std::span<const SampleXYZV<T>> posvels;
     double boundingRadius;
     mutable std::uint32_t lastSample{ 0 };
 
@@ -563,44 +564,36 @@ LoadSamplesXYZAscii(const std::filesystem::path& filename)
 bool
 ParseXYZVBinaryHeader(std::istream& in, const std::filesystem::path& filename)
 {
-    std::array<char, sizeof(XYZVBinaryHeader)> header;
-
-    // Sonar detects this as being in a critical section for some reason
-    if (!in.read(header.data(), header.size())) /* Flawfinder: ignore */ //NOSONAR
+    XYZVBinaryHeader header;
+    if (!in.read(reinterpret_cast<char*>(&header), sizeof(header))) /* Flawfinder: ignore */
     {
         GetLogger()->error(_("Error reading header of {}.\n"), filename);
         return false;
     }
 
-    if (std::string_view(header.data() + offsetof(XYZVBinaryHeader, magic), XYZV_MAGIC.size()) != XYZV_MAGIC)
+    if (std::string_view(header.magic.data(), header.magic.size()) != XYZV_MAGIC)
     {
         GetLogger()->error(_("Bad binary xyzv file {}.\n"), filename);
         return false;
     }
 
-    decltype(XYZVBinaryHeader::byteOrder) byteOrder;
-    std::memcpy(&byteOrder, header.data() + offsetof(XYZVBinaryHeader, byteOrder), sizeof(byteOrder));
-    if (byteOrder != static_cast<decltype(byteOrder)>(celestia::compat::endian::native))
+    if (header.byteOrder != nativeEndianCode)
     {
         GetLogger()->error(_("Unsupported byte order {}, expected {} in {}.\n"),
-                           byteOrder, static_cast<int>(celestia::compat::endian::native), filename);
+                           header.byteOrder.get(), nativeEndianCode, filename);
         return false;
     }
 
-    decltype(XYZVBinaryHeader::digits) digits;
-    std::memcpy(&digits, header.data() + offsetof(XYZVBinaryHeader, digits), sizeof(digits));
-    if (digits != std::numeric_limits<double>::digits)
+    if (header.digits != std::numeric_limits<double>::digits)
     {
         GetLogger()->error(_("Unsupported digits number {}, expected {} in {}.\n"),
-                            digits, std::numeric_limits<double>::digits, filename);
+                           header.digits.get(), std::numeric_limits<double>::digits, filename);
         return false;
     }
 
-    decltype(XYZVBinaryHeader::count) count;
-    std::memcpy(&count, header.data() + offsetof(XYZVBinaryHeader, count), sizeof(count));
-    if (count == 0)
+    if (header.count == 0)
     {
-        GetLogger()->error(_("Invalid record count {} in {}.\n"), count, filename);
+        GetLogger()->error(_("Invalid record count {} in {}.\n"), header.count.get(), filename);
         return false;
     }
 
@@ -611,26 +604,22 @@ template<typename T>
 bool
 ReadXYZVBinarySample(std::istream& in, double& tdb, SampleXYZV<T>& sample)
 {
-    std::array<char, sizeof(XYZVBinaryData)> data;
-    if (!in.read(data.data(), data.size())) /* Flawfinder: ignore */
+    XYZVBinaryData data;
+    if (!in.read(reinterpret_cast<char*>(&data), sizeof(data))) /* Flawfinder: ignore */
         return false;
 
-    std::memcpy(&tdb, data.data() + offsetof(XYZVBinaryData, tdb), sizeof(double));
+    tdb = data.tdb;
 
     if constexpr (std::is_same_v<T, double>)
     {
-        std::memcpy(sample.position.data(), data.data() + offsetof(XYZVBinaryData, position), sizeof(double) * 3);
-        std::memcpy(sample.velocity.data(), data.data() + offsetof(XYZVBinaryData, velocity), sizeof(double) * 3);
-
-        sample.velocity *= astro::daysToSecs(1.0);
+        sample.position = Eigen::Matrix<T, 3, 1>(data.position[0], data.position[1], data.position[2]);
+        sample.velocity = Eigen::Matrix<T, 3, 1>(data.velocity[0], data.velocity[1], data.velocity[2])
+                        * astro::daysToSecs(1.0);
     }
     else
     {
-        Eigen::Vector3d position;
-        Eigen::Vector3d velocity;
-
-        std::memcpy(position.data(), data.data() + offsetof(XYZVBinaryData, position), sizeof(double) * 3);
-        std::memcpy(velocity.data(), data.data() + offsetof(XYZVBinaryData, velocity), sizeof(double) * 3);
+        Eigen::Vector3d position(data.position[0], data.position[1], data.position[2]);
+        Eigen::Vector3d velocity(data.velocity[0], data.velocity[1], data.velocity[2]);
 
         sample.position = position.template cast<T>();
         sample.velocity = (velocity * astro::daysToSecs(1.0)).template cast<T>();

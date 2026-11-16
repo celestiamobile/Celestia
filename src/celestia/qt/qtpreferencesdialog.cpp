@@ -221,6 +221,9 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
     ui.featureSizeSpinBox->setValue(minimumFeatureSize);
 
     ui.antialiasLinesCheck->setChecked(util::is_set(renderFlags, ::RenderFlags::ShowSmoothLines));
+    ui.separateRayleighMieScaleHeightsCheck->setChecked(renderer->getSeparateRayleighMieScaleHeights());
+    ui.atmosphereSegmentCountSpinBox->setValue(static_cast<int>(renderer->getAtmosphereSegmentCount()));
+    ui.cloudSegmentCountSpinBox->setValue(static_cast<int>(renderer->getCloudSegmentCount()));
 
     {
         QSignalBlocker blocker(ui.sRGBRenderingCombo);
@@ -305,6 +308,7 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
 
     {
         QSignalBlocker blocker(ui.starColorBox);
+        ui.starColorBox->addItem(_("Blackbody Illuminant E"), static_cast<int>(ColorTableType::Illuminant_E));
         ui.starColorBox->addItem(_("Blackbody D65"), static_cast<int>(ColorTableType::Blackbody_D65));
         ui.starColorBox->addItem(_("Blackbody (Solar Whitepoint)"), static_cast<int>(ColorTableType::SunWhite));
         ui.starColorBox->addItem(_("Blackbody (Vega Whitepoint)"), static_cast<int>(ColorTableType::VegaWhite));
@@ -787,6 +791,24 @@ void
 PreferencesDialog::on_antialiasLinesCheck_stateChanged(int state)
 {
     setRenderFlag(appCore, ::RenderFlags::ShowSmoothLines, state);
+}
+
+void
+PreferencesDialog::on_separateRayleighMieScaleHeightsCheck_stateChanged(int state) const
+{
+    appCore->getRenderer()->setSeparateRayleighMieScaleHeights(state == Qt::Checked);
+}
+
+void
+PreferencesDialog::on_atmosphereSegmentCountSpinBox_valueChanged(int value) const
+{
+    appCore->getRenderer()->setAtmosphereSegmentCount(static_cast<unsigned int>(value));
+}
+
+void
+PreferencesDialog::on_cloudSegmentCountSpinBox_valueChanged(int value) const
+{
+    appCore->getRenderer()->setCloudSegmentCount(static_cast<unsigned int>(value));
 }
 
 void

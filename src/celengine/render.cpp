@@ -51,7 +51,6 @@
 #include "textlayout.h"
 #include <celastro/astro.h>
 #include <celastro/date.h>
-#include <celcompat/numbers.h>
 #include <celengine/observer.h>
 #include <celephem/rotation.h>
 #include <celmath/frustum.h>
@@ -84,8 +83,11 @@
 #include <cstring>
 #include <cassert>
 #include <cmath>
+#include <functional>
+#include <optional>
 #include <sstream>
 #include <iomanip>
+#include <numbers>
 #include <numeric>
 #ifdef _MSC_VER
 #include <malloc.h>
@@ -135,6 +137,9 @@ static constexpr float MinAtmosphereThicknessInPixels = 2.0f;
 static constexpr unsigned int OrbitCacheCullThreshold = 200;
 // Age in frames at which unused orbit paths may be eliminated from the cache
 static constexpr std::uint32_t OrbitCacheRetireAge = 16;
+
+static constexpr unsigned int StarBufferCapacity = 2048;
+static constexpr unsigned int LegacyLargeStarCapacity = 512;
 
 
 // Some useful unit conversions
@@ -211,10 +216,10 @@ Renderer::Renderer() :
 #ifndef GL_ES
     renderMode(GL_FILL),
 #endif
-    pointStarVertexBuffer(std::make_unique<PointStarVertexBuffer>(*this, 2048)),
-    glareVertexBuffer(std::make_unique<PointStarVertexBuffer>(*this, 2048)),
-    psfPointBuffer(std::make_unique<PsfStarVertexBuffer>(*this, 2048)),
-    psfGlowBuffer(std::make_unique<PsfStarVertexBuffer>(*this, 2048)),
+    pointStarVertexBuffer(std::make_unique<PointStarVertexBuffer>(*this, StarBufferCapacity)),
+    glareVertexBuffer(std::make_unique<PointStarVertexBuffer>(*this, StarBufferCapacity)),
+    psfPointBuffer(std::make_unique<PsfStarVertexBuffer>(*this, StarBufferCapacity)),
+    psfGlowBuffer(std::make_unique<PsfStarVertexBuffer>(*this, StarBufferCapacity)),
     m_starPipelineOwner(std::make_unique<celestia::render::StarPipelineOwner>()),
     curvePlotVertexBuffer(std::make_unique<CurvePlotVertexBuffer>(*this)),
     m_atmosphereRenderer(std::make_unique<AtmosphereRenderer>(*this)),
@@ -222,9 +227,9 @@ Renderer::Renderer() :
     m_eclipticLineRenderer(std::make_unique<EclipticLineRenderer>(*this)),
     m_galaxyRenderer(std::make_unique<GalaxyRenderer>(*this)),
     m_globularRenderer(std::make_unique<GlobularRenderer>(*this)),
-    m_legacyLargeStarRenderer(std::make_unique<LegacyLargeStarRenderer>(*this)),
-    m_legacyLargeGlareRenderer(std::make_unique<LegacyLargeStarRenderer>(*this)),
-    m_psfGlowLargeRenderer(std::make_unique<PsfGlowLargeRenderer>(*this)),
+    m_legacyLargeStarRenderer(std::make_unique<LegacyLargeStarRenderer>(*this, LegacyLargeStarCapacity)),
+    m_legacyLargeGlareRenderer(std::make_unique<LegacyLargeStarRenderer>(*this, LegacyLargeStarCapacity)),
+    m_psfGlowLargeRenderer(std::make_unique<PsfGlowLargeRenderer>(*this, StarBufferCapacity)),
     m_hollowMarkerRenderer(std::make_unique<LineRenderer>(*this, 1.0f, LineRenderer::PrimType::Lines, LineRenderer::StorageType::Static)),
     m_nebulaRenderer(std::make_unique<NebulaRenderer>(*this)),
     m_openClusterRenderer(std::make_unique<OpenClusterRenderer>(*this)),
@@ -281,7 +286,7 @@ static void BuildGaussianDiscMipLevel(unsigned char* mipPixels,
     const float sigma = fwhm / 2.3548f;
     const float isig2 = 1.0f / (2.0f * sigma * sigma);
     // Store 1/sqrt(2*pi) in constexpr sfactor
-    constexpr auto sfactor = static_cast<float>(0.5 * celestia::numbers::sqrt2 * celestia::numbers::inv_sqrtpi);
+    constexpr auto sfactor = static_cast<float>(0.5 * std::numbers::sqrt2 * std::numbers::inv_sqrtpi);
     const float s = sfactor / sigma;
 
     const float center = static_cast<float>(size - 1U) * 0.5f;
@@ -428,26 +433,6 @@ translateLabelModeToClassMask(RenderLabels labelMode)
     return classMask;
 }
 
-
-// Depth comparison for labels
-// Note that it's essential to declare this operator as a member
-// function of Renderer::Label; if it's not a class member, C++'s
-// argument dependent lookup will not find the operator when it's
-// used as a predicate for STL algorithms.
-bool Renderer::Annotation::operator<(const Annotation& a) const
-{
-    // Operation is reversed because -z axis points into the screen
-    return position.z() > a.position.z();
-}
-
-// Depth comparison for orbit paths
-bool Renderer::OrbitPathListEntry::operator<(const OrbitPathListEntry& o) const
-{
-    // Operation is reversed because -z axis points into the screen
-    return centerZ - radius > o.centerZ - o.radius;
-}
-
-
 bool Renderer::init(int winWidth, int winHeight,
                     const DetailOptions& _detailOptions,
                     engine::TextureResolution resolution,
@@ -463,6 +448,7 @@ bool Renderer::init(int winWidth, int winHeight,
     cloudSegmentCount = detailOptions.cloudSegmentCount;
     atmosphereExtinctionThreshold = detailOptions.atmosphereExtinctionThreshold;
     atmosphereExtinctionFactor = -std::log(atmosphereExtinctionThreshold);
+    separateRayleighMieScaleHeights = detailOptions.separateRayleighMieScaleHeights;
 
     m_atmosphereRenderer->initGL();
     if (!m_cometRenderer->initGL())
@@ -777,7 +763,7 @@ void Renderer::getLabelAlignmentInfo(const Annotation &annotation, const Texture
         break;
     case LabelHorizontalAlignment::Start:
         halign = rtl ? TextLayout::HorizontalAlignment::Right : TextLayout::HorizontalAlignment::Left;
-        if (annotation.markerRep != nullptr)
+        if (annotation.markerRep)
             hOffset = 2.0f + std::trunc(annotation.markerRep->size() / 2.0f);
         else
             hOffset = 2.0f;
@@ -801,7 +787,7 @@ void Renderer::getLabelAlignmentInfo(const Annotation &annotation, const Texture
 }
 
 void Renderer::addAnnotation(vector<Annotation>& annotations,
-                             const celestia::MarkerRepresentation* markerRep,
+                             const celestia::engine::MarkerRepresentation* markerRep,
                              std::string_view labelText,
                              Color color,
                              const Vector3f& pos,
@@ -836,7 +822,8 @@ void Renderer::addAnnotation(vector<Annotation>& annotations,
         Annotation a;
         if (!special || markerRep == nullptr)
              a.labelText = labelText;
-        a.markerRep = markerRep;
+        if (markerRep != nullptr)
+            a.markerRep = *markerRep;
         a.color = color;
         a.position = win;
         a.halign = halign;
@@ -847,7 +834,7 @@ void Renderer::addAnnotation(vector<Annotation>& annotations,
 }
 
 
-void Renderer::addForegroundAnnotation(const celestia::MarkerRepresentation* markerRep,
+void Renderer::addForegroundAnnotation(const celestia::engine::MarkerRepresentation* markerRep,
                                        std::string_view labelText,
                                        Color color,
                                        const Vector3f& pos,
@@ -859,7 +846,7 @@ void Renderer::addForegroundAnnotation(const celestia::MarkerRepresentation* mar
 }
 
 
-void Renderer::addBackgroundAnnotation(const celestia::MarkerRepresentation* markerRep,
+void Renderer::addBackgroundAnnotation(const celestia::engine::MarkerRepresentation* markerRep,
                                        std::string_view labelText,
                                        Color color,
                                        const Vector3f& pos,
@@ -871,7 +858,7 @@ void Renderer::addBackgroundAnnotation(const celestia::MarkerRepresentation* mar
 }
 
 
-void Renderer::addSortedAnnotation(const celestia::MarkerRepresentation* markerRep,
+void Renderer::addSortedAnnotation(const celestia::engine::MarkerRepresentation* markerRep,
                                    std::string_view labelText,
                                    Color color,
                                    const Vector3f& pos,
@@ -916,9 +903,7 @@ void Renderer::beginObjectAnnotations()
     // It's an error to call beginObjectAnnotations a second time
     // without first calling end.
     assert(!objectAnnotationSetOpen);
-    assert(objectAnnotations.empty());
-
-    objectAnnotations.clear();
+    objectAnnotationBatches[currentIntervalIndex].start = objectAnnotations.size();
     objectAnnotationSetOpen = true;
 }
 
@@ -926,29 +911,11 @@ void Renderer::beginObjectAnnotations()
 void Renderer::endObjectAnnotations()
 {
     objectAnnotationSetOpen = false;
-
-    if (!objectAnnotations.empty())
-    {
-        Renderer::PipelineState ps;
-        ps.blending = true;
-        ps.blendFunc = {GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA};
-        ps.depthMask = true;
-        ps.depthTest = true;
-        ps.smoothLines = true;
-        setPipelineState(ps);
-
-        renderAnnotations(objectAnnotations.begin(),
-                          objectAnnotations.end(),
-                          -depthPartitions[currentIntervalIndex].nearZ,
-                          -depthPartitions[currentIntervalIndex].farZ,
-                          FontStyle::Normal);
-
-        objectAnnotations.clear();
-    }
+    objectAnnotationBatches[currentIntervalIndex].end = objectAnnotations.size();
 }
 
 
-void Renderer::addObjectAnnotation(const celestia::MarkerRepresentation* markerRep,
+void Renderer::addObjectAnnotation(const celestia::engine::MarkerRepresentation* markerRep,
                                    std::string_view labelText,
                                    Color color,
                                    const Vector3f& pos,
@@ -1290,7 +1257,7 @@ setupLightSources(const vector<const Star*>& nearStars,
                   double t,
                   vector<LightSource>& lightSources,
                   float tintSaturation,
-                  const ColorTemperatureTable* tintColors)
+                  const ColorTemperatureTable* starColors)
 {
     // Fade out the illumination from cool objects. Objects at the Draper
     // point (798 K) should be visibly glowing, so set the minimum temperature
@@ -1314,7 +1281,8 @@ setupLightSources(const vector<const Star*>& nearStars,
             if (temp <= DARK_POINT)
                 continue;
 
-            if (tintColors == nullptr)
+            // If star color mode is Enhanced, uses legacy tint colors
+            if (starColors->type() == ColorTableType::Enhanced)
                 ls.color = legacyTintColor(temp).linearize(gl::sRGBRendering);
             else
             {
@@ -1327,10 +1295,7 @@ setupLightSources(const vector<const Star*>& nearStars,
                 // illumination.
                 ls.luminosity *= fadeFactor;
 
-                // Use a variant of the blackbody colors with the whitepoint
-                // set to Sol being white, to ensure consistency of the Solar
-                // System textures.
-                ls.color = tintColors->lookupTintColor(temp, tintSaturation, fadeFactor);
+                ls.color = starColors->lookupTintColor(temp, tintSaturation, fadeFactor);
             }
 
             lightSources.push_back(ls);
@@ -1442,11 +1407,13 @@ void Renderer::renderItem(const RenderListEntry& rle,
 }
 
 
-void Renderer::render(const Observer& observer,
-                      const Universe& universe,
-                      float faintestMagNight,
-                      const Selection& sel)
+void Renderer::renderScene(const Observer& observer,
+                           const Universe& universe,
+                           float faintestMagNight,
+                           const Selection& sel)
 {
+    assert(!annotationsPending);
+
     // Get the observer's time
     double now = observer.getTime();
     realTime = observer.getRealTime();
@@ -1493,7 +1460,10 @@ void Renderer::render(const Observer& observer,
     depthSortedAnnotations.clear();
     foregroundAnnotations.clear();
     backgroundAnnotations.clear();
+    backgroundAnnotationBatches.clear();
     objectAnnotations.clear();
+    objectAnnotationBatches.clear();
+    selectionPointerPosition.reset();
 
     // Put all solar system bodies into the render list.  Stars close and
     // large enough to have discernible surface detail are also placed in
@@ -1581,6 +1551,10 @@ void Renderer::render(const Observer& observer,
         renderDeepSkyObjects(universe, observer, faintestMag);
     }
 
+    // Planets also use PSF buffers, even when stars are hidden.
+    if (starStyle == StarStyle::PointSpreadFunction)
+        preparePsfStarBuffers();
+
     // Render stars
     if (util::is_set(renderFlags, RenderFlags::ShowStars) && universe.getStarCatalog() != nullptr)
     {
@@ -1601,14 +1575,14 @@ void Renderer::render(const Observer& observer,
     renderAsterisms(universe, dist, asterismMVP);
     renderBoundaries(universe, dist, asterismMVP);
 
-    // Render star and deep sky object labels
-    renderBackgroundAnnotations(FontStyle::Normal);
+    // Preserve the font and ordering of background annotation batches.
+    queueBackgroundAnnotations(FontStyle::Normal);
 
-    // Render constellations labels
+    // Collect constellation labels
     if (util::is_set(labelMode, RenderLabels::ConstellationLabels) && universe.getAsterisms() != nullptr)
     {
         labelConstellations(*universe.getAsterisms(), observer);
-        renderBackgroundAnnotations(FontStyle::Large);
+        queueBackgroundAnnotations(FontStyle::Large);
     }
 
     if (util::is_set(renderFlags, RenderFlags::ShowMarkers))
@@ -1623,35 +1597,114 @@ void Renderer::render(const Observer& observer,
         selectionVisible = selectionToAnnotation(sel, observer, xfrustum, now);
     }
 
-    // Render background markers; rendering of other markers is deferred until
-    // solar system objects are rendered.
-    renderBackgroundAnnotations(FontStyle::Normal);
+    queueBackgroundAnnotations(FontStyle::Normal);
 
     removeInvisibleItems(frustum);
 
     // Sort the annotations
-    sort(depthSortedAnnotations.begin(), depthSortedAnnotations.end());
+    // Operation is reversed because -z axis points into the screen
+    std::ranges::sort(depthSortedAnnotations, std::greater{},
+                      [](const auto& a) { return a.position.z(); });
 
     // Sort the orbit paths
-    sort(orbitPathList.begin(), orbitPathList.end());
+    // Operation is reversed because -z axis points into the screen
+    std::ranges::sort(orbitPathList, std::greater{},
+                      [](const auto& op) { return op.centerZ - op.radius; });
 
 #ifndef GL_ES
     glPolygonMode(GL_FRONT_AND_BACK, (GLenum) renderMode);
 #endif
 
     int nIntervals = buildDepthPartitions();
+    objectAnnotationBatches.resize(nIntervals);
     renderSolarSystemObjects(observer, nIntervals, now);
 
-    renderForegroundAnnotations(FontStyle::Normal);
-
-    if (showSelectionPointer && !selectionVisible && util::is_set(renderFlags, RenderFlags::ShowMarkers))
+    if (showSelectionPointer && !selectionVisible && !sel.empty() &&
+        util::is_set(renderFlags, RenderFlags::ShowMarkers))
     {
-        renderSelectionPointer(observer, now, xfrustum, sel);
+        Vector3d position = sel.getPosition(now).offsetFromKm(observer.getPosition());
+        if (xfrustum.testSphere(position, sel.radius()) == math::FrustumAspect::Outside)
+            selectionPointerPosition = position;
     }
 
 #ifndef GL_ES
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
+    annotationsPending = true;
+}
+
+
+void Renderer::renderAnnotations()
+{
+    if (!annotationsPending)
+        return;
+
+    PipelineState ps;
+    ps.blending = true;
+    ps.blendFunc = {GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA};
+    ps.depthTest = true;
+    ps.smoothLines = true;
+    setPipelineState(ps);
+
+    // Background annotations belong behind all scene geometry, not at the
+    // midpoint of the depth buffer used by their orthographic projection.
+    // This preserves opaque occlusion, but not attenuation by transparent objects.
+    glDepthRange(1.0, 1.0);
+    for (const auto& batch : backgroundAnnotationBatches)
+        renderAnnotations(std::span(backgroundAnnotations.cbegin() + batch.start,
+                                    backgroundAnnotations.cbegin() + batch.end),
+                          batch.font);
+
+    auto annotations = std::span<const Annotation>(depthSortedAnnotations);
+    int nIntervals = static_cast<int>(depthPartitions.size());
+    float intervalSize = 1.0f / static_cast<float>(std::max(1, nIntervals));
+    for (int interval = 0; interval < nIntervals; ++interval)
+    {
+        glDepthRange(1.0f - static_cast<float>(interval + 1) * intervalSize,
+                     1.0f - static_cast<float>(interval) * intervalSize);
+        const auto& partition = depthPartitions[interval];
+        annotations = renderSortedAnnotations(annotations,
+                                              -partition.nearZ,
+                                              -partition.farZ,
+                                              FontStyle::Normal);
+        const auto& objectBatch = objectAnnotationBatches[interval];
+        renderAnnotations(std::span<const Annotation>(objectAnnotations)
+                              .subspan(objectBatch.start, objectBatch.end - objectBatch.start),
+                          -partition.nearZ,
+                          -partition.farZ,
+                          FontStyle::Normal);
+    }
+
+    glDepthRange(0.0, 1.0);
+    renderForegroundAnnotations(FontStyle::Normal);
+    if (selectionPointerPosition)
+        renderSelectionPointer(*selectionPointerPosition);
+
+    discardAnnotations();
+}
+
+
+bool Renderer::annotationsRequireDepth() const
+{
+    return annotationsPending &&
+        (!depthSortedAnnotations.empty() ||
+         std::ranges::any_of(backgroundAnnotationBatches,
+                             [](const auto& batch) { return batch.start != batch.end; }) ||
+         std::ranges::any_of(objectAnnotationBatches,
+                             [](const auto& batch) { return batch.start != batch.end; }));
+}
+
+
+void Renderer::discardAnnotations()
+{
+    backgroundAnnotationBatches.clear();
+    objectAnnotationBatches.clear();
+    foregroundAnnotations.clear();
+    depthSortedAnnotations.clear();
+    backgroundAnnotations.clear();
+    objectAnnotations.clear();
+    selectionPointerPosition.reset();
+    annotationsPending = false;
 }
 
 static Eigen::Vector3f
@@ -1728,14 +1781,8 @@ void Renderer::renderObjectAsPoint(const PointObjectInfo& info,
 {
     const Vector3f& position = info.position;
     float radius = info.radius;
-    // In PSF mode, route through the PSF path when the body is a
-    // genuine light source (stars), or when it's still unresolved
-    // (any body — the point representation works regardless of
-    // whether it emits).  A resolved reflective body is excluded
-    // because the PSF's radial falloff inevitably paints a bright
-    // saturated core inside the mesh and a dim tail extending many
-    // disc radii past the limb, both of which are visible artifacts
-    // on a planet whose true visual is just the sharp-edged disc.
+    // Stars and reflective bodies share the PSF point-to-disc transition.
+    // The PSF path separately controls whether a resolved body gets a glow.
     if (starStyle == StarStyle::PointSpreadFunction)
     {
         float pointScale = static_cast<float>(screenDpi) / 96.0f;
@@ -1851,7 +1898,7 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
     float exposureFactor = std::max(starExposure, 1.0e-6f);
     float r              = std::max(starPointRadius, 1.0e-3f);
     float peakRadScale   = exposureFactor * starAtmosphereBrightness * 3.0f
-                           / (celestia::numbers::pi_v<float> * r * r);
+                           / (std::numbers::pi_v<float> * r * r);
     float irradiance     = astro::magToIrradiance(appMag);
     float peakRad        = peakRadScale * irradiance;
 
@@ -1873,10 +1920,10 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
 
     Eigen::Vector3f frontPos = calculateQuadCenter(getCameraOrientationf(), position, radius);
 
-    // Suppress the cone-cap sprite once the body is resolved as a
-    // mesh; the linked glow below handles the bloom around the disc.
-    if (discSizeInPixels <= 1.0f)
-        psfPointBuffer->addStar(frontPos, linearStarColor, peakRadCol);
+    // Fade the cone as the mesh takes over, without changing the glow's peak.
+    if (float pointFade = celestia::engine::detail::psfPointFade(discSizeInPixels, r, pointScale);
+        pointFade > 0.0f)
+        psfPointBuffer->addStar(frontPos, linearStarColor, peakRadCol * pointFade);
 
     // Gate on the irradiance-based peak so the linked term only
     // enhances an already-firing glow, never starts one (keeps
@@ -1886,7 +1933,7 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
         // Peak radiance whose bloom radius (per the shader's PSF formula)
         // equals the body's angular disc.
         float a    = starOptimization / r;
-        float invB = celestia::numbers::pi_v<float> / r - a;
+        float invB = std::numbers::pi_v<float> / r - a;
         // Exact projected limb radius; discSizeInPixels undershoots up close.
         float limbDiscPixels = discSizeInPixels;
         float fadeLimbDiscPixels = limbDiscPixels;
@@ -1911,12 +1958,6 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
             glowPeak = (1.0f - 1.0f / (peakRadCol / starMaxIrradiance + 1.0f))
                        * starMaxIrradiance;
         }
-        // Always render the glow in front of the body (calculateQuadCenter
-        // puts it on the near-side tangent plane).  Skip entirely for
-        // resolved reflective bodies that aren't bright enough to overflow.
-        if (glowPeak <= linkedGlowPeak && !emissive)
-            return;
-
         Vector3f glowPos = frontPos;
         // Size tracks whichever peak is larger: glowPeak in the far/overflow
         // regime, linkedGlowPeak once the disc resolves so the sprite keeps
@@ -1928,6 +1969,9 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
         // continuous distance-derived value, so pass it as a float to keep
         // the transition smooth.
         float alpha = computePsfGlowAlpha(distance, radius, fadeLinkedGlowPeak, glowPeak);
+        alpha *= celestia::engine::detail::psfGlowOnset(peakRadCol);
+        if (!emissive)
+            alpha *= celestia::engine::detail::psfReflectiveGlowOnset(glowPeak, linkedGlowPeak);
         if (alpha <= 0.0f)
             return;
 
@@ -2122,7 +2166,7 @@ Renderer::locationsToAnnotations(const Body& body,
         double z = viewNormal.dot(labelPos);
         labelPos *= planetZ / z;
 
-        const celestia::MarkerRepresentation* locationMarker = nullptr;
+        const celestia::engine::MarkerRepresentation* locationMarker = nullptr;
         if (featureType & Location::City)
             locationMarker = &cityRep;
         else if (featureType & (Location::LandingSite | Location::Observatory))
@@ -2291,8 +2335,8 @@ setupObjectLighting(const vector<LightSource>& suns,
     }
     else if (nLights > 2)
     {
-        sort(ls.lights, ls.lights + nLights,
-             [](const auto &l0, const auto &l1) { return l0.irradiance > l1.irradiance; });
+        std::sort(ls.lights.begin(), ls.lights.begin() + nLights,
+                  [](const auto &l0, const auto &l1) { return l0.irradiance > l1.irradiance; });
     }
 
     // Compute the total irradiance
@@ -2527,7 +2571,7 @@ void Renderer::renderObject(const Vector3f& pos,
         if (obj.atmosphere != nullptr)
         {
             float atmosphereHeight = max(obj.atmosphere->cloudHeight,
-                                         getAtmosphereShellHeight(obj.atmosphere->mieScaleHeight));
+                                         getAtmosphereShellHeight(*obj.atmosphere));
             if (atmosphereHeight > 0.0f)
             {
                 // If there's an atmosphere, we need to move the far plane
@@ -2551,7 +2595,7 @@ void Renderer::renderObject(const Vector3f& pos,
     const Atmosphere* atmosphere = obj.atmosphere;
 
     if (atmosphere != nullptr && atmosphere->cloudSpeed != 0.0f)
-        cloudTexOffset = static_cast<float>(-math::pfmod(now * atmosphere->cloudSpeed * 0.5 * celestia::numbers::inv_pi, 1.0));
+        cloudTexOffset = static_cast<float>(-math::pfmod(now * atmosphere->cloudSpeed * 0.5 * std::numbers::inv_pi, 1.0));
 
     if (obj.geometry == engine::GeometryHandle::Invalid)
     {
@@ -2696,7 +2740,8 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
 
         // If we're beneath the cloud level, render the interior of
         // the cloud sphere.
-        if (distance - radius < atmosphere->cloudHeight)
+        const bool insideCloudLayer = distance - radius < atmosphere->cloudHeight;
+        if (insideCloudLayer)
             glFrontFace(GL_CW);
 
         cloudTex->bind();
@@ -2720,6 +2765,7 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
                               cloudTexOffset,
                               scaleFactors,
                               renderFlags,
+                              insideCloudLayer,
                               obj.orientation,
                               viewFrustum,
                               mvp,
@@ -2759,7 +2805,8 @@ void Renderer::renderPlanetAtmosphere(Body& body,
     float discSizeInPixels = radius / (max(nearPlaneDistance, altitude) * pixelSize);
 
     RenderProperties rp;
-    LightingState ls;
+    // Use optional to avoid unnecessary initialization if we load from the cache
+    std::optional<LightingState> lsOpt;
     Quaterniond q;
     // Reuse the surface pass's lighting if it ran this frame; otherwise compute
     // it (the body disc may have been too small for renderPlanet to draw, e.g.
@@ -2767,13 +2814,16 @@ void Renderer::renderPlanetAtmosphere(Body& body,
     if (auto it = planetLightingCache.find(&body); it != planetLightingCache.end())
     {
         rp = it->second.rp;
-        ls = it->second.lights;
+        lsOpt = it->second.lights;
         q = it->second.q;
     }
     else
     {
-        setupPlanetLighting(body, pos, now, nearPlaneDistance, altitude, rp, ls, q);
+        setupPlanetLighting(body, pos, now, nearPlaneDistance, altitude, rp, lsOpt.emplace(), q);
     }
+
+    // At this point we know the optional is initialized, so the following is safe
+    LightingState& ls = *lsOpt;
 
     RenderInfo ri;
     ri.sunDir_eye = Vector3f::UnitY();
@@ -2851,7 +2901,7 @@ void Renderer::renderPlanetAtmosphere(Body& body,
             frustumFarPlane = std::sqrt(math::square(d) - math::square(eradius)) * 1.1f;
 
         float atmosphereHeight = max(atmosphere->cloudHeight,
-                                     getAtmosphereShellHeight(atmosphere->mieScaleHeight));
+                                     getAtmosphereShellHeight(*atmosphere));
         if (atmosphereHeight > 0.0f)
         {
             float atmosphereRadius = eradius + atmosphereHeight;
@@ -2873,7 +2923,7 @@ void Renderer::renderPlanetAtmosphere(Body& body,
             cloudNormalMap = m_textureManager->find(atmosphere->cloudNormalMap);
     }
     if (atmosphere->cloudSpeed != 0.0f)
-        cloudTexOffset = static_cast<float>(-math::pfmod(now * atmosphere->cloudSpeed * 0.5 * celestia::numbers::inv_pi, 1.0));
+        cloudTexOffset = static_cast<float>(-math::pfmod(now * atmosphere->cloudSpeed * 0.5 * std::numbers::inv_pi, 1.0));
 
     renderAtmosphere(atmosphere, ri, ls, rp, pos, distance, radius,
                      scaleFactors, insidePlanet, lit,
@@ -3097,7 +3147,7 @@ void Renderer::setupPlanetLighting(Body& body, // NOSONAR(cpp:S107,cpp:S3776)
             if (util::is_set(renderFlags, RenderFlags::ShowAtmospheres))
             {
                 shellHeight = rp.atmosphere->mieScaleHeight > 0.0f
-                    ? getAtmosphereShellHeight(rp.atmosphere->mieScaleHeight)
+                    ? getAtmosphereShellHeight(*rp.atmosphere)
                     : rp.atmosphere->height;
             }
             if (util::is_set(renderFlags, RenderFlags::ShowCloudMaps) &&
@@ -3180,7 +3230,7 @@ void Renderer::setupPlanetLighting(Body& body, // NOSONAR(cpp:S107,cpp:S3776)
         // that exotic cases with shadows from two ring different ring systems aren't handled.
         for (unsigned int li = 0; li < lights.nLights; li++)
         {
-            RingSystem* rings = lights.ringShadows[li].ringSystem;
+            const RingSystem* rings = lights.ringShadows[li].ringSystem;
             if (!rings)
                 continue;
 
@@ -3301,12 +3351,12 @@ void Renderer::renderPlanet(Body& body,
         if (bodyFeaturesManager->hasLocations(&body) && util::is_set(labelMode, RenderLabels::LocationLabels))
         {
             // Set up location markers for this body
-            using namespace celestia;
-            mountainRep    = MarkerRepresentation(MarkerRepresentation::Triangle, 8.0f, colors.LocationLabel);
-            craterRep      = MarkerRepresentation(MarkerRepresentation::Circle,   8.0f, colors.LocationLabel);
-            observatoryRep = MarkerRepresentation(MarkerRepresentation::Plus,     8.0f, colors.LocationLabel);
-            cityRep        = MarkerRepresentation(MarkerRepresentation::X,        3.0f, colors.LocationLabel);
-            genericLocationRep = MarkerRepresentation(MarkerRepresentation::Square, 8.0f, colors.LocationLabel);
+            using enum MarkerSymbol;
+            mountainRep    =     MarkerRepresentation(Triangle, 8.0f, colors.LocationLabel);
+            craterRep      =     MarkerRepresentation(Circle,   8.0f, colors.LocationLabel);
+            observatoryRep =     MarkerRepresentation(Plus,     8.0f, colors.LocationLabel);
+            cityRep        =     MarkerRepresentation(X,        3.0f, colors.LocationLabel);
+            genericLocationRep = MarkerRepresentation(Square,   8.0f, colors.LocationLabel);
 
             // We need a double precision body-relative position of the
             // observer, otherwise location labels will tend to jitter.
@@ -3760,7 +3810,12 @@ void Renderer::addRenderListEntries(RenderListEntry& rle, // NOSONAR(cpp:S3776)
         (atmosphere->height > 0.0f || atmosphere->cloudTexture != util::TextureHandle::Invalid) &&
         rle.discSizeInPixels > 1)
     {
-        float atmosphereRadius = body.getRadius() + atmosphere->height;
+        float atmosphereHeight = atmosphere->mieScaleHeight > 0.0f
+            ? getAtmosphereShellHeight(*atmosphere)
+            : atmosphere->height;
+        if (showClouds)
+            atmosphereHeight = std::max(atmosphereHeight, atmosphere->cloudHeight);
+        float atmosphereRadius = body.getRadius() + atmosphereHeight;
 
         rle.renderableType = RenderListEntry::RenderableAtmosphere;
         rle.body = &body;
@@ -4345,6 +4400,26 @@ static float calcMaxFOV(float fovY_degrees, float aspectRatio)
 }
 
 
+void Renderer::preparePsfStarBuffers()
+{
+    float scale = static_cast<float>(screenDpi) / 96.0f;
+
+    psfPointBuffer->setPointScale(scale);
+    psfPointBuffer->setPointRadius(starPointRadius);
+    psfPointBuffer->setOptimization(starOptimization);
+    psfGlowBuffer->setPointScale(scale);
+    psfGlowBuffer->setPointRadius(starPointRadius);
+    psfGlowBuffer->setOptimization(starOptimization);
+    m_psfGlowLargeRenderer->setPointScale(scale);
+    m_psfGlowLargeRenderer->setPointRadius(starPointRadius);
+    m_psfGlowLargeRenderer->setOptimization(starOptimization);
+
+    psfPointBuffer->start(PsfStarVertexBuffer::Mode::Point);
+    psfGlowBuffer->start(PsfStarVertexBuffer::Mode::Glow);
+    m_psfGlowLargeRenderer->start();
+}
+
+
 void Renderer::renderPointStars(const StarDatabase& starDB,
                                 float faintestMagNight,
                                 const Observer& observer)
@@ -4412,21 +4487,6 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
 
     if (starStyle == StarStyle::PointSpreadFunction)
     {
-        starRenderer.psf.pointBuffer->setPointScale(scale);
-        starRenderer.psf.pointBuffer->setPointRadius(starPointRadius);
-        starRenderer.psf.pointBuffer->setOptimization(starOptimization);
-        starRenderer.psf.glowBuffer->setPointScale(scale);
-        starRenderer.psf.glowBuffer->setPointRadius(starPointRadius);
-        starRenderer.psf.glowBuffer->setOptimization(starOptimization);
-        m_psfGlowLargeRenderer->setPointScale(scale);
-        m_psfGlowLargeRenderer->setPointRadius(starPointRadius);
-        m_psfGlowLargeRenderer->setOptimization(starOptimization);
-
-        PsfStarVertexBuffer::enable();
-        starRenderer.psf.pointBuffer->start(PsfStarVertexBuffer::Mode::Point);
-        starRenderer.psf.glowBuffer->start(PsfStarVertexBuffer::Mode::Glow);
-        m_psfGlowLargeRenderer->start();
-
         ps.blendFunc = {GL_ONE, GL_ONE};
 
         // Precompute per-frame PSF constants once instead of recomputing
@@ -4448,7 +4508,7 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
                                                 2.5f);
 
         starRenderer.psf.peakRadScale          = exposureFactor * starAtmosphereBrightness * 3.0f
-                                                 / (celestia::numbers::pi_v<float> * rLog * rLog);
+                                                 / (std::numbers::pi_v<float> * rLog * rLog);
         starRenderer.psf.dimGate               = dimGate;
         starRenderer.psf.glowA                 = glowA;
         starRenderer.psf.glowPeakLargeThreshold = glowPeakLargeThreshold;
@@ -4464,7 +4524,6 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     }
     else
     {
-        PointStarVertexBuffer::enable();
         starRenderer.glareVertexBuffer->startSprites();
         if (starStyle == StarStyle::PointStars)
             starRenderer.starVertexBuffer->startBasicPoints();
@@ -4488,13 +4547,11 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
         starRenderer.psf.pointBuffer->finish();
         starRenderer.psf.glowBuffer->finish();
         m_psfGlowLargeRenderer->finish();
-        PsfStarVertexBuffer::disable();
     }
     else
     {
         starRenderer.starVertexBuffer->finish();
         starRenderer.glareVertexBuffer->finish();
-        PointStarVertexBuffer::disable();
     }
 
 #ifndef GL_ES
@@ -4546,11 +4603,10 @@ void Renderer::renderDeepSkyObjects(const Universe& universe,
 
     dsoRenderer.labelThresholdMag = 2.0f * max(1.0f, (faintestMag - 4.0f) * (1.0f - 0.5f * log10(effDistanceToScreen)));
 
-    using namespace celestia;
-    galaxyRep      = MarkerRepresentation(MarkerRepresentation::Triangle, 8.0f, colors.GalaxyLabel);
-    nebulaRep      = MarkerRepresentation(MarkerRepresentation::Square,   8.0f, colors.NebulaLabel);
-    openClusterRep = MarkerRepresentation(MarkerRepresentation::Circle,   8.0f, colors.OpenClusterLabel);
-    globularRep    = MarkerRepresentation(MarkerRepresentation::Circle,   8.0f, colors.GlobularLabel);
+    galaxyRep      = MarkerRepresentation(MarkerSymbol::Triangle, 8.0f, colors.GalaxyLabel);
+    nebulaRep      = MarkerRepresentation(MarkerSymbol::Square,   8.0f, colors.NebulaLabel);
+    openClusterRep = MarkerRepresentation(MarkerSymbol::Circle,   8.0f, colors.OpenClusterLabel);
+    globularRep    = MarkerRepresentation(MarkerSymbol::Circle,   8.0f, colors.GlobularLabel);
 
     dsoDB->findVisibleDSOs(dsoRenderer,
                            obsPos,
@@ -4710,7 +4766,7 @@ Renderer::renderAnnotationMarker(const Annotation &a,
                                  float depth,
                                  const Matrices &m)
 {
-    const celestia::MarkerRepresentation& markerRep = *a.markerRep;
+    const celestia::engine::MarkerRepresentation& markerRep = *a.markerRep;
     float size = a.size > 0.0f ? a.size : markerRep.size();
 
     glVertexAttrib(CelestiaGLProgram::ColorAttributeIndex, a.color);
@@ -4718,7 +4774,7 @@ Renderer::renderAnnotationMarker(const Annotation &a,
     Matrix4f mv = math::translate(*m.modelview, (float)(int)a.position.x(), (float)(int)a.position.y(), depth);
     Matrices mm = { m.projection, &mv };
 
-    if (markerRep.symbol() == celestia::MarkerRepresentation::Crosshair)
+    if (markerRep.symbol() == celestia::engine::MarkerSymbol::Crosshair)
         renderCrosshair(size, realTime, a.color, mm);
     else
         markerRep.render(*this, size, mm);
@@ -4760,7 +4816,7 @@ Renderer::renderAnnotationLabel(const Annotation &a,
 }
 
 // stars and constellations. DSOs
-void Renderer::renderAnnotations(const vector<Annotation>& annotations,
+void Renderer::renderAnnotations(std::span<const Annotation> annotations,
                                  FontStyle fs)
 {
     auto font = getFont(fs);
@@ -4772,16 +4828,29 @@ void Renderer::renderAnnotations(const vector<Annotation>& annotations,
 
     Matrix4f mv = Matrix4f::Identity();
     Matrices m = { &m_orthoProjMatrix, &mv };
+    bool textActive = false;
+    Color textColor;
 
     for (const auto &annotation : annotations)
     {
-        if (annotation.markerRep != nullptr)
+        if (annotation.markerRep)
         {
+            layout.end();
+            textActive = false;
             renderAnnotationMarker(annotation, layout, 0.0f, m);
         }
 
         if (!annotation.labelText.empty())
         {
+            if (!textActive || textColor != annotation.color)
+            {
+                layout.end();
+                glVertexAttrib(CelestiaGLProgram::ColorAttributeIndex, annotation.color);
+                layout.begin(*m.projection, *m.modelview);
+                textColor = annotation.color;
+                textActive = true;
+            }
+
             TextLayout::HorizontalAlignment alignment = TextLayout::HorizontalAlignment::Left;
             float hOffset = 0.0f;
             float vOffset = 0.0f;
@@ -4789,24 +4858,30 @@ void Renderer::renderAnnotations(const vector<Annotation>& annotations,
             getLabelAlignmentInfo(annotation, font.get(), alignment, hOffset, vOffset);
 
             layout.setHorizontalAlignment(alignment);
-            renderAnnotationLabel(annotation, layout, hOffset, vOffset, 0.0f, m);
+            layout.moveAbsolute(std::trunc(annotation.position.x()) + hOffset + PixelOffset,
+                                std::trunc(annotation.position.y()) + vOffset + PixelOffset);
+            layout.render(annotation.labelText);
+            layout.flushLine();
         }
     }
+    layout.end();
 }
 
 
 void
-Renderer::renderBackgroundAnnotations(FontStyle fs)
+Renderer::queueBackgroundAnnotations(FontStyle fs)
 {
-    Renderer::PipelineState ps;
-    ps.blending = true;
-    ps.blendFunc = {GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA};
-    ps.depthTest = true;
-    ps.smoothLines = true;
-    setPipelineState(ps);
+    if (backgroundAnnotations.empty())
+        return;
 
-    renderAnnotations(backgroundAnnotations, fs);
-    backgroundAnnotations.clear();
+    auto lastEnd = backgroundAnnotationBatches.empty()
+        ? std::size_t(0)
+        : backgroundAnnotationBatches.back().end;
+
+    if (lastEnd == backgroundAnnotations.size())
+        return;
+
+    backgroundAnnotationBatches.emplace_back(fs, lastEnd, backgroundAnnotations.size());
 }
 
 
@@ -4826,8 +4901,8 @@ Renderer::renderForegroundAnnotations(FontStyle fs)
 
 
 // solar system objects
-vector<Renderer::Annotation>::iterator
-Renderer::renderSortedAnnotations(vector<Annotation>::iterator iter,
+std::span<const Renderer::Annotation>
+Renderer::renderSortedAnnotations(std::span<const Annotation> annotations,
                                   float nearDist,
                                   float farDist,
                                   FontStyle fs)
@@ -4840,21 +4915,20 @@ Renderer::renderSortedAnnotations(vector<Annotation>::iterator iter,
     ps.smoothLines = true;
     setPipelineState(ps);
 
-    return renderAnnotations(iter, depthSortedAnnotations.end(), nearDist, farDist, fs);
+    return renderAnnotations(annotations, nearDist, farDist, fs);
 }
 
 
 // locations
-vector<Renderer::Annotation>::iterator
-Renderer::renderAnnotations(vector<Annotation>::iterator startIter,
-                            vector<Annotation>::iterator endIter,
+std::span<const Renderer::Annotation>
+Renderer::renderAnnotations(std::span<const Annotation> annotations,
                             float nearDist,
                             float farDist,
                             FontStyle fs)
 {
     auto font = getFont(fs);
     if (font == nullptr)
-        return endIter;
+        return {};
 
     TextLayout layout{ screenDpi };
     layout.setFont(font);
@@ -4867,14 +4941,14 @@ Renderer::renderAnnotations(vector<Annotation>::iterator startIter,
     // projection matrix in order to get the label text position exactly right but need to mimic
     // the depth coordinate generation of a projection.
 
-    vector<Annotation>::iterator iter = startIter;
-    for (; iter != endIter && iter->position.z() > nearDist; ++iter)
+    auto iter = annotations.begin();
+    for (; iter != annotations.end() && iter->position.z() > nearDist; ++iter)
     {
         // Compute normalized device z
         float z = getProjectionMode()->getNormalizedDeviceZ(nearDist, farDist, iter->position.z());
         float ndc_z = std::clamp(z, -1.0f, 1.0f);
 
-        if (iter->markerRep != nullptr)
+        if (iter->markerRep)
         {
             renderAnnotationMarker(*iter, layout, ndc_z, m);
         }
@@ -4892,11 +4966,11 @@ Renderer::renderAnnotations(vector<Annotation>::iterator startIter,
         }
     }
 
-    return iter;
+    return { iter, annotations.end() };
 }
 
 
-void Renderer::markersToAnnotations(const celestia::MarkerList& markers,
+void Renderer::markersToAnnotations(const celestia::engine::MarkerList& markers,
                                     const Observer& observer,
                                     double jd)
 {
@@ -4913,7 +4987,7 @@ void Renderer::markersToAnnotations(const celestia::MarkerList& markers,
         if ((offset.dot(viewVector)) > cosViewConeAngle * distance)
         {
             float symbolSize = 0.0f;
-            if (marker.sizing() == celestia::DistanceBasedSize)
+            if (marker.sizing() == celestia::engine::MarkerSizing::DistanceBasedSize)
             {
                 symbolSize = (float) (marker.representation().size() / distance) / pixelSize;
             }
@@ -4978,7 +5052,13 @@ float Renderer::getStarPointRadius() const
 
 void Renderer::setStarOptimization(float opt)
 {
-    starOptimization = std::clamp(opt, 0.0f, 10.0f);
+    if (std::isnan(opt))
+    {
+        GetLogger()->warn("Ignoring NaN star optimization.\n");
+        return;
+    }
+
+    starOptimization = opt <= 0.0f ? 0.0f : std::clamp(opt, 0.05f, 1.0f);
     markSettingsChanged();
 }
 
@@ -5176,10 +5256,22 @@ void Renderer::setSolarSystemMaxDistance(float t)
     SolarSystemMaxDistance = std::clamp(t, 1.0f, 10.0f);
 }
 
+void
+Renderer::setAtmosphereSegmentCount(unsigned int count) noexcept
+{
+    atmosphereSegmentCount = std::clamp(count, 1u, 16u);
+}
+
 unsigned int
 Renderer::getAtmosphereSegmentCount() const noexcept
 {
     return atmosphereSegmentCount;
+}
+
+void
+Renderer::setCloudSegmentCount(unsigned int count) noexcept
+{
+    cloudSegmentCount = std::clamp(count, 1u, 16u);
 }
 
 unsigned int
@@ -5200,6 +5292,30 @@ Renderer::getAtmosphereShellHeight(float scaleHeight) const noexcept
     return scaleHeight * atmosphereExtinctionFactor;
 }
 
+float
+Renderer::getAtmosphereShellHeight(const Atmosphere& atmosphere) const noexcept
+{
+    return getAtmosphereShellHeight(atmosphere.getLegacyScaleHeight());
+}
+
+void
+Renderer::setSeparateRayleighMieScaleHeights(bool enabled) noexcept
+{
+    separateRayleighMieScaleHeights = enabled;
+}
+
+bool
+Renderer::getSeparateRayleighMieScaleHeights() const noexcept
+{
+    return separateRayleighMieScaleHeights;
+}
+
+bool
+Renderer::getSeparateRayleighMieScaleHeights(const Atmosphere& atmosphere) const noexcept
+{
+    return separateRayleighMieScaleHeights && atmosphere.hasValidScaleHeights();
+}
+
 void Renderer::getViewport(int* x, int* y, int* w, int* h) const
 {
     if (x != nullptr)
@@ -5212,7 +5328,7 @@ void Renderer::getViewport(int* x, int* y, int* w, int* h) const
         *h = m_viewport[3];
 }
 
-void Renderer::getViewport(std::array<int, 4>& viewport) const
+void Renderer::getViewport(std::span<int, 4> viewport) const
 {
     static_assert(sizeof(int) == sizeof(GLint), "int and GLint size mismatch");
     std::copy(std::begin(m_viewport), std::end(m_viewport), std::begin(viewport));
@@ -5224,7 +5340,7 @@ void Renderer::setViewport(int x, int y, int w, int h)
     glViewport(x, y, w, h);
 }
 
-void Renderer::setViewport(const std::array<int, 4>& viewport)
+void Renderer::setViewport(std::span<const int, 4> viewport)
 {
     std::copy(std::begin(viewport), std::end(viewport), std::begin(m_viewport));
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
@@ -5389,7 +5505,7 @@ static void draw_rectangle_solid(const Renderer &renderer,
             r.colors[i].get(vertices[i].color);
     }
 
-    bo->bind().setData(vertices, gl::Buffer::BufferUsage::StreamDraw);
+    bo->bind().setData(std::as_bytes(std::span{vertices}), gl::Buffer::BufferUsage::StreamDraw);
 
     if (!initialized)
     {
@@ -5680,9 +5796,9 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
             cullRadius = radius;
             if (const Atmosphere* atmosphere = bodyFeaturesManager->getAtmosphere(ri.body); atmosphere != nullptr)
             {
-                cullRadius += atmosphere->height;
                 cloudHeight = max(atmosphere->cloudHeight,
-                                  getAtmosphereShellHeight(atmosphere->mieScaleHeight));
+                                  getAtmosphereShellHeight(*atmosphere));
+                cullRadius += max(atmosphere->height, cloudHeight);
             }
             cullRadius = std::max(cullRadius, ringOuterRadius);
             break;
@@ -5810,7 +5926,7 @@ Renderer::selectionToAnnotation(const Selection &sel,
 {
     Vector3d offset = sel.getPosition(jd).offsetFromKm(observer.getPosition());
 
-    static celestia::MarkerRepresentation cursorRep(celestia::MarkerRepresentation::Crosshair);
+    static celestia::engine::MarkerRepresentation cursorRep(celestia::engine::MarkerSymbol::Crosshair);
     if (xfrustum.testSphere(offset, sel.radius()) == math::FrustumAspect::Outside)
         return false;
 
@@ -5916,7 +6032,7 @@ Renderer::buildNearSystemsLists(const Universe &universe,
                           now,
                           lightSourceList,
                           tintSaturation,
-                          starColors.type() == ColorTableType::Enhanced ? nullptr : &tintColors);
+                          &starColors);
 
     // Traverse the frame trees of each nearby solar system and
     // build the list of objects to be rendered.
@@ -6110,7 +6226,6 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
                                    double now)
 {
     // Render everything that wasn't culled.
-    auto annotation = depthSortedAnnotations.begin();
     float intervalSize = 1.0f / static_cast<float>(max(1, nIntervals));
     int i = static_cast<int>(renderList.size()) - 1;
     m_legacyLargeStarRenderer->start();
@@ -6125,8 +6240,8 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
 
         // Set the depth range for this interval--each interval is allocated an
         // equal section of the depth buffer.
-        glDepthRange(1.0f - (interval + 1) * intervalSize,
-                     1.0f - interval * intervalSize);
+        glDepthRange(1.0f - static_cast<float>(interval + 1) * intervalSize,
+                     1.0f - static_cast<float>(interval) * intervalSize);
 
         // Set up a perspective projection using the current interval's near and
         // far clip planes.
@@ -6194,7 +6309,6 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
         ps.depthTest = true;
         setPipelineState(ps);
 
-        PointStarVertexBuffer::enable();
         glareVertexBuffer->startSprites();
         glareVertexBuffer->render();
         glareVertexBuffer->finish();
@@ -6204,17 +6318,15 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
             pointStarVertexBuffer->startSprites();
         pointStarVertexBuffer->render();
         pointStarVertexBuffer->finish();
-        PointStarVertexBuffer::disable();
 
         m_legacyLargeStarRenderer->render();
         m_legacyLargeGlareRenderer->render();
 
-        // Drain any close-star PSF point-sprites added by
-        // Drain any close-star PSF point-sprites added by
+        // Drain PSF points and glows added by
         // renderObjectAsPoint during renderItem above.  Uses the current
         // per-interval (km-scale) projection so Sol-at-1AU stays inside
-        // the depth range.  The buffers were started+finished once in
-        // renderPointStars (m_prog persists), so render() can pick up the
+        // the depth range.  The buffers were prepared before either the
+        // star or solar-system pass, so render() can pick up the
         // current MVP via makeCurrent() without re-calling start().
         if (starStyle == StarStyle::PointSpreadFunction)
         {
@@ -6224,21 +6336,14 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
             psPsf.depthTest = true;
             setPipelineState(psPsf);
 
-            PsfStarVertexBuffer::enable();
             psfPointBuffer->render();
             psfGlowBuffer->render();
             m_psfGlowLargeRenderer->render();
             psfPointBuffer->finish();
             psfGlowBuffer->finish();
             m_psfGlowLargeRenderer->finish();
-            PsfStarVertexBuffer::disable();
         }
 
-        // Render annotations in this interval
-        annotation = renderSortedAnnotations(annotation,
-                                             nearPlaneDistance,
-                                             farPlaneDistance,
-                                             FontStyle::Normal);
         endObjectAnnotations();
     }
 

@@ -17,11 +17,12 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <numbers>
+#include <span>
 #include <utility>
 
 #include <celastro/astro.h>
 #include <celastro/date.h>
-#include <celcompat/numbers.h>
 #include <celmath/mathlib.h>
 #include <celmath/geomutil.h>
 #include <celutil/logger.h>
@@ -149,7 +150,7 @@ protected:
     constexpr PlanetOrbitMixin() noexcept = default;
 
     static std::array<PlanetElements, 8> gPlanetElements;
-    void computePlanetElements(double, const int*, std::size_t) const;
+    void computePlanetElements(double, std::span<const int>) const;
     void computePlanetCoords(int p, double map, double da, double dhl, double dl,
                              double dm, double dml, double dr, double ds,
                              double& eclLong, double& eclLat, double& distance) const;
@@ -158,13 +159,12 @@ protected:
 std::array<PlanetElements, 8> PlanetOrbitMixin::gPlanetElements{ };
 
 void
-PlanetOrbitMixin::computePlanetElements(double t, const int* pList, std::size_t npList) const
+PlanetOrbitMixin::computePlanetElements(double t, std::span<const int> pList) const
 {
     // Parameter t represents the Julian centuries elapsed since 1900.
     // In other words, t = (jd - 2415020.0) / 36525.0
-    for (std::size_t i = 0; i < npList; ++i)
+    for (int planet : pList)
     {
-        int planet = pList[i];
         const StaticElements& ep = gElements[planet];
         PlanetElements& pp = gPlanetElements[planet];
         double aa = ep[1]*t;
@@ -204,7 +204,7 @@ PlanetOrbitMixin::computePlanetCoords(int p, double map, double da, double dhl, 
     eclLat = std::asin(spsi) + dhl;
     eclLong = std::atan(y/clo) + om + math::degToRad(dl);
     if (clo < 0)
-        eclLong += celestia::numbers::pi;
+        eclLong += std::numbers::pi;
     eclLong = math::pfmod(eclLong, TWOPI);
     distance *= astro::KM_PER_AU<double>;
 }
@@ -333,7 +333,7 @@ EclipticToEquatorial(double fEclLat, double fEclLon,
     dec = std::asin((sy*ceps)+(cy*seps*sx));
     RA = std::atan(((sx*ceps)-(ty*seps))/cx);
     if (cx<0)
-        RA += celestia::numbers::pi; // account for atan quad ambiguity
+        RA += std::numbers::pi; // account for atan quad ambiguity
     RA = math::pfmod(RA, TWOPI);
 }
 
@@ -446,7 +446,7 @@ public:
         // Calculate the Julian centuries elapsed since 1900
         t = (jd - 2415020.0)/36525.0;
 
-        computePlanetElements(t, pList.data(), pList.size());
+        computePlanetElements(t, pList);
 
         // Compute necessary planet mean anomalies
         map[0] = math::degToRad(gPlanetElements[0][0] - gPlanetElements[0][2]);
@@ -469,8 +469,8 @@ public:
                             eclLong, eclLat, distance);
 
         // Corrections for internal coordinate system
-        eclLat -= (celestia::numbers::pi/2);
-        eclLong += celestia::numbers::pi;
+        eclLat -= (std::numbers::pi/2);
+        eclLong += std::numbers::pi;
 
         return from_polar(eclLong, eclLat, distance);
     };
@@ -509,7 +509,7 @@ public:
 
         mas = meanAnomalySun(t);
 
-        computePlanetElements(t, pList.data(), pList.size());
+        computePlanetElements(t, pList);
 
         //Compute necessary planet mean anomalies
         map[0] = 0.0;
@@ -539,8 +539,8 @@ public:
                             eclLong, eclLat, distance);
 
         //Corrections for internal coordinate system
-        eclLat -= (celestia::numbers::pi/2);
-        eclLong += celestia::numbers::pi;
+        eclLat -= (std::numbers::pi/2);
+        eclLong += std::numbers::pi;
 
         return from_polar(eclLong, eclLat, distance);
     };
@@ -600,12 +600,12 @@ public:
         dr = 5.43e-06*std::sin(a1)+1.575e-05*std::sin(b1)+1.627e-05*std::sin(c1)+
             3.076e-05*std::cos(d1)+9.27e-06*std::sin(h1);
 
-        eclLong = nu+math::degToRad(ls-ms+dl) + celestia::numbers::pi;
+        eclLong = nu+math::degToRad(ls-ms+dl) + std::numbers::pi;
         eclLong = math::pfmod(eclLong, TWOPI);
         distance = astro::KM_PER_AU<double> * (1.0000002*(1.0-s*std::cos(ea))+dr);
 
         // Correction for internal coordinate system
-        eclLong += celestia::numbers::pi;
+        eclLong += std::numbers::pi;
 
         double seclLong;
         double ceclLong;
@@ -769,8 +769,8 @@ public:
         EpochConvert(jd, astro::J2000, RA, dec, RA, dec);
 
         // Corrections for internal coordinate system
-        dec -= (celestia::numbers::pi/2);
-        RA += celestia::numbers::pi;
+        dec -= (std::numbers::pi/2);
+        RA += std::numbers::pi;
 
         return from_polar(RA, dec, distance);
     };
@@ -811,7 +811,7 @@ public:
 
         mas = meanAnomalySun(t);
 
-        computePlanetElements(t, pList.data(), pList.size());
+        computePlanetElements(t, pList);
 
         //Compute necessary planet mean anomalies
         map[0] = 0.0;
@@ -851,8 +851,8 @@ public:
                             eclLong, eclLat, distance);
 
         //Corrections for internal coordinate system
-        eclLat -= (celestia::numbers::pi/2);
-        eclLong += celestia::numbers::pi;
+        eclLat -= (std::numbers::pi/2);
+        eclLong += std::numbers::pi;
 
         return from_polar(eclLong, eclLat, distance);
     };
@@ -894,7 +894,7 @@ public:
         //Calculate the Julian centuries elapsed since 1900
         t = (jd - 2415020.0)/36525.0;
 
-        computePlanetElements(t, pList.data(), pList.size());
+        computePlanetElements(t, pList);
 
         map = math::degToRad(gPlanetElements[p][0] - gPlanetElements[p][2]);
 
@@ -955,8 +955,8 @@ public:
                             eclLong, eclLat, distance);
 
         //Corrections for internal coordinate system
-        eclLat -= (celestia::numbers::pi/2);
-        eclLong += celestia::numbers::pi;
+        eclLat -= (std::numbers::pi/2);
+        eclLong += std::numbers::pi;
 
         return from_polar(eclLong, eclLat, distance);
     };
@@ -999,7 +999,7 @@ public:
         //Calculate the Julian centuries elapsed since 1900
         t = (jd - 2415020.0)/36525.0;
 
-        computePlanetElements(t, pList.data(), pList.size());
+        computePlanetElements(t, pList);
 
         map = math::degToRad(gPlanetElements[p][0] - gPlanetElements[p][2]);
 
@@ -1082,8 +1082,8 @@ public:
                             eclLong, eclLat, distance);
 
         //Corrections for internal coordinate system
-        eclLat -= (celestia::numbers::pi/2);
-        eclLong += celestia::numbers::pi;
+        eclLat -= (std::numbers::pi/2);
+        eclLong += std::numbers::pi;
 
         return from_polar(eclLong, eclLat, distance);
     };
@@ -1125,7 +1125,7 @@ public:
         //Calculate the Julian centuries elapsed since 1900
         t = (jd - 2415020.0)/36525.0;
 
-        computePlanetElements(t, pList.data(), pList.size());
+        computePlanetElements(t, pList);
 
         map = math::degToRad(gPlanetElements[p][0] - gPlanetElements[p][2]);
 
@@ -1170,8 +1170,8 @@ public:
                             eclLong, eclLat, distance);
 
         //Corrections for internal coordinate system
-        eclLat -= (celestia::numbers::pi/2);
-        eclLong += celestia::numbers::pi;
+        eclLat -= (std::numbers::pi/2);
+        eclLong += std::numbers::pi;
 
         return from_polar(eclLong, eclLat, distance);
     };
@@ -1213,7 +1213,7 @@ public:
         //Calculate the Julian centuries elapsed since 1900
         t = (jd - 2415020.0)/36525.0;
 
-        computePlanetElements(t, pList.data(), pList.size());
+        computePlanetElements(t, pList);
 
         map = math::degToRad(gPlanetElements[p][0] - gPlanetElements[p][2]);
 
@@ -1249,8 +1249,8 @@ public:
                             eclLong, eclLat, distance);
 
         //Corrections for internal coordinate system
-        eclLat -= (celestia::numbers::pi/2);
-        eclLong += celestia::numbers::pi;
+        eclLat -= (std::numbers::pi/2);
+        eclLong += std::numbers::pi;
 
         return from_polar(eclLong, eclLat, distance);
     };
@@ -1286,7 +1286,7 @@ public:
         //Calculate the Julian centuries elapsed since 1900
         t = (jd - 2415020.0)/36525.0;
 
-        computePlanetElements(t, pList.data(), pList.size());
+        computePlanetElements(t, pList);
 
         map = math::degToRad(gPlanetElements[p][0] - gPlanetElements[p][2]);
 
@@ -1294,8 +1294,8 @@ public:
                             eclLong, eclLat, distance);
 
         //Corrections for internal coordinate system
-        eclLat -= celestia::numbers::pi / 2;
-        eclLong += celestia::numbers::pi;
+        eclLat -= std::numbers::pi / 2;
+        eclLong += std::numbers::pi;
 
         return from_polar(eclLong, eclLat, distance);
     };
@@ -1599,8 +1599,8 @@ public:
         L += JupAscendingNode;
 
         // Corrections for internal coordinate system
-        B -= (celestia::numbers::pi/2);
-        L += celestia::numbers::pi;
+        B -= (std::numbers::pi/2);
+        L += std::numbers::pi;
 
         return from_polar(L, B, R);
     };
@@ -1689,8 +1689,8 @@ public:
         L += JupAscendingNode;
 
         // Corrections for internal coordinate system
-        B -= (celestia::numbers::pi/2);
-        L += celestia::numbers::pi;
+        B -= (std::numbers::pi/2);
+        L += std::numbers::pi;
 
         return from_polar(L, B, R);
     };
@@ -1782,8 +1782,8 @@ public:
         L += JupAscendingNode;
 
         //Corrections for internal coordinate system
-        B -= (celestia::numbers::pi/2);
-        L += celestia::numbers::pi;
+        B -= (std::numbers::pi/2);
+        L += std::numbers::pi;
 
         return from_polar(L, B, R);
     };
@@ -1920,8 +1920,8 @@ public:
         L += JupAscendingNode;
 
         //Corrections for internal coordinate system
-        B -= (celestia::numbers::pi/2);
-        L += celestia::numbers::pi;
+        B -= (std::numbers::pi/2);
+        L += std::numbers::pi;
 
         return from_polar(L, B, R);
     };
@@ -2554,7 +2554,7 @@ public:
 
     double getPeriod() const override
     {
-        return 2.0 * celestia::numbers::pi / n;
+        return 2.0 * std::numbers::pi / n;
     }
 
     double getBoundingRadius() const override
@@ -3075,7 +3075,7 @@ private:
 class JPLEphOrbit : public CachingOrbit
 {
 public:
-    JPLEphOrbit(const JPLEphemeris& e,
+    JPLEphOrbit(const std::shared_ptr<const JPLEphemeris>& e,
                 JPLEphemItem _target,
                 JPLEphemItem _center,
                 double _period, double _boundingRadius) :
@@ -3103,7 +3103,7 @@ public:
     {
         // Get the position relative to the Earth (for the Moon) or
         // the solar system barycenter.
-        Eigen::Vector3d pos = ephem.getPlanetPosition(target, tjd);
+        Eigen::Vector3d pos = ephem->getPlanetPosition(target, tjd);
 
         if (center == JPLEphemItem::SSB && target != JPLEphemItem::Moon)
         {
@@ -3115,14 +3115,14 @@ public:
         }
         else
         {
-            Eigen::Vector3d centerPos = ephem.getPlanetPosition(center, tjd);
+            Eigen::Vector3d centerPos = ephem->getPlanetPosition(center, tjd);
             if (target == JPLEphemItem::Moon)
             {
-                pos += ephem.getPlanetPosition(JPLEphemItem::Earth, tjd);
+                pos += ephem->getPlanetPosition(JPLEphemItem::Earth, tjd);
             }
             if (center == JPLEphemItem::Moon)
             {
-                centerPos += ephem.getPlanetPosition(JPLEphemItem::Earth, tjd);
+                centerPos += ephem->getPlanetPosition(JPLEphemItem::Earth, tjd);
             }
 
             // Compute the position of target relative to the center
@@ -3137,7 +3137,7 @@ public:
     }
 
 private:
-    const JPLEphemeris& ephem;
+    std::shared_ptr<const JPLEphemeris> ephem;
     JPLEphemItem target;
     JPLEphemItem center;
     double period;
@@ -3150,38 +3150,45 @@ CreateJPLEphOrbit(JPLEphemItem target,
                   double period,
                   double boundingRadius)
 {
-    static bool jplephInitialized = false;
-    static JPLEphemeris* jpleph = nullptr;
+    static std::weak_ptr<const JPLEphemeris> jpleph;
 
-    // Attempt to load JPL ephemeris data if we haven't tried already
-    if (!jplephInitialized)
+    std::shared_ptr<const JPLEphemeris> eph = jpleph.lock();
+    if (!eph)
     {
-        jplephInitialized = true;
+        static bool isErrored = false;
+        if (isErrored)
+            return nullptr;
+
+        // Attempt to load JPL ephemeris data if we haven't tried already
         std::ifstream in("data/jpleph.dat", std::ios::in | std::ios::binary);
         if (in.good())
-            jpleph = JPLEphemeris::load(in);
-        if (jpleph != nullptr)
+            eph = JPLEphemeris::load(in);
+
+        if (eph)
         {
-            if (unsigned int deNumber = jpleph->getDENumber(); deNumber != 100)
+            jpleph = eph;
+            if (unsigned int deNumber = eph->getDENumber(); deNumber != 100)
                 GetLogger()->debug("Loaded DE{} ephemeris. Valid from JD {:.8f} to JD {:.8f}\n",
-                        deNumber, jpleph->getStartDate(), jpleph->getEndDate());
+                                   deNumber, eph->getStartDate(), eph->getEndDate());
             else
                 GetLogger()->debug("Loaded INPOP ephemeris. Valid from JD {:.8f} to JD {:.8f}\n",
-                                jpleph->getStartDate(), jpleph->getEndDate());
+                                   eph->getStartDate(), eph->getEndDate());
 
             GetLogger()->debug("Ephemeris record size: {} doubles, with {} endianess.\n",
-                               jpleph->getRecordSize(),
-                               jpleph->getByteSwap() ? "non-native" : "native");
+                               eph->getRecordSize(),
+                               eph->getByteSwap() ? "non-native" : "native");
+        }
+        else
+        {
+            isErrored = true;
+            return nullptr;
         }
     }
 
-    if (jpleph == nullptr)
-        return nullptr;
-
-    auto o = std::make_shared<JPLEphOrbit>(*jpleph, target, center, period, boundingRadius);
+    auto o = std::make_shared<JPLEphOrbit>(eph, target, center, period, boundingRadius);
     return std::make_shared<MixedOrbit>(std::move(o),
-                                        jpleph->getStartDate(),
-                                        jpleph->getEndDate(),
+                                        eph->getStartDate(),
+                                        eph->getEndDate(),
                                         astro::SolarMass);
 }
 

@@ -1,6 +1,5 @@
 set(CELUTIL_SOURCES
   align.h
-  array_view.h
   associativearray.cpp
   associativearray.h
   binaryread.h
@@ -31,7 +30,6 @@ set(CELUTIL_SOURCES
   logger.h
   parser.cpp
   parser.h
-  ranges.h
   r128.h
   r128util.cpp
   r128util.h
@@ -51,12 +49,10 @@ set(CELUTIL_SOURCES
   utf8.h
 )
 
-if (USE_ICU)
-  list(APPEND CELUTIL_SOURCES
-    unicode.cpp
-    unicode.h
-  )
-endif()
+list(APPEND CELUTIL_SOURCES
+  unicode.cpp
+  unicode.h
+)
 
 if (WIN32)
   list(APPEND CELUTIL_SOURCES

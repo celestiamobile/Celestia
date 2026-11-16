@@ -25,8 +25,8 @@
 #include <celestia/audiosession.h>
 #include <celestia/configfile.h>
 #include <celestia/hud.h>
-#include <celestia/url.h>
 #include <celestia/celestiacore.h>
+#include <celestia/celestiastate.h>
 #include <celestia/view.h>
 #include <celscript/common/scriptmaps.h>
 #include <celttf/truetypefont.h>
@@ -890,9 +890,14 @@ static int celestia_setlabelcolor(lua_State* l)
     std::string_view key = lua_tostring(l, 2);
     const auto &LabelColorMap = this_celestia(l)->scriptMaps().LabelColorMap;
     if (auto it = LabelColorMap.find(key); it == LabelColorMap.end())
+    {
         GetLogger()->warn("Unknown label style: {}\n", key);
+        return 0;
+    }
     else
+    {
         color = it->second;
+    }
 
     double red     = Celx_SafeGetNumber(l, 3, AllErrors, "setlabelcolor: color values must be numbers");
     double green   = Celx_SafeGetNumber(l, 4, AllErrors, "setlabelcolor: color values must be numbers");
@@ -906,7 +911,7 @@ static int celestia_setlabelcolor(lua_State* l)
         *color = Color((float) red, (float) green, (float) blue, (float) opacity);
     }
 
-    return 1;
+    return 0;
 }
 
 
@@ -948,9 +953,14 @@ static int celestia_setlinecolor(lua_State* l)
     std::string_view key = lua_tostring(l, 2);
     const auto &LineColorMap = this_celestia(l)->scriptMaps().LineColorMap;
     if (auto it = LineColorMap.find(key); it == LineColorMap.end())
+    {
         GetLogger()->warn("Unknown line style: {}\n", key);
+        return 0;
+    }
     else
+    {
         color = it->second;
+    }
 
     double red     = Celx_SafeGetNumber(l, 3, AllErrors, "setlinecolor: color values must be numbers");
     double green   = Celx_SafeGetNumber(l, 4, AllErrors, "setlinecolor: color values must be numbers");
@@ -964,7 +974,7 @@ static int celestia_setlinecolor(lua_State* l)
         *color = Color((float) red, (float) green, (float) blue, (float) opacity);
     }
 
-    return 1;
+    return 0;
 }
 
 
@@ -1190,7 +1200,7 @@ static int celestia_mark(lua_State* l)
 
     if (sel != nullptr)
     {
-        celestia::MarkerRepresentation markerRep(celestia::MarkerRepresentation::Diamond);
+        celestia::engine::MarkerRepresentation markerRep(celestia::engine::MarkerSymbol::Diamond);
         markerRep.setColor(Color(0.0f, 1.0f, 0.0f));
         markerRep.setSize(10.0f);
 
@@ -1772,6 +1782,9 @@ static int celestia_getstarcolor(lua_State* l)
     case ColorTableType::Enhanced:
         lua_pushstring(l, "enhanced");
         break;
+    case ColorTableType::Illuminant_E:
+        lua_pushstring(l, "illuminant_e");
+        break;
     case ColorTableType::Blackbody_D65:
         lua_pushstring(l, "blackbody_d65");
         break;
@@ -1802,14 +1815,16 @@ static int celestia_setstarcolor(lua_State* l)
         return 0;
     }
 
-    if (starColor == "blackbody_d65"sv)
+    if (starColor == "illuminant_e"sv)
+        renderer->setStarColorTable(ColorTableType::Illuminant_E);
+    else if (starColor == "blackbody_d65"sv)
         renderer->setStarColorTable(ColorTableType::Blackbody_D65);
-    else if (starColor == "enhanced"sv)
-        renderer->setStarColorTable(ColorTableType::Enhanced);
     else if (starColor == "sunwhite"sv)
         renderer->setStarColorTable(ColorTableType::SunWhite);
     else if (starColor == "vegawhite"sv)
         renderer->setStarColorTable(ColorTableType::VegaWhite);
+    else if (starColor == "enhanced"sv)
+        renderer->setStarColorTable(ColorTableType::Enhanced);
     else
         Celx_DoError(l, "Invalid starcolor");
 
@@ -1925,7 +1940,7 @@ static int celestia_newposition(lua_State* l)
     Celx_CheckArgs(l, 4, 4, "Expected 3 arguments for celestia:newposition");
     // for error checking only:
     this_celestia(l);
-    R128 components[3];
+    std::array<R128, 3> components;
     for (int i = 0; i < 3; i++)
     {
         if (lua_isnumber(l, i+2))
@@ -1935,7 +1950,16 @@ static int celestia_newposition(lua_State* l)
         }
         else if (lua_isstring(l, i+2))
         {
-            components[i] = util::DecodeFromBase64(lua_tostring(l, i+2));
+            std::string_view src = lua_tostring(l, i+2);
+            if (auto component = util::DecodeFromBase64(src); component.has_value())
+            {
+                components[i] = *component;
+            }
+            else
+            {
+                Celx_DoError(l, "String arguments to celestia:newposition must be decodable as base64");
+                return 0;
+            }
         }
         else
         {
@@ -2278,11 +2302,8 @@ static int celestia_geturl(lua_State* l)
     const celestia::View* view = getViewByObserver(appCore, obs);
     appCore->setActiveView(view);
 
-    CelestiaState appState(appCore);
-    appState.captureState();
-
-    Url url(appState);
-    lua_pushstring(l, url.getAsString().c_str());
+    auto url = CelestiaState::capture(*appCore).createURL();
+    lua_pushlstring(l, url.data(), url.size());
 
     return 1;
 }

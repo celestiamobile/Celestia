@@ -355,12 +355,26 @@ ParseResult parseGotoLocCommand(const AssociativeArray& paramList, const ScriptM
         return std::make_unique<CommandGotoLocation>(t, *pos, rotation);
     }
 
-    const std::string* x = paramList.getString("x");
-    const std::string* y = paramList.getString("y");
-    const std::string* z = paramList.getString("z");
-    double xpos = x == nullptr ? 0.0 : static_cast<double>(DecodeFromBase64(*x));
-    double ypos = y == nullptr ? 0.0 : static_cast<double>(DecodeFromBase64(*y));
-    double zpos = z == nullptr ? 0.0 : static_cast<double>(DecodeFromBase64(*z));
+    double xpos = 0;
+    if (const std::string* x = paramList.getString("x"); x)
+    {
+        if (auto x128 = DecodeFromBase64(*x); x128.has_value())
+            xpos = static_cast<double>(*x128);
+    }
+
+    double ypos = 0;
+    if (const std::string* y = paramList.getString("y"); y)
+    {
+        if (auto y128 = DecodeFromBase64(*y); y128.has_value())
+            ypos = static_cast<double>(*y128);
+    }
+
+    double zpos = 0;
+    if (const std::string* z = paramList.getString("z"); z)
+    {
+        if (auto z128 = DecodeFromBase64(*z); z128.has_value())
+            zpos = static_cast<double>(*z128);
+    }
     auto ow = paramList.getNumber<double>("ow").value_or(0.0);
     auto ox = paramList.getNumber<double>("ox").value_or(0.0);
     auto oy = paramList.getNumber<double>("oy").value_or(0.0);
@@ -532,14 +546,17 @@ ParseResult parseSetPositionCommand(const AssociativeArray& paramList, const Scr
         return std::make_unique<CommandSetPosition>(basePosition.offsetKm(offset));
     }
 
-    const std::string* x = paramList.getString("x");
-    const std::string* y = paramList.getString("y");
-    const std::string* z = paramList.getString("z");
-    return x == nullptr || y == nullptr || z == nullptr
-        ? makeError("Missing x, y, z or base, offset parameters to setposition")
-        : std::make_unique<CommandSetPosition>(UniversalCoord(DecodeFromBase64(*x),
-                                                              DecodeFromBase64(*y),
-                                                              DecodeFromBase64(*z)));
+    if (auto x = paramList.getString("x"), y = paramList.getString("y"), z = paramList.getString("z");
+        x && y && z)
+    {
+        if (auto x128 = DecodeFromBase64(*x), y128 = DecodeFromBase64(*y), z128 = DecodeFromBase64(*z);
+            x128.has_value() && y128.has_value() && z128.has_value())
+        {
+            return std::make_unique<CommandSetPosition>(UniversalCoord(*x128, *y128, *z128));
+        }
+    }
+
+    return makeError("Missing x, y, z or base, offset parameters to setposition");
 }
 
 
@@ -714,36 +731,37 @@ ParseResult parseMarkCommand(const AssociativeArray& paramList, const ScriptMaps
     auto alpha  = paramList.getNumber<float>("alpha").value_or(0.9f);
     Color color(colorv.x(), colorv.y(), colorv.z(), alpha);
 
-    celestia::MarkerRepresentation::Symbol symbol = celestia::MarkerRepresentation::Diamond;
+    auto symbol = celestia::engine::MarkerSymbol::Diamond;
     if (const std::string* symbolString = paramList.getString("symbol"); symbolString != nullptr)
     {
+        using enum celestia::engine::MarkerSymbol;
         if (compareIgnoringCase("diamond"sv, *symbolString) == 0)
-            symbol = celestia::MarkerRepresentation::Diamond;
+            symbol = Diamond;
         else if (compareIgnoringCase("triangle"sv, *symbolString) == 0)
-            symbol = celestia::MarkerRepresentation::Triangle;
+            symbol = Triangle;
         else if (compareIgnoringCase("square"sv, *symbolString) == 0)
-            symbol = celestia::MarkerRepresentation::Square;
+            symbol = Square;
         else if (compareIgnoringCase("filledsquare"sv, *symbolString) == 0)
-            symbol = celestia::MarkerRepresentation::FilledSquare;
+            symbol = FilledSquare;
         else if (compareIgnoringCase("plus"sv, *symbolString) == 0)
-            symbol = celestia::MarkerRepresentation::Plus;
+            symbol = Plus;
         else if (compareIgnoringCase("x"sv, *symbolString) == 0)
-            symbol = celestia::MarkerRepresentation::X;
+            symbol = X;
         else if (compareIgnoringCase("leftarrow"sv, *symbolString) == 0)
-            symbol = celestia::MarkerRepresentation::LeftArrow;
+            symbol = LeftArrow;
         else if (compareIgnoringCase("rightarrow"sv, *symbolString) == 0)
-            symbol = celestia::MarkerRepresentation::RightArrow;
+            symbol = RightArrow;
         else if (compareIgnoringCase("uparrow"sv, *symbolString) == 0)
-            symbol = celestia::MarkerRepresentation::UpArrow;
+            symbol = UpArrow;
         else if (compareIgnoringCase("downarrow"sv, *symbolString) == 0)
-            symbol = celestia::MarkerRepresentation::DownArrow;
+            symbol = DownArrow;
         else if (compareIgnoringCase("circle"sv, *symbolString) == 0)
-            symbol = celestia::MarkerRepresentation::Circle;
+            symbol = Circle;
         else if (compareIgnoringCase("disk"sv, *symbolString) == 0)
-            symbol = celestia::MarkerRepresentation::Disk;
+            symbol = Disk;
     }
 
-    celestia::MarkerRepresentation rep{symbol};
+    celestia::engine::MarkerRepresentation rep{symbol};
 
     rep.setSize(static_cast<float>(size));
     rep.setColor(color);
@@ -1042,7 +1060,7 @@ CommandSequence CommandParser::parse()
 }
 
 
-celestia::util::array_view<std::string> CommandParser::getErrors() const
+std::span<const std::string> CommandParser::getErrors() const
 {
     return errorList;
 }

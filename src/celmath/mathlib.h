@@ -12,10 +12,9 @@
 #include <config.h>
 
 #include <cmath>
+#include <numbers>
 
 #include <Eigen/Core>
-
-#include <celcompat/numbers.h>
 
 namespace celestia::math
 {
@@ -55,7 +54,7 @@ template<> inline void sincos(double angle, double& s, double& c)
 #endif
 
 #if __cplusplus < 202002L
-template<typename T> constexpr T lerp(T t, T a, T b)
+template<typename T> constexpr T lerp(T a, T b, T t)
 {
     return a + t * (b - a);
 }
@@ -65,13 +64,13 @@ using ::std::lerp;
 
 template<typename T> inline constexpr T degToRad(T d)
 {
-    using celestia::numbers::pi_v;
+    using std::numbers::pi_v;
     return d / static_cast<T>(180) * pi_v<T>;
 }
 
 template<typename T> inline constexpr T radToDeg(T r)
 {
-    using celestia::numbers::inv_pi_v;
+    using std::numbers::inv_pi_v;
     return r * static_cast<T>(180) * inv_pi_v<T>;
 }
 
@@ -106,13 +105,13 @@ template<typename T> T pfmod(T x, T y)
 
 template<typename T> inline constexpr T circleArea(T r)
 {
-    using celestia::numbers::pi_v;
+    using std::numbers::pi_v;
     return pi_v<T> * r * r;
 }
 
 template<typename T> inline constexpr T sphereArea(T r)
 {
-    using celestia::numbers::pi_v;
+    using std::numbers::pi_v;
     return static_cast<T>(4) * pi_v<T> * r * r;
 }
 
@@ -231,7 +230,7 @@ template<typename T> bool planeCircleIntersection(const Eigen::Matrix<T, 3, 1>& 
 }
 } // namespace celestia::math
 
-constexpr long double operator ""_deg(long double deg)
+consteval long double operator ""_deg(long double deg)
 {
     return celestia::math::degToRad(deg);
 }

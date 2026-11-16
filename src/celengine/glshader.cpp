@@ -31,8 +31,6 @@ shaderType(GLenum shaderType)
     {
     case GL_VERTEX_SHADER:
         return "vertex"sv;
-    case GL_GEOMETRY_SHADER:
-        return "geometry"sv;
     case GL_FRAGMENT_SHADER:
         return "fragment"sv;
     default:
@@ -85,7 +83,11 @@ GetInfoLog(GLuint obj)
 
 template<typename... Args>
 void
+#if FMT_VERSION < 90000
 writeShaderLog(std::string_view format, Args&&... args)
+#else
+writeShaderLog(fmt::format_string<Args...> format, Args&&... args)
+#endif
 {
     if (g_shaderLogFile == nullptr)
         return;
@@ -314,12 +316,6 @@ GLVertexShader::create(std::string_view source, GLShaderStatus& status)
     return createShader<GLVertexShader>(CreateToken{}, source, status);
 }
 
-GLGeometryShader
-GLGeometryShader::create(std::string_view source, GLShaderStatus& status)
-{
-    return createShader<GLGeometryShader>(CreateToken{}, source, status);
-}
-
 GLFragmentShader
 GLFragmentShader::create(std::string_view source, GLShaderStatus& status)
 {
@@ -373,12 +369,6 @@ GLProgramBuilder::attach(GLVertexShader&& vs)
 }
 
 void
-GLProgramBuilder::attach(GLGeometryShader&& gs)
-{
-    geometryShader = std::move(gs);
-}
-
-void
 GLProgramBuilder::attach(GLFragmentShader&& fs)
 {
     fragmentShader = std::move(fs);
@@ -413,8 +403,6 @@ GLProgramBuilder::link(GLShaderStatus& status)
 
     if (vertexShader.isValid())
         glAttachShader(id, vertexShader.getID());
-    if (geometryShader.isValid())
-        glAttachShader(id, geometryShader.getID());
     if (fragmentShader.isValid())
         glAttachShader(id, fragmentShader.getID());
 

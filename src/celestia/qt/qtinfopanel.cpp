@@ -14,6 +14,7 @@
 #include "qtdateutil.h"
 
 #include <cmath>
+#include <numbers>
 #include <string>
 
 #include <Eigen/Core>
@@ -27,9 +28,10 @@
 
 #include <celastro/astro.h>
 #include <celastro/date.h>
-#include <celcompat/numbers.h>
 #include <celengine/body.h>
 #include <celengine/selection.h>
+#include <celengine/timeline.h>
+#include <celengine/timelinephase.h>
 #include <celengine/universe.h>
 #include <celephem/orbit.h>
 #include <celephem/rotation.h>
@@ -108,7 +110,7 @@ rectToSpherical(const Eigen::Vector3d& v)
     double r = v.norm();
     double theta = std::atan2(v.y(), v.x());
     if (theta < 0)
-        theta = theta + 2.0 * celestia::numbers::pi;
+        theta = theta + 2.0 * std::numbers::pi;
     double phi = std::asin(v.z() / r);
 
     return Eigen::Vector3d(theta, phi, r);
@@ -211,24 +213,22 @@ void InfoPanel::buildSolarSystemBodyPage(Body* body,
 #endif
 
     double orbitalPeriod = 0.0;
-    const celestia::ephem::Orbit* orbit = body->getOrbit(t);
+    const TimelinePhase& phase = body->getTimeline()->findPhase(t);
+    const celestia::ephem::Orbit* orbit = phase.orbit().get();
     if (orbit->isPeriodic())
-        orbitalPeriod = orbit->getPeriod();
+        orbitalPeriod = std::abs(orbit->getPeriod());
 
     // Show rotation information for natural, periodic rotators
-    if (body->getRotationModel(t)->isPeriodic() && !isArtificial)
+    if (auto rotationModel = phase.rotationModel().get(); rotationModel->isPeriodic() && !isArtificial)
     {
-        const celestia::ephem::RotationModel* rotationModel = body->getRotationModel(t);
-        double rotPeriod = rotationModel->getPeriod();
+        double rotPeriod = std::abs(rotationModel->getPeriod());
 
         double dayLength = 0.0;
         bool prograde = false;
         if (orbitalPeriod > 0.0)
         {
-            Eigen::Vector3d axis = Eigen::AngleAxisd(rotationModel->equatorOrientationAtTime(t)
-                                                     * body->getBodyFrame(t)->getOrientation(t)).axis();
-            Eigen::Vector3d orbitNormal = body->getOrbitFrame(t)->getOrientation(t)
-                                        * orbit->positionAtTime(t).cross(orbit->velocityAtTime(t));
+            Eigen::Vector3d axis = phase.bodyFrame()->getOrientation(t).conjugate() * rotationModel->angularVelocityAtTime(t);
+            Eigen::Vector3d orbitNormal = phase.orbitFrame()->getOrientation(t).conjugate() * (orbit->positionAtTime(t).cross(orbit->velocityAtTime(t)));
             prograde = axis.dot(orbitNormal) >= 0;
             double siderealDaysPerYear = orbitalPeriod / rotPeriod;
             double solarDaysPerYear = prograde ? siderealDaysPerYear - 1.0 : siderealDaysPerYear + 1.0;

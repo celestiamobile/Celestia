@@ -40,7 +40,7 @@ jobs:
     - name: Update vcpkg
       shell: pwsh
       run: |
-        $vcpkgCommit = 'e90cc0982b7cfae62447f1f3bed1fbca0bc8f6be'
+        $vcpkgCommit = '414b5330a184ea5fbc6ca29f7960b189f6b0392f'
         pushd "$env:VCPKG_INSTALLATION_ROOT"
         git fetch origin $vcpkgCommit
         git reset --hard $vcpkgCommit
@@ -116,12 +116,10 @@ jobs:
             -DENABLE_TOOLS=ON     `
             -DENABLE_TESTS=ON     `
             -DENABLE_SDL=OFF      `
-            -DENABLE_WIN=ON       `
             -DENABLE_QT6=ON       `
             -DENABLE_FFMPEG=ON    `
             -DENABLE_MINIAUDIO=ON `
             -DENABLE_LTO=ON       `
-            -DUSE_ICU=ON          `
             -DUSE_WIN_ICU=ON
 
     - name: Build
@@ -132,22 +130,6 @@ jobs:
       shell: pwsh
       working-directory: ${{github.workspace}}/build
       run: ctest -C ${{env.BUILD_TYPE}}
-
-    - name: Install Windows
-      shell: pwsh
-      run: |
-        cmake --install ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --component core
-        cmake --install ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --component wingui
-        Rename-Item -Path "install" -NewName "install-wingui"
-
-    - name: Upload Windows GUI
-      uses: actions/upload-artifact@v7
-      if: success()
-      with:
-        name: celestia-windows-${{matrix.platform}}-wingui
-        if-no-files-found: error
-        path: |
-          ${{github.workspace}}/install-wingui/
 
     - name: Install Qt6
       shell: pwsh
@@ -191,20 +173,27 @@ jobs:
           avif: ON
           gles: ON
           minaudio: ON
-          icu: ON
           qt6: OFF
         - os: ubuntu-24.04
           avif: ON
           gles: ON
           minaudio: ON
-          icu: ON
           qt6: ON
           analysis_artifacts: 1
+        - os: ubuntu-26.04
+          avif: ON
+          gles: ON
+          minaudio: ON
+          qt6: ON
         - os: ubuntu-24.04-arm
           avif: ON
           gles: ON
           minaudio: ON
-          icu: ON
+          qt6: ON
+        - os: ubuntu-26.04-arm
+          avif: ON
+          gles: ON
+          minaudio: ON
           qt6: ON
 
     runs-on: ${{matrix.config.os}}
@@ -255,8 +244,7 @@ jobs:
               -DENABLE_QT6=${{matrix.config.qt6}}            \
               -DENABLE_FFMPEG=ON                             \
               -DENABLE_LIBAVIF=${{matrix.config.avif}}       \
-              -DENABLE_MINIAUDIO=${{matrix.config.minaudio}} \
-              -DUSE_ICU=${{matrix.config.icu}}
+              -DENABLE_MINIAUDIO=${{matrix.config.minaudio}}
 
     - name: Build
       working-directory: ${{github.workspace}}/build
@@ -305,7 +293,8 @@ jobs:
                      libepoxy \
                      libavif \
                      qt@6 \
-                     sdl2
+                     sdl2 \
+                     icu4c
 
     - name: 'Checkout source code'
       uses: actions/checkout@v7
@@ -314,18 +303,18 @@ jobs:
 
     - name: 'Configure CMake'
       run: |
-        cmake -B ${{github.workspace}}/build \
-              -G Ninja                       \
-              -DENABLE_GLES=OFF              \
-              -DENABLE_SPICE=OFF             \
-              -DENABLE_TOOLS=OFF             \
-              -DENABLE_TESTS=ON              \
-              -DENABLE_SDL=ON                \
-              -DENABLE_QT6=ON                \
-              -DENABLE_FFMPEG=ON             \
-              -DENABLE_LIBAVIF=ON            \
-              -DENABLE_MINIAUDIO=ON          \
-              -DUSE_ICU=OFF
+        cmake -B ${{github.workspace}}/build               \
+              -G Ninja                                     \
+              -DCMAKE_PREFIX_PATH="$(brew --prefix icu4c)" \
+              -DENABLE_GLES=OFF                            \
+              -DENABLE_SPICE=OFF                           \
+              -DENABLE_TOOLS=OFF                           \
+              -DENABLE_TESTS=ON                            \
+              -DENABLE_SDL=ON                              \
+              -DENABLE_QT6=ON                              \
+              -DENABLE_FFMPEG=ON                           \
+              -DENABLE_LIBAVIF=ON                          \
+              -DENABLE_MINIAUDIO=ON
 
     - name: Build
       working-directory: ${{github.workspace}}/build
@@ -389,8 +378,7 @@ jobs:
               -DENABLE_SDL=ON           \
               -DENABLE_FFMPEG=OFF       \
               -DENABLE_LIBAVIF=OFF      \
-              -DENABLE_MINIAUDIO=ON     \
-              -DUSE_ICU=OFF # tests fail on freebsd
+              -DENABLE_MINIAUDIO=ON
 
     - name: Build
       shell: freebsd {0}

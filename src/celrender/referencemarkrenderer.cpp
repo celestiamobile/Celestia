@@ -12,9 +12,10 @@
 
 #include "referencemarkrenderer.h"
 
+#include <numbers>
+
 #include <Eigen/Core>
 
-#include <celcompat/numbers.h>
 #include <celengine/glsupport.h>
 #include <celengine/render.h>
 #include <celengine/shadermanager.h>
@@ -50,7 +51,7 @@ getArrowVertices()
     {
         float s;
         float c;
-        math::sincos((static_cast<float>(i) * 2.0f * celestia::numbers::pi_v<float>) / arrowSections, s, c);
+        math::sincos((static_cast<float>(i) * 2.0f * std::numbers::pi_v<float>) / arrowSections, s, c);
 
         vertices.emplace_back(shaftRadius * s, shaftRadius * c, 0.0f);
         vertices.emplace_back(shaftRadius * s, shaftRadius * c, shaftLength);
@@ -143,13 +144,13 @@ ArrowRenderer::ArrowRenderer(const Renderer& renderer) :
     auto vertices = getArrowVertices();
     auto indices = getArrowIndices();
 
-    auto m_buffer = gl::Buffer::create(gl::Buffer::TargetHint::Array, vertices);
+    auto m_buffer = gl::Buffer::create(gl::Buffer::TargetHint::Array, std::as_bytes(std::span{vertices}));
 
     m_vo.addVertexBuffer(m_buffer,
                          CelestiaGLProgram::VertexCoordAttributeIndex,
                          3,
                          gl::VertexObject::DataType::Float);
-    auto indexBuffer = gl::Buffer::create(gl::Buffer::TargetHint::ElementArray, indices);
+    auto indexBuffer = gl::Buffer::create(gl::Buffer::TargetHint::ElementArray, std::as_bytes(std::span{indices}));
     m_vo.setCount(static_cast<int>(indices.size()));
     m_vo.setIndexBuffer(indexBuffer, 0, gl::VertexObject::IndexType::UnsignedShort);
 
@@ -167,7 +168,7 @@ PlanetGridRenderer::PlanetGridRenderer(const Renderer& renderer) :
     for (unsigned int i = 0; i <= circleSubdivisions + 1; i++)
     {
         float s, c;
-        math::sincos((2.0f * celestia::numbers::pi_v<float>) * static_cast<float>(i) / circleSubdivisions, s, c);
+        math::sincos((2.0f * std::numbers::pi_v<float>) * static_cast<float>(i) / circleSubdivisions, s, c);
         Eigen::Vector3f latitudePoint(c, 0.0f, s);
         Eigen::Vector3f longitudePoint(c, s, 0.0f);
         m_latitudeRenderer.addVertex(latitudePoint);

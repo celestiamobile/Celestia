@@ -12,11 +12,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 #include <Eigen/Geometry>
 
 #include <celastro/astro.h>
-#include <celcompat/numbers.h>
 #include <celengine/body.h>
 #include <celengine/glsupport.h>
 #include <celengine/observer.h>
@@ -47,7 +47,7 @@ constexpr float CometTailAttenDistSol = astro::AUtoKilometers(5.0f);
 CometRenderer::CometRenderer(Renderer &renderer) :
     m_renderer(renderer),
     m_vertices(std::make_unique<CometTailVertex[]>(MaxVertices)),
-    m_indices(std::make_unique<ushort[]>(MaxIndices))
+    m_indices(std::make_unique<GLushort[]>(MaxIndices))
 {
 }
 
@@ -66,8 +66,12 @@ CometRenderer::initGL()
     m_brightnessLoc = m_prog->attribIndex("in_Brightness");
 
     m_vo = gl::VertexObject(gl::VertexObject::Primitive::TriangleStrip);
-    m_bo = gl::Buffer::create(gl::Buffer::TargetHint::Array);
-    m_ibo = gl::Buffer::create(gl::Buffer::TargetHint::ElementArray);
+    m_bo = gl::Buffer::create(gl::Buffer::TargetHint::Array,
+                              static_cast<GLsizeiptr>(sizeof(CometTailVertex) * MaxVertices),
+                              gl::Buffer::BufferUsage::StreamDraw);
+    m_ibo = gl::Buffer::create(gl::Buffer::TargetHint::ElementArray,
+                               static_cast<GLsizeiptr>(sizeof(GLushort) * MaxIndices),
+                               gl::Buffer::BufferUsage::StreamDraw);
 
     m_vo
         .addVertexBuffer(
@@ -214,7 +218,7 @@ CometRenderer::render(const Body &body,
         float radius = static_cast<float>(i) / static_cast<float>(nTailPoints) * dustTailRadius;
         for (int j = 0; j < nTailSlices; j++)
         {
-            float theta = 2.0f * numbers::pi_v<float> * static_cast<float>(j) / static_cast<float>(nTailSlices);
+            float theta = 2.0f * std::numbers::pi_v<float> * static_cast<float>(j) / static_cast<float>(nTailSlices);
             float s, c;
             math::sincos(theta, s, c);
             CometTailVertex& vtx = m_vertices[i * nTailSlices + j];
@@ -246,13 +250,8 @@ CometRenderer::render(const Body &body,
     m_prog->vec3Param("viewDir") = pos.normalized();
     m_prog->floatParam("fadeFactor") = fadeFactor;
 
-    m_bo->invalidateData().setData(
-        util::array_view(m_vertices.get(), MaxVertices),
-        gl::Buffer::BufferUsage::StreamDraw);
-
-    m_ibo->invalidateData().setData(
-        util::array_view(m_indices.get(), MaxIndices),
-        gl::Buffer::BufferUsage::StreamDraw);
+    m_bo->invalidateData().setSubData(0, std::as_bytes(std::span(m_vertices.get(), MaxVertices)));
+    m_ibo->invalidateData().setSubData(0, std::as_bytes(std::span(m_indices.get(), MaxIndices)));
 
     glDisable(GL_CULL_FACE);
     int count = IndexListCapacity(nTailSlices, nTailPoints);

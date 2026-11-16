@@ -11,6 +11,7 @@
 
 #include <config.h>
 #include <cmath>
+#include <concepts>
 #include <fstream>
 #include <type_traits>
 
@@ -41,7 +42,8 @@ applyBoolean(bool& target, const AssociativeArray& hash, std::string_view key)
         target = *b;
 }
 
-template<typename T, std::enable_if_t<std::is_arithmetic_v<T>, int> = 0>
+template<typename T>
+    requires std::integral<T> || std::floating_point<T>
 void
 applyNumber(T& target, const AssociativeArray& hash, std::string_view key)
 {
@@ -134,11 +136,11 @@ applyPathArray(std::vector<std::filesystem::path>& target, const AssociativeArra
                 break;
             }
 
-            target.emplace_back(celestia::util::PathExp(std::filesystem::u8path(*itemStr)));
+            target.emplace_back(util::PathExp(util::U8Path(*itemStr)));
         }
     }
     else if (auto str = value->getString(); str != nullptr)
-        target.emplace_back(celestia::util::PathExp(std::filesystem::u8path(*str)));
+        target.emplace_back(util::PathExp(util::U8Path(*str)));
     else
         GetLogger()->error("{} must be a string or an array of strings.\n", key);
 }
@@ -209,8 +211,8 @@ applyRenderDetails(CelestiaConfig::RenderDetails& renderDetails, const Associati
     applyNumber(renderDetails.labelConstellationsFadeStartDist, hash, "LabelConstellationsFadeStartDist"sv);
     applyNumber(renderDetails.labelConstellationsFadeEndDist, hash, "LabelConstellationsFadeEndDist"sv);
 
-    applyNumber(renderDetails.shadowTextureSize, hash, "ShadowTextureSize"sv);
-    applyNumber(renderDetails.eclipseTextureSize, hash, "EclipseTextureSize"sv);
+    applyNumber(renderDetails.textures.shadowSize, hash, "ShadowTextureSize"sv);
+    applyNumber(renderDetails.textures.eclipseSize, hash, "EclipseTextureSize"sv);
     applyNumber(renderDetails.orbitPathSamplePoints, hash, "OrbitPathSamplePoints"sv);
     applyNumber(renderDetails.atmosphere.segmentCount, hash, "AtmosphereSegmentCount"sv);
     renderDetails.atmosphere.segmentCount = std::clamp(renderDetails.atmosphere.segmentCount, 1u, 16u);
@@ -223,7 +225,10 @@ applyRenderDetails(CelestiaConfig::RenderDetails& renderDetails, const Associati
         GetLogger()->error("AtmosphereExtinctionThreshold must be between 0 and 1.\n");
         renderDetails.atmosphere.extinctionThreshold = 0.000125f;
     }
+    applyBoolean(renderDetails.atmosphere.separateRayleighMieScaleHeights, hash, "SeparateRayleighMieScaleHeights"sv);
     applyNumber(renderDetails.aaSamples, hash, "AntialiasingSamples"sv);
+    applyNumber(renderDetails.textures.anisotropy, hash, "TextureAnisotropy"sv);
+    renderDetails.textures.anisotropy = std::max(renderDetails.textures.anisotropy, 1);
     applyNumber(renderDetails.SolarSystemMaxDistance, hash, "SolarSystemMaxDistance"sv);
     renderDetails.SolarSystemMaxDistance = std::clamp(renderDetails.SolarSystemMaxDistance, 1.0f, 10.0f);
     applyNumber(renderDetails.ShadowMapSize, hash, "ShadowMapSize"sv);

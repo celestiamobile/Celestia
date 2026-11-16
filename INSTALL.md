@@ -58,7 +58,7 @@ Just download the GPG public key again, check the fingerprint and expiration dat
 ### On Ubuntu 22.04/24.04/26.04 and derived systems:
 
 ```
-curl https://download.opensuse.org/repositories/home:/munix9:/celestia:/1.7/xUbuntu_${VERSION}/Release.key | sudo apt-key add -
+curl https://download.opensuse.org/repositories/home:/munix9:/celestia:/1.7/xUbuntu_${VERSION}/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/celestia-obs.gpg > /dev/null
 echo "deb https://download.opensuse.org/repositories/home:/munix9:/celestia:/1.7/xUbuntu_${VERSION}/ ./" | sudo tee /etc/apt/sources.list.d/celestia-obs.list
 sudo apt update && sudo apt install celestia
 ```
@@ -73,7 +73,7 @@ sudo zypper refresh
 sudo zypper install celestia
 ```
 
-Where VERSION is 15.6, 16.0, 16.1 or openSUSE_Tumbleweed.
+Where VERSION is 16.0, 16.1 or openSUSE_Tumbleweed.
 
 See also the download package sites on OBS for [celestia](https://software.opensuse.org/download.html?project=home:munix9:celestia:1.7&package=celestia) and [celestia-data](https://software.opensuse.org/download.html?project=home:munix9:celestia:1.7&package=celestia-data).
 
@@ -116,8 +116,9 @@ When building with Qt6 interface (see below), you need a compiler with full
 support for C++ filesystem library, e.g. GCC 8 or Clang 7.
 
 Then you need to have the following devel components installed before Celestia
-will build: OpenGL, libboost, libepoxy, fmtlib, Eigen3, freetype, libjpeg, and
-libpng. Optional packages are gettext, Qt6, sdl2, ffmpeg, libavif, glu.
+will build: OpenGL, libboost, libepoxy, fmtlib, Eigen3, freetype, libjpeg,
+libpng, and icu. Optional packages are gettext, Qt6, sdl2, ffmpeg, libavif,
+glu.
 
 Earlier compilers may not have support for the C++17 float charconv functions.
 On these systems, you will also need to install the fast_float library.
@@ -190,6 +191,12 @@ Use vcpkg to install the following packages:
 * libpng
 * luajit
 
+Front ends (depending on whether you want to use the Qt6 front-end or the SDL
+front-end, you only need one of these):
+
+* qtbase\[windeployqt\]
+* sdl2
+
 Optional packages:
 
 * cspice
@@ -206,9 +213,7 @@ In Visual Studio Code, create the workspace settings file at
 {
   "cmake.configureSettings": {
     "CMAKE_TOOLCHAIN_FILE": "<path_to_vcpkg>/scripts/buildsystems/vcpkg.cmake",
-    "ENABLE_QT6": false,
-    "ENABLE_WIN": true,
-    "USE_ICU": true,
+    "ENABLE_QT6": true,
     "USE_WIN_ICU": true
   }
 }
@@ -217,17 +222,15 @@ In Visual Studio Code, create the workspace settings file at
 Replace the `<path_to_vcpkg>` in the `CMAKE_TOOLCHAIN_FILE` variable with the
 path to your installation of vcpkg.
 
-If you want to build the Qt6 front-end instead of the Windows front-end, you
-have the choice of installing the pre-compiled libraries from the Qt installer
-or building them yourself by installing from vcpkg. To build the front-end,
-set `ENABLE_QT6` to `true` and `ENABLE_WIN` to `false`. If you have installed
-the pre-compiled Qt libraries from the Qt installer, you need to add the
-`Qt6_DIR` key to the `cmake.configureSettings` section to
+If you want to use the pre-compiled Qt libraries from the Qt installer, you
+need to add the `Qt6_DIR` key to the `cmake.configureSettings` section to
 `<path_to_qt>/msvc2022_64/lib/cmake/Qt6`.
 
+If you want to build the SDL front-end instead of the Qt6 front-end, you can
+replace the `ENABLE_QT6` key with `ENABLE_SDL`.
+
 On versions of Windows older than Windows 10 1903, you will need to set
-`USE_WIN_ICU` to `false`. You will then need to either switch off ICU support
-by setting `USE_ICU` to `false`, or install it via vcpkg.
+`USE_WIN_ICU` to `false`. You will then need to install it via vcpkg.
 
 Optional features (see below) can be enabled by adding additional keys to
 the `cmake.configureSettings` section. These will also require installing the
@@ -289,7 +292,7 @@ Configure and build:
 ```
 mkdir build
 cd build
-cmake .. -G"MSYS Makefiles" -DENABLE_WIN=OFF
+cmake .. -G"MSYS Makefiles"
 mingw32-make.exe -jN
 ```
 
@@ -305,7 +308,7 @@ pacman -S mingw-w64-x86_64-lld mingw-w64-x86_64-lldb
 Follow by:
 
 ```
-cmake .. -G "MSYS Makefiles" -DENABLE_WIN=OFF -DCMAKE_CXX_FLAGS='-fuse-ld=lld' -DCMAKE_BUILD_TYPE=Debug
+cmake .. -G "MSYS Makefiles" -DCMAKE_CXX_FLAGS='-fuse-ld=lld' -DCMAKE_BUILD_TYPE=Debug
 ```
 
 Then do `mingw32-make.exe`.
@@ -326,7 +329,7 @@ Install Homebrew
 Install required packages:
 
 ```
-brew install pkg-config cmake fast_float fmt gettext gperf libepoxy libpng lua qt@6 jpeg eigen freetype boost
+brew install pkg-config cmake fast_float fmt gettext gperf libepoxy libpng lua qt@6 jpeg eigen freetype boost icu4c
 ```
 
 Install optional packages:
@@ -342,7 +345,7 @@ Configure and build:
 ```
 mkdir build
 cd build
-cmake ..
+cmake .. -DCMAKE_PREFIX_PATH="$(brew --prefix icu4c)"
 make -jN
 ```
 
@@ -362,31 +365,28 @@ the following option to cmake: `-DCMAKE_INSTALL_PREFIX=/another/path`.
 
 List of supported parameters (passed as `-DPARAMETER=VALUE`):
 
- Parameter             | TYPE | Default   | Description
------------------------|------|-----------|--------------------------------------
-| CMAKE_INSTALL_PREFIX | path | \*        | Prefix where to install Celestia
-| CMAKE_PREFIX_PATH    | path |           | Additional path to look for libraries
-| LEGACY_OPENGL_LIBS   | bool | \*\*OFF   | Use OpenGL libraries not GLvnd
-| ENABLE_CELX          | bool | ON        | Enable Lua scripting support
-| ENABLE_SPICE         | bool | OFF       | Enable NAIF kernels support
-| ENABLE_NLS           | bool | ON        | Enable interface translation
-| ENABLE_QT6           | bool | OFF       | Build Qt6 frontend
-| ENABLE_SDL           | bool | OFF       | Build SDL frontend
-| ENABLE_WIN           | bool | \*\*\*OFF | Build Windows native frontend
-| ENABLE_FFMPEG        | bool | OFF       | Support video capture using ffmpeg
-| ENABLE_LIBAVIF       | bool | OFF       | Support AVIF texture using libavif
-| ENABLE_MINIAUDIO     | bool | OFF       | Support audio playback using miniaudio
-| ENABLE_TOOLS         | bool | OFF       | Build tools for Celestia data files
-| ENABLE_GLES          | bool | OFF       | Use OpenGL ES 3.0 in rendering code
-| USE_QT6              | bool | OFF       | Use Qt6 in Qt frontend
-| USE_ICU              | bool | OFF       | Use ICU for UTF8 decoding for text rendering
-| USE_MESHOPTIMIZER    | bool | OFF       | Use meshoptimizer when loading models
+ Parameter             | TYPE | Default | Description
+-----------------------|------|---------|--------------------------------------
+| CMAKE_INSTALL_PREFIX | path | \*      | Prefix where to install Celestia
+| CMAKE_PREFIX_PATH    | path |         | Additional path to look for libraries
+| LEGACY_OPENGL_LIBS   | bool | \*\*OFF | Use OpenGL libraries not GLvnd
+| ENABLE_CELX          | bool | ON      | Enable Lua scripting support
+| ENABLE_SPICE         | bool | OFF     | Enable NAIF kernels support
+| ENABLE_NLS           | bool | ON      | Enable interface translation
+| ENABLE_QT6           | bool | OFF     | Build Qt6 frontend
+| ENABLE_SDL           | bool | OFF     | Build SDL frontend
+| ENABLE_FFMPEG        | bool | OFF     | Support video capture using ffmpeg
+| ENABLE_LIBAVIF       | bool | OFF     | Support AVIF texture using libavif
+| ENABLE_MINIAUDIO     | bool | OFF     | Support audio playback using miniaudio
+| ENABLE_TOOLS         | bool | OFF     | Build tools for Celestia data files
+| ENABLE_GLES          | bool | OFF     | Use OpenGL ES 3.0 in rendering code
+| USE_QT6              | bool | OFF     | Use Qt6 in Qt frontend
+| USE_MESHOPTIMIZER    | bool | OFF     | Use meshoptimizer when loading models
 
 Notes:
  \* /usr/local on Unix-like systems, c:\Program Files or c:\Program Files (x86)
    on Windows depending on OS type (32 or 64 bit) and build configuration.
  \*\* Ignored on Windows systems.
- \*\*\* Ignored on Unix-like systems.
 
 Parameters of type "bool" accept ON or OFF value. Parameters of type "path"
 accept any directory.

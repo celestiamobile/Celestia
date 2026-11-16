@@ -19,7 +19,6 @@
 
 #include <boost/container/static_vector.hpp>
 
-#include <celcompat/numbers.h>
 #include <celmath/geomutil.h>
 #include <celmath/mathlib.h>
 #include <celmodel/material.h>
@@ -264,7 +263,10 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
             // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
             // ... but don't show atmospheres when there are no light sources.
             if (atmosphere->mieScaleHeight > 0.0f && shadprop.nLights > 0)
+            {
                 shadprop.texUsage |= TexUsage::Scattering;
+                shadprop.separateRayleighMieScaleHeights = renderer->getSeparateRayleighMieScaleHeights(*atmosphere);
+            }
         }
 
         if (util::is_set(renderFlags, RenderFlags::ShowCloudMaps) &&
@@ -354,7 +356,7 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
         {
             float extinctionThreshold = renderer->getAtmosphereExtinctionThreshold();
             float atmosphereRadius = radius +
-                                     renderer->getAtmosphereShellHeight(atmosphere->mieScaleHeight);
+                                     renderer->getAtmosphereShellHeight(*atmosphere);
             prog->setAtmosphereParameters(*atmosphere, radius, radius, atmosphereRadius,
                                           renderer->getAtmosphereSegmentCount(),
                                           extinctionThreshold);
@@ -556,14 +558,18 @@ void renderClouds_GLSL(const RenderInfo& ri,
                        float texOffset,
                        const Eigen::Vector3f& semiAxes,
                        RenderFlags renderFlags,
+                       bool insideCloudLayer,
                        const Eigen::Quaternionf& planetOrientation,
                        const math::Frustum& frustum,
                        const Matrices &m,
                        Renderer* renderer,
                        LODSphereMesh* lodSphere)
 {
-    float radius = semiAxes.maxCoeff();
-    float cloudRadius = radius + (atmosphere != nullptr ? atmosphere->cloudHeight : 0.0f);
+    const float radius = semiAxes.maxCoeff();
+    const float cloudRadius = radius + (atmosphere != nullptr ? atmosphere->cloudHeight : 0.0f);
+    const float atmosphereRadius = atmosphere != nullptr
+        ? radius + renderer->getAtmosphereShellHeight(*atmosphere)
+        : radius;
 
     boost::container::static_vector<Texture*, LODSphereMesh::MAX_SPHERE_MESH_TEXTURES> textures;
 
@@ -587,12 +593,19 @@ void renderClouds_GLSL(const RenderInfo& ri,
             shadprop.texUsage |= TexUsage::CompressedNormalTexture;
     }
 
-    if (atmosphere != nullptr && util::is_set(renderFlags, RenderFlags::ShowAtmospheres))
+    // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
+    // ... but don't show atmospheres when there are no light sources.
+    // A high cloud layer viewed from outside has no atmosphere in front of it.
+    // Keep scattering when inside the cloud layer: foreground air still contributes.
+    // Use the same finite shell as the atmosphere pass, including both scale heights.
+    if (atmosphere != nullptr &&
+        util::is_set(renderFlags, RenderFlags::ShowAtmospheres) &&
+        atmosphere->mieScaleHeight > 0.0f &&
+        shadprop.nLights > 0 &&
+        (cloudRadius < atmosphereRadius || insideCloudLayer))
     {
-        // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
-        // ... but don't show atmospheres when there are no light sources.
-        if (atmosphere->mieScaleHeight > 0.0f && shadprop.nLights > 0)
-            shadprop.texUsage |= TexUsage::Scattering;
+        shadprop.texUsage |= TexUsage::Scattering;
+        shadprop.separateRayleighMieScaleHeights = renderer->getSeparateRayleighMieScaleHeights(*atmosphere);
     }
 
     setEclipseShadowProperties(ls, shadprop);
@@ -626,8 +639,6 @@ void renderClouds_GLSL(const RenderInfo& ri,
         if (shadprop.hasScattering())
         {
             float extinctionThreshold = renderer->getAtmosphereExtinctionThreshold();
-            float atmosphereRadius = radius +
-                                     renderer->getAtmosphereShellHeight(atmosphere->mieScaleHeight);
             prog->setAtmosphereParameters(*atmosphere, radius, cloudRadius, atmosphereRadius,
                                           renderer->getCloudSegmentCount(),
                                           extinctionThreshold);

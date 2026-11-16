@@ -12,8 +12,9 @@
 
 #include "dsooctree.h"
 
+#include <numbers>
+
 #include <celastro/astro.h>
-#include <celcompat/numbers.h>
 #include <celmath/mathlib.h>
 
 namespace celestia::engine
@@ -23,7 +24,7 @@ namespace celestia::engine
 
 DSOOctreeVisibleObjectsProcessor::DSOOctreeVisibleObjectsProcessor(DSOHandler* dsoHandler, // cppcheck-suppress uninitMemberVar
                                                                    const DSOOctree::PointType& obsPosition,
-                                                                   util::array_view<PlaneType> frustumPlanes,
+                                                                   std::span<const PlaneType, 5> frustumPlanes,
                                                                    float limitingFactor) :
     m_dsoHandler(dsoHandler),
     m_obsPosition(obsPosition),
@@ -49,10 +50,10 @@ DSOOctreeVisibleObjectsProcessor::checkNode(const DSOOctree::PointType& center,
 
     // Compute the distance to node; this is equal to the distance to
     // the cellCenterPos of the node minus the boundingRadius of the node, scale * SQRT3.
-    double minDistance = (m_obsPosition - center).norm() - size * numbers::sqrt3;
+    double minDistance = (m_obsPosition - center).norm() - size * std::numbers::sqrt3;
 
     // Check whether the brightest object in this node is bright enough to render
-    auto distanceModulus = static_cast<float>(astro::distanceModulus(minDistance));
+    float distanceModulus = astro::distanceModulus(minDistance);
     if (minDistance > 0.0 && (factor + distanceModulus) > m_limitingFactor)
         return false;
 
@@ -70,7 +71,7 @@ DSOOctreeVisibleObjectsProcessor::process(const std::unique_ptr<DeepSkyObject>& 
         return;
 
     double distance = (m_obsPosition - obj->getPosition()).norm() - obj->getBoundingSphereRadius();
-    auto appMag = static_cast<float>((distance >= astro::LY_PER_10PARSEC) ? astro::absToAppMag(static_cast<double>(absMag), distance) : absMag);
+    float appMag = (distance >= astro::LY_PER_10PARSEC) ? astro::absToAppMag(absMag, distance) : absMag;
 
     if (appMag <= m_limitingFactor)
         m_dsoHandler->process(obj, distance, absMag);
@@ -93,7 +94,7 @@ DSOOctreeCloseObjectsProcessor::checkNode(const DSOOctree::PointType& center,
 {
     // Compute the distance to node; this is equal to the distance to
     // the cellCenterPos of the node minus the boundingRadius of the node, scale * SQRT3.
-    double nodeDistance = (m_obsPosition - center).norm() - size * numbers::sqrt3;
+    double nodeDistance = (m_obsPosition - center).norm() - size * std::numbers::sqrt3;
     return nodeDistance <= m_boundingRadius;
 }
 

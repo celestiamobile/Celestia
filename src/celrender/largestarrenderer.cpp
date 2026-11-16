@@ -10,13 +10,14 @@
 #include "largestarrenderer.h"
 
 #include <array>
+#include <cassert>
 #include <cstddef>
+#include <span>
 
 #include <celengine/glsupport.h>
 #include <celengine/render.h>
 #include <celengine/shadermanager.h>
 #include <celrender/gl/vertexobject.h>
-#include <celutil/array_view.h>
 #include <celutil/color.h>
 
 namespace gl   = celestia::gl;
@@ -29,30 +30,29 @@ namespace
 {
 struct Corner
 {
-    signed char   x, y;
-    unsigned char u, v;
+    GLbyte  x, y;
+    GLubyte u, v;
 };
 
-// 4-vertex quad in TL, BL, BR, TR order; drawn as two triangles via
-// the static index buffer.
+// 4-vertex quad in BL, BR, TL, TR order; drawn as triangle strip
 constexpr std::array<Corner, 4> kQuadCorners = {{
-    { -127,  127, 0,   0   },
     { -127, -127, 0,   255 },
     {  127, -127, 255, 255 },
+    { -127,  127, 0,   0   },
     {  127,  127, 255, 0   },
 }};
 
-constexpr std::size_t kVerticesPerStar = 4;
-constexpr std::size_t kIndicesPerStar  = 6;
 } // namespace
 
-LargeStarRenderer::LargeStarRenderer(Renderer    &renderer,
+LargeStarRenderer::LargeStarRenderer(const Renderer &renderer,
                                      StaticShader shaderId,
-                                     capacity_t   capacity) :
+                                     capacity_t   capacity,
+                                     StaticShaderOptions shaderOptions) :
     m_renderer(renderer),
     m_shaderId(shaderId),
+    m_shaderOptions(shaderOptions),
     m_capacity(capacity),
-    m_vertices(static_cast<std::size_t>(capacity) * kVerticesPerStar)
+    m_instances(std::make_unique<StarInstance[]>(capacity))
 {
 }
 
@@ -61,7 +61,7 @@ LargeStarRenderer::~LargeStarRenderer() = default;
 void
 LargeStarRenderer::start()
 {
-    m_prog   = m_renderer.getShaderManager().getShader(m_shaderId);
+    m_prog   = m_renderer.getShaderManager().getShader(m_shaderId, m_shaderOptions);
     m_nStars = 0;
 }
 
@@ -73,11 +73,10 @@ LargeStarRenderer::render()
 
     makeCurrent();
 
-    m_bo->invalidateData().setData(
-        util::array_view(m_vertices.data(), static_cast<std::size_t>(m_nStars) * kVerticesPerStar),
-        gl::Buffer::BufferUsage::StreamDraw);
+    m_bo->invalidateData().setSubData(0, std::as_bytes(std::span(m_instances.get(),
+                                                                 static_cast<std::size_t>(m_nStars))));
 
-    m_vo->draw(static_cast<int>(m_nStars) * static_cast<int>(kIndicesPerStar));
+    m_vo->drawInstances(static_cast<GLsizei>(m_nStars));
     m_nStars = 0;
 }
 
@@ -92,7 +91,7 @@ void
 LargeStarRenderer::makeCurrent()
 {
     auto &owner = m_renderer.starPipelineOwner();
-    if (owner.isActive(this) || m_prog == nullptr)
+    if (m_prog == nullptr)
         return;
 
     owner.setActive(this);
@@ -119,91 +118,81 @@ LargeStarRenderer::setupVertexArrayObject()
 
     m_initialized = true;
 
-    m_bo = gl::Buffer::create(gl::Buffer::TargetHint::Array);
-    m_vo = std::make_unique<gl::VertexObject>(gl::VertexObject::Primitive::Triangles);
+    auto vertexBuffer = gl::Buffer::create(gl::Buffer::TargetHint::Array, std::as_bytes(std::span{kQuadCorners}));
 
-    // Two triangles per quad: (0,1,2) and (0,2,3).
-    std::vector<GLushort> indices(static_cast<std::size_t>(m_capacity) * kIndicesPerStar);
-    for (std::size_t i = 0; i < m_capacity; ++i)
-    {
-        auto base = static_cast<GLushort>(i * kVerticesPerStar);
-        auto *out = &indices[i * kIndicesPerStar];
-        out[0] = base;
-        out[1] = static_cast<GLushort>(base + 1);
-        out[2] = static_cast<GLushort>(base + 2);
-        out[3] = base;
-        out[4] = static_cast<GLushort>(base + 2);
-        out[5] = static_cast<GLushort>(base + 3);
-    }
-    auto indexBuffer = gl::Buffer::create(gl::Buffer::TargetHint::ElementArray, indices);
-    m_vo->setIndexBuffer(indexBuffer, 0, gl::VertexObject::IndexType::UnsignedShort);
+    m_bo = gl::Buffer::create(gl::Buffer::TargetHint::Array,
+                              static_cast<GLsizeiptr>(sizeof(StarInstance) * m_capacity),
+                              gl::Buffer::BufferUsage::StreamDraw);
+    m_vo = std::make_unique<gl::VertexObject>(gl::VertexObject::Primitive::TriangleStrip);
 
     m_vo->addVertexBuffer(
-        m_bo,
+        vertexBuffer,
         CelestiaGLProgram::VertexCoordAttributeIndex,
         2,
         gl::VertexObject::DataType::Byte,
         true,
-        sizeof(StarVertex),
-        offsetof(StarVertex, corner));
+        sizeof(Corner),
+        offsetof(Corner, x));
 
     m_vo->addVertexBuffer(
-        m_bo,
-        CelestiaGLProgram::NormalAttributeIndex,
-        3,
-        gl::VertexObject::DataType::Float,
-        false,
-        sizeof(StarVertex),
-        offsetof(StarVertex, center));
-
-    m_vo->addVertexBuffer(
-        m_bo,
+        vertexBuffer,
         CelestiaGLProgram::TextureCoord0AttributeIndex,
         2,
         gl::VertexObject::DataType::UnsignedByte,
         true,
-        sizeof(StarVertex),
-        offsetof(StarVertex, uv));
+        sizeof(Corner),
+        offsetof(Corner, u));
+
+    m_vo->setCount(4);
+
+    m_vo->addInstanceBuffer(
+        m_bo,
+        CelestiaGLProgram::CenterAttributeIndex,
+        3,
+        gl::VertexObject::DataType::Float,
+        false,
+        sizeof(StarInstance),
+        offsetof(StarInstance, center));
 
     // Color stays 4-component: this layout is shared with
     // LegacyLargeStarRenderer, whose shader reads in_Color.a.
-    m_vo->addVertexBuffer(
+    m_vo->addInstanceBuffer(
         m_bo,
         CelestiaGLProgram::ColorAttributeIndex,
         4,
         gl::VertexObject::DataType::UnsignedByte,
         true,
-        sizeof(StarVertex),
-        offsetof(StarVertex, color));
+        sizeof(StarInstance),
+        offsetof(StarInstance, color));
 
-    m_vo->addVertexBuffer(
+    m_vo->addInstanceBuffer(
         m_bo,
         CelestiaGLProgram::IntensityAttributeIndex,
         1,
         gl::VertexObject::DataType::Float,
         false,
-        sizeof(StarVertex),
-        offsetof(StarVertex, scalar));
+        sizeof(StarInstance),
+        offsetof(StarInstance, scalar));
 
     // continuous distance-derived glow fade; float for a smooth transition
     // (unused by the legacy shader)
-    m_vo->addVertexBuffer(
+    m_vo->addInstanceBuffer(
         m_bo,
         CelestiaGLProgram::AlphaAttributeIndex,
         1,
         gl::VertexObject::DataType::Float,
         false,
-        sizeof(StarVertex),
-        offsetof(StarVertex, alpha));
+        sizeof(StarInstance),
+        offsetof(StarInstance, alpha));
 
-    m_vo->addVertexBuffer(
+    m_vo->addInstanceBuffer(
         m_bo,
         CelestiaGLProgram::LimbRadiusAttributeIndex,
         1,
         gl::VertexObject::DataType::Float,
         false,
-        sizeof(StarVertex),
-        offsetof(StarVertex, limbRadius));
+        sizeof(StarInstance),
+        offsetof(StarInstance, limbRadius));
 }
 
 void
@@ -213,24 +202,17 @@ LargeStarRenderer::addStar(const Eigen::Vector3f &center,
                            float                  limbRadius,
                            float                  alpha)
 {
-    if (m_nStars < m_capacity)
-    {
-        std::array<unsigned char, 4> packedColor{};
-        color.get(packedColor.data());
+    assert(m_nStars < m_capacity);
+    std::array<unsigned char, 4> packedColor{};
+    color.get(packedColor.data());
 
-        StarVertex *out = &m_vertices[static_cast<std::size_t>(m_nStars) * kVerticesPerStar];
-        for (std::size_t i = 0; i < kVerticesPerStar; ++i)
-        {
-            out[i].center     = center;
-            out[i].scalar     = scalar;
-            out[i].limbRadius = limbRadius;
-            out[i].alpha      = alpha;
-            out[i].color      = packedColor;
-            out[i].corner     = { kQuadCorners[i].x, kQuadCorners[i].y };
-            out[i].uv         = { kQuadCorners[i].u, kQuadCorners[i].v };
-        }
-        m_nStars++;
-    }
+    StarInstance &out = m_instances[static_cast<std::size_t>(m_nStars)];
+    out.center     = center;
+    out.scalar     = scalar;
+    out.limbRadius = limbRadius;
+    out.alpha      = alpha;
+    out.color      = packedColor;
+    ++m_nStars;
 
     if (m_nStars == m_capacity)
         render();

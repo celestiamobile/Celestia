@@ -11,11 +11,11 @@
 
 #include <array>
 #include <memory>
-#include <vector>
 
 #include <Eigen/Core>
 
 #include <celrender/gl/buffer.h>
+#include <celutil/classops.h>
 #include "starpipelineowner.h"
 
 class Color;
@@ -30,11 +30,13 @@ class VertexObject;
 namespace celestia::render
 {
 
+class PsfPointLargeRenderer;
+
 // Vertex buffer used by StarStyle::PointSpreadFunction.
 // Vertices carry per-star peak radiance (HDR float) and a linear, green-
-// normalised colour.  The shader is the same in both modes; a uniform
-// selects "point" (fixed pixel disc) or "glow" (PSF approximation).
-class PsfStarVertexBuffer : public StarPipelineFlushable
+// normalised colour.  Oversized center cones use an instanced billboard
+// fallback selected by start() from the configured radius and DPI scale.
+class PsfStarVertexBuffer : public StarPipelineFlushable, private util::NoMove
 {
 public:
     using capacity_t = unsigned int;
@@ -46,12 +48,8 @@ public:
     };
 
     PsfStarVertexBuffer(const Renderer &renderer, capacity_t capacity);
-    ~PsfStarVertexBuffer() override = default;
+    ~PsfStarVertexBuffer() override;
     PsfStarVertexBuffer() = delete;
-    PsfStarVertexBuffer(const PsfStarVertexBuffer&) = delete;
-    PsfStarVertexBuffer(PsfStarVertexBuffer&&) = delete;
-    PsfStarVertexBuffer& operator=(const PsfStarVertexBuffer&) = delete;
-    PsfStarVertexBuffer& operator=(PsfStarVertexBuffer&&) = delete;
 
     void start(Mode mode);
     void render();
@@ -64,28 +62,27 @@ public:
     void setOptimization(float opt)   { m_optimization = opt; }
     void setPointScale(float scale)   { m_pointScale = scale; }
 
-    static void enable();
-    static void disable();
-
 private:
     struct StarVertex
     {
-        Eigen::Vector3f            position;
-        float                      peakRadiance;
-        float                      limbRadius;   // resolved-body limb (px), 0 if none
-        float                      alpha;        // glow fade, full float precision
-        std::array<unsigned char, 4> color;      // rgb only; alpha byte unused
+        Eigen::Vector3f        position;
+        float                  peakRadiance;
+        float                  limbRadius;   // resolved-body limb (px), 0 if none
+        float                  alpha;        // glow fade, full float precision
+        std::array<GLubyte, 4> color;      // rgb only; alpha byte unused
     };
 
     const Renderer                 &m_renderer;
     capacity_t                      m_capacity;
     capacity_t                      m_nStars                { 0 };
-    std::vector<StarVertex>         m_vertices;
+    std::unique_ptr<StarVertex[]>   m_vertices; //NOSONAR
     Mode                            m_mode                  { Mode::Point };
     float                           m_pointRadius           { 1.5f };
     float                           m_optimization          { 0.1f };
     float                           m_pointScale            { 1.0f };
     CelestiaGLProgram              *m_prog                  { nullptr };
+    std::unique_ptr<PsfPointLargeRenderer> m_largePointRenderer;
+    bool m_useLargePoints{ false };
 
     celestia::gl::Buffer::SharedPtr             m_bo;
     std::unique_ptr<celestia::gl::VertexObject> m_vo;

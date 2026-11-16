@@ -12,6 +12,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <cmath>
+#include <span>
 #include <vector>
 
 #include "glsupport.h"
@@ -33,6 +34,8 @@ using celestia::engine::expandLuminanceAlphaToRGBA;
 
 namespace
 {
+
+GLint PreferredTextureAnisotropy = 8; // NOSONAR
 
 // When sRGB rendering is disabled, strip sRGB pixel formats to their
 // non-sRGB equivalents so the GPU does not linearize on sample.
@@ -63,28 +66,13 @@ struct TextureCaps
     GLint preferredAnisotropy;
 };
 
-const TextureCaps&
+TextureCaps
 GetTextureCaps()
 {
-    static TextureCaps texCaps;
-    static bool texCapsInitialized = false;
+    if (!gl::EXT_texture_filter_anisotropic)
+        return { 1 };
 
-    if (!texCapsInitialized)
-    {
-        texCapsInitialized = true;
-
-        texCaps.preferredAnisotropy = 1;
-#ifndef GL_ES
-        if (gl::EXT_texture_filter_anisotropic)
-        {
-            // Cap the preferred level texture anisotropy to 8; eventually, we should allow
-            // the user to control this.
-            texCaps.preferredAnisotropy = std::min(8, gl::maxTextureAnisotropy);
-        }
-#endif
-    }
-
-    return texCaps;
+    return { std::min(PreferredTextureAnisotropy, gl::maxTextureAnisotropy) };
 }
 
 bool
@@ -610,6 +598,12 @@ ComputeTileMipMaps(const Image& img, Image& tile,
 
 } // end unnamed namespace
 
+void
+celestia::engine::SetTextureAnisotropy(int anisotropy)
+{
+    PreferredTextureAnisotropy = std::max(anisotropy, 1);
+}
+
 Texture::Texture(int _width, int _height, bool _alpha) :
     width(_width),
     height(_height),
@@ -883,12 +877,11 @@ TiledTexture::getTile(int lod, int u, int v)
     return TextureTile(glNames[v * uSplit + u]);
 }
 
-CubeMap::CubeMap(celestia::util::array_view<Image> faces) :
+CubeMap::CubeMap(std::span<const Image, 6> faces) :
     Texture(faces[0].getWidth(), faces[0].getHeight()),
     glName(0)
 {
     // Verify that all the faces are square and have the same size
-    assert(faces.size() == 6);
     const Image& firstFace = faces[0];
     std::int32_t width = firstFace.getWidth();
     if (firstFace.getHeight() != width ||

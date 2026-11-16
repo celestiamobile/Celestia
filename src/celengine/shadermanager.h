@@ -33,7 +33,6 @@ enum class StaticShader
     Crosshair,
     Depth,
     Galaxy,
-    Galaxy150,
     Globular,
     LargeStar,
     PsfStarGlow,
@@ -51,20 +50,22 @@ enum class StaticShader
 // Compile-time options that select variants of a static shader via #define injection.
 enum class StaticShaderOptions : std::uint8_t
 {
-    None    = 0,
-    ToneMap = 0x01,
+    None          = 0,
+    ToneMap       = 0x01,
+    Billboard     = 0x02,
+    ConvertToSRGB = 0x04,
+    PreserveDepth = 0x08,
 };
 
 ENUM_CLASS_BITWISE_OPS(StaticShaderOptions);
 
 struct StaticShaderProperties
 {
+    bool operator==(const StaticShaderProperties&) const noexcept = default;
+
     StaticShader        shader;
     StaticShaderOptions options;
 };
-
-bool
-operator==(const StaticShaderProperties& lhs, const StaticShaderProperties& rhs);
 
 template<>
 struct std::hash<StaticShaderProperties>
@@ -177,6 +178,8 @@ struct ShaderProperties
     bool hasScattering() const;
     bool isViewDependent() const;
 
+    bool operator==(const ShaderProperties&) const noexcept = default;
+
     std::uint16_t nLights{ 0 };
     LightingModel lightModel{ LightingModel::DiffuseModel };
     TexUsage texUsage{ TexUsage::None };
@@ -193,13 +196,8 @@ struct ShaderProperties
     ShadowMask shadowCounts{ ShadowMask::None };
 
     FisheyeOverrideMode fishEyeOverride { FisheyeOverrideMode::None };
+    bool separateRayleighMieScaleHeights{ false };
 };
-
-bool
-operator==(const ShaderProperties& lhs, const ShaderProperties& rhs);
-
-inline bool
-operator!=(const ShaderProperties& lhs, const ShaderProperties& rhs) { return !(lhs == rhs); }
 
 template<>
 struct std::hash<ShaderProperties>
@@ -277,6 +275,7 @@ public:
         LineSideAttributeIndex      = 12,
         AlphaAttributeIndex         = 13,
         LimbRadiusAttributeIndex    = 14,
+        CenterAttributeIndex        = 15,
     };
 
     CelestiaGLProgramLight lights[MaxShaderLights];
@@ -373,6 +372,7 @@ public:
 
 private:
     void initCommonParameters();
+    void initAtmosphereParameters();
     void initParameters();
     void initSamplers();
 
@@ -383,24 +383,16 @@ private:
 class ShaderManager
 {
 public:
-    struct GeomShaderParams
-    {
-        int inputType;
-        int outType;
-        int nOutVertices;
-    };
-
     ShaderManager();
     ~ShaderManager() = default;
 
     CelestiaGLProgram* getShader(const ShaderProperties&);
-    CelestiaGLProgram* getShader(StaticShader, const GeomShaderParams* = nullptr);
-    CelestiaGLProgram* getShader(StaticShader, StaticShaderOptions, const GeomShaderParams* = nullptr);
+    CelestiaGLProgram* getShader(StaticShader, StaticShaderOptions = StaticShaderOptions::None);
 
     void setFisheyeEnabled(bool enabled);
 
 private:
-    std::shared_ptr<CelestiaGLProgram> loadShader(StaticShaderProperties, const GeomShaderParams*);
+    std::shared_ptr<CelestiaGLProgram> loadShader(StaticShaderProperties);
     std::shared_ptr<CelestiaGLProgram> getErrorProgram();
 
     std::unordered_map<ShaderProperties, std::shared_ptr<CelestiaGLProgram>> m_dynamicShaders;

@@ -12,19 +12,26 @@
 
 #include <array>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
 #include <locale>
 #include <memory>
-#include <string_view>
+#include <system_error>
 
 #include <fmt/format.h>
 
+#include <celcompat/charconv.h>
 #include "astro.h"
 
 #if defined(__GNUC__) && !defined(_WIN32)
+#if defined(__clang__) && FMT_VERSION < 110100
+#include <iomanip>
+#include <fmt/ostream.h>
+#else
 #include <fmt/chrono.h>
+#endif
 #else
 #include <iomanip>
 #include <sstream>
@@ -80,7 +87,7 @@ constexpr std::array<LeapSecondRecord, 28> LeapSeconds
     LeapSecondRecord{ 37, 2457754.5 }, // 1 Jan 2017
 };
 
-celestia::util::array_view<LeapSecondRecord> g_leapSeconds = LeapSeconds; //NOSONAR
+std::span<const LeapSecondRecord> g_leapSeconds = LeapSeconds; //NOSONAR
 
 #if !(defined(__GNUC__) && !defined(_WIN32))
 class MonthAbbreviations
@@ -127,10 +134,164 @@ timeToUTC(const std::time_t& time, std::tm& utct)
 #endif
 }
 
+constexpr std::string_view Whitespace = "\t "sv;
+
+// Parser utilities. We have to do this manually because we want to support
+// parsing from string_view, and the C library sscanf function requires a
+// null terminator. Note that we only check that the format of the date is
+// correct here, the check for whether the parsed numbers constitute a valid
+// date and time is done in the parseString method. This saves repeating the
+// logic for the ISO and legacy format dates.
+
+struct DateValues
+{
+    bool parseISO(std::string_view);
+    bool parseLegacy(std::string_view);
+    bool parseTime(std::string_view);
+
+    int year{ 0 };
+    unsigned char month{ 1 };
+    unsigned char day{ 1 };
+    unsigned char hour{ 0 };
+    unsigned char minute{ 0 };
+    double second{ 0.0 };
+};
+
+bool
+readInteger(std::string_view& s, std::integral auto& value, int length = -1)
+{
+    auto [ptr, ec] = compat::from_chars(s.data(), s.data() + s.size(), value);
+    if (ec != std::errc{})
+        return false;
+
+    auto prefixLength = ptr - s.data();
+    if (length != -1 && prefixLength != length)
+        return false;
+    s.remove_prefix(static_cast<std::size_t>(prefixLength));
+    return true;
+}
+
+bool
+skipCharacter(std::string_view& s, char ch)
+{
+    if (s.empty() || s.front() != ch)
+        return false;
+
+    s.remove_prefix(1);
+    return true;
+}
+
+bool
+DateValues::parseTime(std::string_view s)
+{
+    if (!readInteger(s, hour, 2) ||
+        !skipCharacter(s, ':') ||
+        !readInteger(s, minute, 2))
+    {
+        return false;
+    }
+
+    // allow omitting seconds
+    if (s.empty())
+    {
+        second = 0.0;
+        return true;
+    }
+
+    if (!skipCharacter(s, ':') || s.size() < 2)
+        return false;
+
+    if (auto [ptr, ec] = compat::from_chars(s.data(), s.data() + s.size(), second, compat::chars_format::fixed);
+        ec == std::errc{})
+    {
+        auto length = ptr - s.data();
+        if (length < 2 ||
+            std::ranges::any_of(s.substr(0, 2), [](char c) { return c < '0' || c > '9'; }) ||
+            (length >= 3 && s[2] != '.'))
+        {
+            return false;
+        }
+
+        s.remove_prefix(static_cast<std::size_t>(length));
+    }
+    else
+    {
+        return false;
+    }
+
+    // we should extend this to handle timezones, but for now we just allow
+    // the Z or +00:00 suffix
+    return s.empty() || s == "Z"sv || s =="+00:00"sv;
+}
+
+bool
+DateValues::parseISO(std::string_view s)
+{
+    if (!readInteger(s, year) ||
+        !skipCharacter(s, '-') ||
+        !readInteger(s, month, 2) ||
+        !skipCharacter(s, '-') ||
+        !readInteger(s, day, 2))
+    {
+        return false;
+    }
+
+    // allow date-only
+    if (s.empty())
+    {
+        hour = 0;
+        minute = 0;
+        second = 0.0;
+        return true;
+    }
+
+    if (auto sep = s.front(); sep != 'T' && sep != ' ')
+        return false;
+
+    return parseTime(s.substr(1));
+}
+
+bool
+skipWhitespace(std::string_view& s)
+{
+    auto pos = s.find_first_not_of(Whitespace);
+    if (pos == 0 || pos == std::string_view::npos)
+        return false;
+
+    s.remove_prefix(pos);
+    return true;
+}
+
+bool
+DateValues::parseLegacy(std::string_view s)
+{
+    // the legacy parse format uses whitespace to separate the date components
+    // and does not impose length checks on the components
+    if (!readInteger(s, year) ||
+        !skipWhitespace(s) ||
+        !readInteger(s, month) ||
+        !skipWhitespace(s) ||
+        !readInteger(s, day))
+    {
+        return false;
+    }
+
+    // allow date-only
+    if (s.empty())
+    {
+        hour = 0;
+        minute = 0;
+        second = 0.0;
+        return true;
+    }
+
+    return skipWhitespace(s) && parseTime(s);
+}
+
 } // end unnamed namespace
 
 void
-setLeapSeconds(celestia::util::array_view<LeapSecondRecord> leapSeconds)
+setLeapSeconds(std::span<const LeapSecondRecord> leapSeconds)
 {
     g_leapSeconds = leapSeconds;
 }
@@ -208,14 +369,29 @@ Date::toString(const std::locale& loc, Format format) const
     cal_time.tm_zone = tzname.c_str();
 #endif
 
+#define CEL_LOCALE_TM_FORMAT  "%c"
+#define CEL_TZNAME_TM_FORMAT  "%Y %b %d %H:%M:%S %Z"
+#define CEL_DEFAULT_TM_FORMAT "%Y %b %d %H:%M:%S %z"
+
     switch(format)
     {
+#if defined(__clang__) && FMT_VERSION < 110100
+    // Workaround for a compile bug that occurs with Clang when formatting
+    // std::tm in C++20 mode with fmt versions before 11.1
     case Locale:
-        return fmt::format(loc, "{:%c}"sv, cal_time);
+        return fmt::format(loc, "{}", fmt::streamed(std::put_time(&cal_time, CEL_LOCALE_TM_FORMAT)));
     case TZName:
-        return fmt::format(loc, "{:%Y %b %d %H:%M:%S %Z}"sv, cal_time);
+        return fmt::format(loc, "{}", fmt::streamed(std::put_time(&cal_time, CEL_TZNAME_TM_FORMAT)));
     default:
-        return fmt::format(loc, "{:%Y %b %d %H:%M:%S %z}"sv, cal_time);
+        return fmt::format(loc, "{}", fmt::streamed(std::put_time(&cal_time, CEL_DEFAULT_TM_FORMAT)));
+#else
+    case Locale:
+        return fmt::format(loc, "{:" CEL_LOCALE_TM_FORMAT "}", cal_time);
+    case TZName:
+        return fmt::format(loc, "{:" CEL_TZNAME_TM_FORMAT "}", cal_time);
+    default:
+        return fmt::format(loc, "{:" CEL_DEFAULT_TM_FORMAT "}", cal_time);
+#endif
     }
 #else
     static const MonthAbbreviations* monthAbbreviations = nullptr;
@@ -286,50 +462,43 @@ Date::systemDate()
 
 // TODO: need option to parse UTC times (with leap seconds)
 bool
-parseDate(const std::string& s, Date& date)
+parseDate(std::string_view s, Date& date)
 {
-    int year = 0;
-    unsigned int month = 1;
-    unsigned int day = 1;
-    unsigned int hour = 0;
-    unsigned int minute = 0;
-    double second = 0.0;
+    if (auto pos = s.find_first_not_of(Whitespace); pos == std::string_view::npos)
+        return false;
+    else
+        s = s.substr(pos, s.find_last_not_of(Whitespace) + 1);
 
-    if (std::sscanf(s.c_str(), "%d-%u-%uT%u:%u:%lf",
-                    &year, &month, &day, &hour, &minute, &second) != 6 &&
-        std::sscanf(s.c_str(), " %d %u %u %u:%u:%lf ",
-                    &year, &month, &day, &hour, &minute, &second) != 6 &&
-        std::sscanf(s.c_str(), " %d %u %u %u:%u ",
-                    &year, &month, &day, &hour, &minute) != 5 &&
-        std::sscanf(s.c_str(), " %d %u %u ", &year, &month, &day) != 3)
+    DateValues values;
+    if (!values.parseISO(s) && !values.parseLegacy(s))
+        return false;
+
+    if (values.month < 1 || values.month > 12 ||
+        values.hour > 23 || values.minute > 59 ||
+        values.second >= 60.0 || values.second < 0.0)
     {
         return false;
     }
 
-    if (month < 1 || month > 12)
-        return false;
-    if (hour > 23 || minute > 59 || second >= 60.0 || second < 0.0)
-        return false;
-
     // Days / month calculation . . .
-    int maxDay = 31 - ((0xa50 >> month) & 0x1);
-    if (month == 2)
+    int maxDay = 31 - ((0xa50 >> values.month) & 0x1);
+    if (values.month == 2)
     {
         // Check for a leap year
-        if (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0))
+        if (values.year % 4 == 0 && (values.year % 100 != 0 || values.year % 400 == 0))
             maxDay = 29;
         else
             maxDay = 28;
     }
-    if (day > (unsigned int) maxDay || day < 1)
+    if (values.day > maxDay || values.day < 1)
         return false;
 
-    date.year = year;
-    date.month = month;
-    date.day = day;
-    date.hour = hour;
-    date.minute = minute;
-    date.seconds = second;
+    date.year = values.year;
+    date.month = values.month;
+    date.day = values.day;
+    date.hour = values.hour;
+    date.minute = values.minute;
+    date.seconds = values.second;
 
     return true;
 }

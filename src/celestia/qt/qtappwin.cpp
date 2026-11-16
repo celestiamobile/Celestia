@@ -77,13 +77,11 @@
 #include <celestia/ffmpegcapture.h>
 #endif
 #include <celestia/scriptmenu.h>
-#include <celestia/url.h>
 #include <celutil/gettext.h>
 #include <celutil/greek.h>
 #include <celutil/tzutil.h>
 #include "qtbookmark.h"
 #include "qtcelestiaactions.h"
-#include "qtcelestialbrowser.h"
 #include "qtcommandline.h"
 #include "qtdeepskybrowser.h"
 #include "qteventfinder.h"
@@ -95,6 +93,7 @@
 #include "qtselectionpopup.h"
 #include "qtsettimedialog.h"
 #include "qtsolarsystembrowser.h"
+#include "qtstarbrowser.h"
 #include "qttimetoolbar.h"
 #include "qttourguide.h"
 #include "steamintegration.h"
@@ -377,9 +376,9 @@ CelestiaAppWindow::init(const CelestiaCommandLineOptions& options)
     infoPanel->setVisible(false);
 
     // Create the various browser widgets
-    celestialBrowser = new CelestialBrowser(m_appCore, nullptr, infoPanel);
-    celestialBrowser->setObjectName("celestia-browser");
-    connect(celestialBrowser,
+    StarBrowser* starBrowser = new StarBrowser(m_appCore, nullptr, infoPanel);
+    starBrowser->setObjectName("celestia-browser");
+    connect(starBrowser,
             SIGNAL(selectionContextMenuRequested(const QPoint&, Selection&)),
             this,
             SLOT(slotShowSelectionContextMenu(const QPoint&, Selection&)));
@@ -400,7 +399,7 @@ CelestiaAppWindow::init(const CelestiaCommandLineOptions& options)
 
     // Set up the browser tabs
     tabWidget->addTab(solarSystemBrowser, _("Solar System"));
-    tabWidget->addTab(celestialBrowser, _("Stars"));
+    tabWidget->addTab(starBrowser, _("Stars"));
     tabWidget->addTab(deepSkyBrowser, _("Deep Sky Objects"));
 
     toolsDock->setWidget(tabWidget);
@@ -608,6 +607,9 @@ CelestiaAppWindow::writeSettings()
     settings.setValue("StarMaxIrradiance", renderer->getStarMaxIrradiance());
     settings.setValue("StarDimClipFactor", renderer->getStarDimClipFactor());
     settings.setValue("StarExposure", renderer->getStarExposure());
+    settings.setValue("SeparateRayleighMieScaleHeights", renderer->getSeparateRayleighMieScaleHeights());
+    settings.setValue("AtmosphereSegmentCount", renderer->getAtmosphereSegmentCount());
+    settings.setValue("CloudSegmentCount", renderer->getCloudSegmentCount());
     settings.setValue("ToneMappingExposure", renderer->getToneMappingExposure());
     settings.setValue("ToneMappingMode",
                       static_cast<int>(renderer->getToneMappingMode()));
@@ -824,11 +826,8 @@ CelestiaAppWindow::slotCopyImage()
 void
 CelestiaAppWindow::slotCopyURL()
 {
-    CelestiaState appState(m_appCore);
-    appState.captureState();
-
-    Url url(appState);
-    QApplication::clipboard()->setText(url.getAsString().c_str());
+    std::string url = CelestiaState::capture(*m_appCore).createURL();
+    QApplication::clipboard()->setText(QString::fromStdString(url));
     m_appCore->flash(_("Copied URL"));
 }
 
@@ -1143,9 +1142,6 @@ CelestiaAppWindow::slotAddBookmark()
     if (defaultTitle.isEmpty())
         defaultTitle = _("New bookmark");
 
-    CelestiaState appState(m_appCore);
-    appState.captureState();
-
     // Capture the current frame buffer to use as a bookmark icon.
     QImage grabbedImage = glWidget->grabFramebuffer();
     int width = grabbedImage.width();
@@ -1158,7 +1154,7 @@ CelestiaAppWindow::slotAddBookmark()
     else
         iconImage = grabbedImage.copy(0, (height - width) / 2, width, width);
 
-    AddBookmarkDialog dialog(m_bookmarkManager, defaultTitle, appState, iconImage);
+    AddBookmarkDialog dialog(m_bookmarkManager, defaultTitle, *m_appCore, iconImage);
     dialog.exec();
 
     populateBookmarkMenu();

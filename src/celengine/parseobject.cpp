@@ -15,6 +15,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -22,7 +23,6 @@
 
 #include <celastro/astro.h>
 #include <celastro/date.h>
-#include <celcompat/numbers.h>
 #include <celephem/customorbit.h>
 #include <celephem/customrotation.h>
 #include <celephem/orbit.h>
@@ -61,7 +61,6 @@ namespace astro = celestia::astro;
 namespace engine = celestia::engine;
 namespace ephem = celestia::ephem;
 namespace math = celestia::math;
-namespace numbers = celestia::numbers;
 namespace util = celestia::util;
 
 namespace
@@ -694,7 +693,7 @@ CreateFixedRotationModel(double offset,
                          double inclination,
                          double ascendingNode)
 {
-    Eigen::Quaterniond q = math::YRotation(-numbers::pi - offset) *
+    Eigen::Quaterniond q = math::YRotation(-std::numbers::pi - offset) *
                            math::XRotation(-inclination) *
                            math::YRotation(-ascendingNode);
 
@@ -751,7 +750,7 @@ CreateFixedRotationModel(const Value& value)
     auto inclination = math::degToRad(rotationData->getAngle<double>("Inclination").value_or(0.0));
     auto ascendingNode = math::degToRad(rotationData->getAngle<double>("AscendingNode").value_or(0.0));
 
-    Eigen::Quaterniond q = math::YRotation(-numbers::pi - offset) *
+    Eigen::Quaterniond q = math::YRotation(-std::numbers::pi - offset) *
                            math::XRotation(-inclination) *
                            math::YRotation(-ascendingNode);
 
@@ -772,7 +771,7 @@ CreateFixedAttitudeRotationModel(const Value& value)
     auto tilt = math::degToRad(rotationData->getAngle<double>("Tilt").value_or(0.0));
     auto roll = math::degToRad(rotationData->getAngle<double>("Roll").value_or(0.0));
 
-    Eigen::Quaterniond q = math::YRotation(-numbers::pi - heading) *
+    Eigen::Quaterniond q = math::YRotation(-std::numbers::pi - heading) *
                            math::XRotation(-tilt) *
                            math::ZRotation(-roll);
 
@@ -1234,6 +1233,47 @@ CreateTwoVectorFrame(const Universe& universe,
 }
 
 std::optional<FrameId>
+CreateSkyPlaneFrame(const Universe& universe,
+                    const AssociativeArray& frameData,
+                    Selection& defaultCenter,
+                    FrameCache& frameCache)
+{
+    defaultCenter = getFrameCenter(universe, frameData, defaultCenter);
+
+    Selection obj = defaultCenter;
+    if (const std::string* targetName = frameData.getString("Object"); targetName)
+    {
+        obj = universe.findPath(*targetName, {});
+        if (obj.empty())
+        {
+            GetLogger()->error("Target object '{}' for topocentric frame not found.\n", *targetName);
+            return std::nullopt;
+        }
+    }
+
+    // To avoid making Modify operations even more horrible to implement than they
+    // already are, use the name hierarchy to find the star rather than the frame
+    // hierarchy. In non-pathological cases, this should give the same result.
+    while (obj.getType() != SelectionType::Star)
+    {
+        if (obj.empty())
+        {
+            GetLogger()->error("No target specified for topocentric frame.\n");
+            return std::nullopt;
+        }
+
+        obj = obj.nameParent();
+    }
+
+    assert(obj.star() != nullptr);
+
+    double freezeEpoch = astro::J2000;
+    ParseDate(frameData, "Freeze", freezeEpoch);
+    return frameCache.getFrameId(SkyPlaneFrameKey(obj.star(), freezeEpoch));
+}
+
+
+std::optional<FrameId>
 CreateJ2000EclipticFrame(const Universe& universe,
                          const AssociativeArray& frameData,
                          Selection& defaultCenter,
@@ -1448,6 +1488,18 @@ CreateComplexFrame(const Universe& universe,
         }
 
         return CreateJ2000EquatorFrame(universe, *equatorData, defaultCenter, frameCache);
+    }
+
+    if (const Value* value = frameData.getValue("SkyPlane"); value != nullptr)
+    {
+        const AssociativeArray* skyPlaneData = value->getHash();
+        if (skyPlaneData == nullptr)
+        {
+            GetLogger()->error("Object has incorrect SkyPlane frame syntax.\n");
+            return std::nullopt;
+        }
+
+        return CreateSkyPlaneFrame(universe, *skyPlaneData, defaultCenter, frameCache);
     }
 
     GetLogger()->error("Frame definition does not have a valid frame type.\n");

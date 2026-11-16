@@ -36,4 +36,8 @@ struct Atmosphere
     Eigen::Vector3f absorptionCoeff{ Eigen::Vector3f::Zero() };
 
     float cloudShadowDepth{ 0.0f };
+
+    bool hasValidScaleHeights() const noexcept;
+    float getLegacyScaleHeight() const noexcept;
+    float getLegacyMieCoeff() const noexcept;
 };

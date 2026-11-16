@@ -9,11 +9,14 @@
 
 #include "psfstarvertexbuffer.h"
 
+#include <cassert>
 #include <cmath>
+#include <numbers>
+#include <span>
 
 #include <celrender/gl/vertexobject.h>
+#include <celrender/psfpointlargerenderer.h>
 #include <celastro/astro.h>
-#include <celcompat/numbers.h>
 #include <celutil/color.h>
 
 #include "glsupport.h"
@@ -65,14 +68,28 @@ PsfStarVertexBuffer::PsfStarVertexBuffer(const Renderer &renderer,
                                          capacity_t capacity) :
     m_renderer(renderer),
     m_capacity(capacity),
-    m_vertices(capacity)
+    m_vertices(std::make_unique<StarVertex[]>(capacity))
 {
 }
+
+PsfStarVertexBuffer::~PsfStarVertexBuffer() = default;
 
 void
 PsfStarVertexBuffer::start(Mode mode)
 {
     m_mode = mode;
+    m_useLargePoints = mode == Mode::Point
+                      && 2.0f * m_pointRadius * m_pointScale > static_cast<float>(gl::maxPointSize);
+    if (m_useLargePoints)
+    {
+        if (m_largePointRenderer == nullptr)
+            m_largePointRenderer = std::make_unique<PsfPointLargeRenderer>(m_renderer, m_capacity);
+        m_largePointRenderer->setPointRadius(m_pointRadius);
+        m_largePointRenderer->setPointScale(m_pointScale);
+        m_largePointRenderer->start();
+        return;
+    }
+
     StaticShader id = (mode == Mode::Point) ? StaticShader::PsfStarPoint
                                             : StaticShader::PsfStarGlow;
     m_prog = m_renderer.getShaderManager().getShader(id);
@@ -81,16 +98,27 @@ PsfStarVertexBuffer::start(Mode mode)
 void
 PsfStarVertexBuffer::render()
 {
+    if (m_useLargePoints)
+    {
+        m_largePointRenderer->render();
+        return;
+    }
+
     if (m_nStars == 0 || m_prog == nullptr)
         return;
 
     makeCurrent();
 
-    m_bo->invalidateData().setData(
-        util::array_view(m_vertices.data(), m_nStars),
-        gl::Buffer::BufferUsage::StreamDraw);
+    m_bo->invalidateData().setSubData(0, std::as_bytes(std::span(m_vertices.get(), m_nStars)));
 
+#ifndef GL_ES
+    // makeCurrent() may flush another buffer, so enable only after it returns.
+    glEnable(GL_PROGRAM_POINT_SIZE);
+#endif
     m_vo->draw(m_nStars);
+#ifndef GL_ES
+    glDisable(GL_PROGRAM_POINT_SIZE);
+#endif
     m_nStars = 0;
 }
 
@@ -98,7 +126,7 @@ void
 PsfStarVertexBuffer::makeCurrent()
 {
     auto &owner = m_renderer.starPipelineOwner();
-    if (owner.isActive(this) || m_prog == nullptr)
+    if (m_prog == nullptr)
         return;
 
     owner.setActive(this);  // flushes whoever held the pipeline before
@@ -113,7 +141,7 @@ PsfStarVertexBuffer::makeCurrent()
     if (m_mode == Mode::Glow)
     {
         float a = (m_pointRadius > 0.0f) ? (m_optimization / m_pointRadius) : 0.0f;
-        float denom = (celestia::numbers::pi_v<float> / std::max(m_pointRadius, 1e-6f)) - a;
+        float denom = (std::numbers::pi_v<float> / std::max(m_pointRadius, 1e-6f)) - a;
         float b = (denom != 0.0f) ? (1.0f / denom) : 0.0f;
         m_prog->floatParam("psfA") = a;
         m_prog->floatParam("psfB") = b;
@@ -131,7 +159,9 @@ PsfStarVertexBuffer::setupVertexArrayObject()
 
     m_initialized = true;
 
-    m_bo = gl::Buffer::create(gl::Buffer::TargetHint::Array);
+    m_bo = gl::Buffer::create(gl::Buffer::TargetHint::Array,
+                              static_cast<GLsizeiptr>(sizeof(StarVertex) * m_capacity),
+                              gl::Buffer::BufferUsage::StreamDraw);
     m_vo = std::make_unique<gl::VertexObject>(gl::VertexObject::Primitive::Points);
 
     m_vo->addVertexBuffer(
@@ -185,24 +215,14 @@ PsfStarVertexBuffer::setupVertexArrayObject()
 void
 PsfStarVertexBuffer::finish()
 {
+    if (m_useLargePoints)
+    {
+        m_largePointRenderer->finish();
+        return;
+    }
+
     render();
     m_renderer.starPipelineOwner().clearIfActive(this);
-}
-
-void
-PsfStarVertexBuffer::enable()
-{
-#ifndef GL_ES
-    glEnable(GL_PROGRAM_POINT_SIZE);
-#endif
-}
-
-void
-PsfStarVertexBuffer::disable()
-{
-#ifndef GL_ES
-    glDisable(GL_PROGRAM_POINT_SIZE);
-#endif
 }
 
 void
@@ -212,15 +232,19 @@ PsfStarVertexBuffer::addStar(const Eigen::Vector3f &pos,
                              float limbRadius,
                              float alpha)
 {
-    if (m_nStars < m_capacity)
+    if (m_useLargePoints)
     {
-        m_vertices[m_nStars].position = pos;
-        m_vertices[m_nStars].peakRadiance = peakRadiance;
-        m_vertices[m_nStars].limbRadius = limbRadius;
-        m_vertices[m_nStars].alpha = alpha;
-        color.get(m_vertices[m_nStars].color.data());
-        m_nStars++;
+        m_largePointRenderer->addStar(pos, color, peakRadiance);
+        return;
     }
+
+    assert(m_nStars < m_capacity);
+    m_vertices[m_nStars].position = pos;
+    m_vertices[m_nStars].peakRadiance = peakRadiance;
+    m_vertices[m_nStars].limbRadius = limbRadius;
+    m_vertices[m_nStars].alpha = alpha;
+    color.get(m_vertices[m_nStars].color.data());
+    ++m_nStars;
 
     if (m_nStars == m_capacity)
     {

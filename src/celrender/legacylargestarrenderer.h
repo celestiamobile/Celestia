@@ -21,7 +21,7 @@ namespace celestia::render
 class LegacyLargeStarRenderer : public LargeStarRenderer
 {
 public:
-    explicit LegacyLargeStarRenderer(Renderer &renderer, capacity_t capacity = 512);
+    LegacyLargeStarRenderer(const Renderer &renderer, capacity_t capacity);
     ~LegacyLargeStarRenderer() override;
 
     void setTexture(Texture *texture) { m_texture = texture; }

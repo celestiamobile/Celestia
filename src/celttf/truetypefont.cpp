@@ -11,8 +11,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <memory>
+#include <span>
 #include <system_error>
 #include <tuple>
 #include <unordered_map>
@@ -27,7 +29,6 @@
 #include <celimage/image.h>
 #include <celrender/gl/buffer.h>
 #include <celrender/gl/vertexobject.h>
-#include <celutil/array_view.h>
 #include <celutil/fsutils.h>
 #include <celutil/logger.h>
 #include <celutil/utf8.h>
@@ -171,7 +172,7 @@ struct TextureFontPrivate
     unsigned int m_instanceCount{ 0 };
 
     gl::VertexObject      m_vao{ gl::VertexObject::Primitive::TriangleStrip };
-    gl::Buffer::SharedPtr m_vbo{ gl::Buffer::create(gl::Buffer::TargetHint::Array) };
+    gl::Buffer::SharedPtr m_vbo;
 
     bool m_shaderInUse{ false };
 };
@@ -180,16 +181,17 @@ struct TextureFontPrivate
 TextureFontPrivate::TextureFontPrivate(const Renderer *renderer) : m_renderer(renderer)
 {
     constexpr std::array<std::uint8_t, 8> vertexData{ 0, 0, 255, 0, 0, 255, 255, 255 };
-    auto vertexBuffer = gl::Buffer::create(gl::Buffer::TargetHint::Array, vertexData);
     m_vao.addVertexBuffer(
-        vertexBuffer,
+        gl::Buffer::create(gl::Buffer::TargetHint::Array, std::as_bytes(std::span{vertexData})),
         VertexLocation,
         2,
         gl::VertexObject::DataType::UnsignedByte,
         true);
     m_vao.setCount(4);
 
-    m_vbo->setData(util::array_view<void>(nullptr, sizeof(FontInstance) * MaxInstances), gl::Buffer::BufferUsage::StreamDraw);
+    m_vbo = gl::Buffer::create(gl::Buffer::TargetHint::Array,
+                               static_cast<GLsizeiptr>(sizeof(FontInstance) * MaxInstances),
+                               gl::Buffer::BufferUsage::StreamDraw);
 
     m_vao.addInstanceBuffer(
         m_vbo,
@@ -515,6 +517,7 @@ TextureFontPrivate::render(std::u16string_view line, float x, float y)
         if (g.bw > 0 && g.bh > 0)
         {
             // Only render characters if they have bitmaps
+            assert(m_instanceCount < MaxInstances);
             auto& instance = m_instances[m_instanceCount];
 
             // Make Sonar stop complaining about precision issues
@@ -550,7 +553,7 @@ TextureFontPrivate::flush()
     if (m_instanceCount == 0)
         return;
 
-    m_vbo->setSubData(0, util::array_view(m_instances.data(), m_instanceCount));
+    m_vbo->invalidateData().setSubData(0, std::as_bytes(std::span{m_instances.data(), m_instanceCount}));
     m_vao.drawInstances(m_instanceCount);
     m_vbo->unbind();
 
@@ -759,7 +762,7 @@ std::filesystem::path
 ParseFontName(const std::filesystem::path &filename, int &index, int &size)
 {
     // Format with font path/collection index(if any)/font size(if any)
-    auto fn = celestia::util::PathToString(filename);
+    auto fn = util::PathToString(filename);
     if (auto ps = fn.rfind(','); ps != std::string::npos)
     {
         if (from_chars(&fn[ps + 1], &fn[fn.size()], size).ec == std::errc())
@@ -767,9 +770,9 @@ ParseFontName(const std::filesystem::path &filename, int &index, int &size)
             if (auto pi = fn.rfind(',', ps - 1); pi != std::string::npos)
             {
                 if (from_chars(&fn[pi + 1], &fn[pi], index).ec == std::errc())
-                    return std::filesystem::u8path(fn.substr(0, pi));
+                    return util::U8Path(std::string_view(fn).substr(0, pi));
             }
-            return std::filesystem::u8path(fn.substr(0, ps));
+            return util::U8Path(std::string_view(fn).substr(0, ps));
         }
     }
     return filename;
@@ -781,10 +784,7 @@ struct FontCacheKey
     int index;
     int size;
 
-    bool operator==(const FontCacheKey &other) const
-    {
-        return filename == other.filename && index == other.index && size == other.size;
-    }
+    bool operator==(const FontCacheKey &other) const noexcept = default;
 };
 
 template<> struct std::hash<FontCacheKey>

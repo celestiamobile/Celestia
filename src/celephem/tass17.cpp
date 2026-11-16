@@ -19,13 +19,13 @@
 #include <cmath>
 #include <cstddef>
 #include <memory>
+#include <numbers>
+#include <span>
 #include <utility>
 
 #include <celastro/astro.h>
 #include <celastro/date.h>
-#include <celcompat/numbers.h>
 #include <celmath/mathlib.h>
-#include <celutil/array_view.h>
 #include "orbit.h"
 
 namespace celestia::ephem
@@ -2870,7 +2870,7 @@ constexpr TASSExtraParams IapetusExtraParams =
 };
 
 void
-CalcLongitude(double t, std::array<double, 8>& dlo)
+CalcLongitude(double t, std::span<double, 8> dlo)
 {
     for (int i = 84; i < MimasAPF.size(); i++)
     {
@@ -2977,9 +2977,9 @@ EllipticToRectangular(std::array<double, 6> elem, double tam, double am)
 class TASS17MajMoonOrbit: public CachingOrbit
 {
 public:
-    TASS17MajMoonOrbit(std::array<int, 4> _termIndices, const util::array_view<TASSTerm> _terms,
-                const util::array_view<TASSAPF> _apf, const TASSExtraParams& _extraParams,
-                double _period, double _boundingRadius) :
+    TASS17MajMoonOrbit(std::array<int, 4> _termIndices, std::span<const TASSTerm> _terms,
+                       std::span<const TASSAPF> _apf, const TASSExtraParams& _extraParams,
+                       double _period, double _boundingRadius) :
         termIndices(_termIndices),
         terms(_terms),
         apf(_apf),
@@ -3094,8 +3094,8 @@ public:
 
 private:
     std::array<int, 4> termIndices;
-    util::array_view<TASSTerm> terms;
-    util::array_view<TASSAPF> apf;
+    std::span<const TASSTerm> terms;
+    std::span<const TASSAPF> apf;
     TASSExtraParams extraParams;
     double period;
     double boundingRadius;
@@ -3109,7 +3109,7 @@ private:
 class TASS17HyperionOrbit: public CachingOrbit
 {
 public:
-    TASS17HyperionOrbit(std::array<int, 4> _termIndices, const util::array_view<TASSAPF> _apf) :
+    TASS17HyperionOrbit(std::array<int, 4> _termIndices, std::span<const TASSAPF> _apf) :
         termIndices(_termIndices),
         apf(_apf)
     {
@@ -3159,10 +3159,10 @@ public:
             zti += apf[i].ampl * swt;
         }
 
-        double vl = std::fmod(0.2953088138695055E+00 * t + q, celestia::numbers::pi * 2);
+        double vl = std::fmod(0.2953088138695055E+00 * t + q, std::numbers::pi * 2);
         if (vl < 0)
         {
-            vl += celestia::numbers::pi * 2;
+            vl += std::numbers::pi * 2;
         }
 
         std::array<double, 6> elem = {p, vl, zr, zi, ztr, zti};
@@ -3196,7 +3196,7 @@ public:
 
 private:
     std::array<int, 4> termIndices;
-    util::array_view<TASSAPF> apf;
+    std::span<const TASSAPF> apf;
 };
 
 } // end unnamed namespace

@@ -13,8 +13,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <numbers>
+#include <span>
 
-#include <celcompat/numbers.h>
 #include <celengine/atmosphere.h>
 #include <celengine/glsupport.h>
 #include <celengine/lightenv.h>
@@ -37,7 +38,9 @@ namespace celestia::render
 
 namespace
 {
-constexpr int MaxSkyRings = 32;
+constexpr int MaxHorizonRings = 6;
+constexpr int WithinAtmosphereRings = 12;
+constexpr int MaxSkyRings = MaxHorizonRings + WithinAtmosphereRings;
 constexpr int MaxSkySlices = 180;
 constexpr int MinSkySlices = 30;
 
@@ -64,7 +67,9 @@ void AtmosphereRenderer::initGL()
     m_skyContour.reserve(MaxSkySlices + 1);
 
     m_vo = gl::VertexObject(gl::VertexObject::Primitive::Triangles);
-    m_bo = gl::Buffer::create(gl::Buffer::TargetHint::Array);
+    m_bo = gl::Buffer::create(gl::Buffer::TargetHint::Array,
+                              static_cast<GLsizeiptr>(MaxVertices * sizeof(SkyVertex)),
+                              gl::Buffer::BufferUsage::StreamDraw);
 
     m_vo.addVertexBuffer(
         m_bo,
@@ -82,7 +87,9 @@ void AtmosphereRenderer::initGL()
         true,
         sizeof(SkyVertex),
         offsetof(SkyVertex, color));
-    m_ibo = gl::Buffer::create(gl::Buffer::TargetHint::ElementArray);
+    m_ibo = gl::Buffer::create(gl::Buffer::TargetHint::ElementArray,
+                               static_cast<GLsizeiptr>(MaxIndices * sizeof(GLushort)),
+                               gl::Buffer::BufferUsage::StreamDraw);
     m_vo.setIndexBuffer(m_ibo, 0, gl::VertexObject::IndexType::UnsignedShort);
 }
 
@@ -132,10 +139,10 @@ AtmosphereRenderer::computeLegacy(
         nSlices &= ~1;
     }
 
-    int nRings = std::min(1 + static_cast<int>(pixSize) / 5, 6);
+    int nRings = std::min(1 + static_cast<int>(pixSize) / 5, MaxHorizonRings);
     int nHorizonRings = nRings;
     if (within)
-        nRings += 12;
+        nRings += WithinAtmosphereRings;
 
     float horizonHeight = height;
     if (within)
@@ -192,12 +199,12 @@ AtmosphereRenderer::computeLegacy(
     vAxis = uAxis.cross(normal);
 
     // Compute the contour of the ellipsoid
-    for (int i = 0; i <= nSlices; i++)
+    for (int i = 0; i <= nSlices; ++i)
     {
         SkyContourPoint p;
         // We want rays with an origin at the eye point and tangent to the the
         // ellipsoid.
-        float theta = static_cast<float>(i) / static_cast<float>(nSlices) * 2.0f * numbers::pi_v<float>;
+        float theta = static_cast<float>(i) / static_cast<float>(nSlices) * 2.0f * std::numbers::pi_v<float>;
         Eigen::Vector3f w = std::cos(theta) * uAxis + std::sin(theta) * vAxis;
         w *= static_cast<float>(centerDist);
 
@@ -239,23 +246,25 @@ AtmosphereRenderer::computeLegacy(
     float sunset = cosSunAltitude < 0.9f ? 0.0f : (cosSunAltitude - 0.9f) * 10.0f;
 
     // Build the list of vertices
-    for (int i = 0; i <= nRings; i++)
+    for (int i = 0; i <= nRings; ++i)
     {
-        SkyVertex vtx;
         float h = std::min(1.0f, static_cast<float>(i) / static_cast<float>(nHorizonRings));
         float hh = std::sqrt(h);
         float u = i <= nHorizonRings ? 0.0f :
             static_cast<float>(i - nHorizonRings) / static_cast<float>(nRings - nHorizonRings);
-        float r = math::lerp(h, 1.0f - (horizonHeight * 0.05f), 1.0f + horizonHeight);
+        float r = math::lerp(1.0f - (horizonHeight * 0.05f), 1.0f + horizonHeight, h);
 
-        for (int j = 0; j < nSlices; j++)
+        for (int j = 0; j < nSlices; ++j)
         {
             Eigen::Vector3f v;
             if (i <= nHorizonRings)
                 v = m_skyContour[j].v * r;
             else
                 v = math::mix(m_skyContour[j].v, zenith, u) * r;
-            Eigen::Vector3f p = center + v;
+
+            auto& vtx = m_skyVertices.emplace_back();
+            Eigen::Map<Eigen::Vector3f> p(vtx.position.data());
+            p = center + v;
 
             Eigen::Vector3f viewDir = p.normalized();
             float cosSunAngle = viewDir.dot(sunDirection);
@@ -280,8 +289,6 @@ AtmosphereRenderer::computeLegacy(
                     brightness = (cosSunAngle + 0.2f) * 2.0f;
             }
 
-            std::memcpy(&vtx.position[0], p.data(), vtx.position.size() * sizeof(vtx.position[0]));
-
             float atten = 1.0f - hh;
             Eigen::Vector3f color = math::mix(botColor, topColor, hh);
             brightness *= minOpacity + (1.0f - minOpacity) * fade * atten;
@@ -292,13 +299,12 @@ AtmosphereRenderer::computeLegacy(
                   brightness * color.y(),
                   brightness * color.z(),
                   fade * (minOpacity + (1.0f - minOpacity)) * atten).get(&vtx.color[0]);
-            m_skyVertices.push_back(vtx);
         }
     }
     m_skyContour.clear();
 
     // Create the index list
-    BuildIndexList(static_cast<ushort>(nRings), static_cast<ushort>(nSlices), m_skyIndices);
+    BuildIndexList(static_cast<GLushort>(nRings), static_cast<GLushort>(nSlices), m_skyIndices);
 }
 
 void
@@ -328,8 +334,8 @@ AtmosphereRenderer::renderLegacy(
     ps.blendFunc = {GL_ONE, GL_ONE_MINUS_SRC_ALPHA};
     m_renderer.setPipelineState(ps);
 
-    m_bo->invalidateData().setData(m_skyVertices, gl::Buffer::BufferUsage::StreamDraw);
-    m_ibo->invalidateData().setData(m_skyIndices, gl::Buffer::BufferUsage::StreamDraw);
+    m_bo->invalidateData().setSubData(0, std::as_bytes(std::span{m_skyVertices}));
+    m_ibo->invalidateData().setSubData(0, std::as_bytes(std::span{m_skyIndices}));
 
     prog->use();
     prog->setMVPMatrices(*m.projection, *m.modelview);
@@ -356,6 +362,7 @@ AtmosphereRenderer::render(
 
     shadprop.texUsage |= TexUsage::Scattering;
     shadprop.lightModel = LightingModel::AtmosphereModel;
+    shadprop.separateRayleighMieScaleHeights = m_renderer.getSeparateRayleighMieScaleHeights(atmosphere);
 
     ShaderProperties transmissionProps = shadprop;
     transmissionProps.nLights = 0;
@@ -399,7 +406,7 @@ AtmosphereRenderer::render(
 
     float extinctionThreshold = m_renderer.getAtmosphereExtinctionThreshold();
     float atmosphereRadius = radius +
-                             m_renderer.getAtmosphereShellHeight(atmosphere.mieScaleHeight);
+                             m_renderer.getAtmosphereShellHeight(atmosphere);
     float atmScale = atmosphereRadius / radius;
 
     auto setupAtmosphereProgram = [&](CelestiaGLProgram* prog)

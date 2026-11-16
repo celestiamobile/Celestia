@@ -16,6 +16,7 @@
 #ifdef USE_MINIAUDIO
 #include <optional>
 #endif
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -572,14 +573,14 @@ class CommandPreloadTextures : public InstantaneousCommand
 class CommandMark : public InstantaneousCommand
 {
  public:
-    CommandMark(std::string, celestia::MarkerRepresentation, bool);
+    CommandMark(std::string, celestia::engine::MarkerRepresentation, bool);
 
  protected:
     void processInstantaneous(ExecutionEnvironment&) override;
 
  private:
     std::string target;
-    celestia::MarkerRepresentation rep;
+    celestia::engine::MarkerRepresentation rep;
     bool occludable;
 };
 
@@ -761,7 +762,7 @@ class CommandPlay : public InstantaneousCommand
 class CommandScriptImage : public InstantaneousCommand
 {
  public:
-    CommandScriptImage(float, float, float, float, const std::filesystem::path&, bool, std::array<Color, 4>&);
+    CommandScriptImage(float, float, float, float, const std::filesystem::path&, bool, std::span<Color, 4>);
 
  protected:
     void processInstantaneous(ExecutionEnvironment&) override;

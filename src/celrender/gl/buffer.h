@@ -12,12 +12,13 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include <boost/smart_ptr/intrusive_ptr.hpp>
 
 #include <celengine/glsupport.h>
-#include <celutil/array_view.h>
 #include <celutil/classops.h>
 
 namespace celestia::gl
@@ -83,7 +84,7 @@ public:
      * @param usage Buffer usage policy. @see @ref BufferUsage
      * @return Reference to self.
      */
-    Buffer& setData(util::array_view<void> data, BufferUsage usage = BufferUsage::StaticDraw);
+    Buffer& setData(std::span<const std::byte> data, BufferUsage usage = BufferUsage::StaticDraw);
 
     /**
      * @brief Partially update the Buffer.
@@ -92,7 +93,7 @@ public:
      * @param data Data.
      * @return Reference to self.
      */
-    Buffer& setSubData(GLintptr offset, util::array_view<void> data);
+    Buffer& setSubData(GLintptr offset, std::span<const std::byte> data);
 
     //! Invalidate buffer data.
     Buffer& invalidateData();
@@ -114,6 +115,10 @@ public:
      */
     static SharedPtr create(TargetHint targetHint);
 
+    static SharedPtr create(TargetHint  targetHint,
+                            GLsizeiptr  size,
+                            BufferUsage usage);
+
     /**
      * @brief Construct a new Buffer object.
      *
@@ -125,9 +130,9 @@ public:
      *
      * @see @ref TargetHint @ref BufferUsage
      */
-    static SharedPtr create(TargetHint             targetHint,
-                            util::array_view<void> data,
-                            BufferUsage            usage = BufferUsage::StaticDraw);
+    static SharedPtr create(TargetHint                 targetHint,
+                            std::span<const std::byte> data,
+                            BufferUsage                usage = BufferUsage::StaticDraw);
 
 private:
     Buffer(GLuint, TargetHint);
@@ -136,6 +141,8 @@ private:
     void clear();
     //! Destroy underlying OpenGL resources
     void destroy() noexcept;
+
+    void setData(const void*, GLsizeiptr, BufferUsage);
 
     inline friend void
     intrusive_ptr_add_ref(Buffer* p)

@@ -40,7 +40,6 @@
 
 #include <celastro/astro.h>
 #include <celastro/date.h>
-#include <celcompat/numbers.h>
 #include <celengine/asterism.h>
 #include <celengine/axisarrow.h>
 #include <celengine/body.h>
@@ -58,10 +57,12 @@
 #include <celengine/textlayout.h>
 #include <celengine/timeline.h>
 #include <celengine/timelinephase.h>
+#include <celengine/texture.h>
 #include <celengine/rectangle.h>
 #include <celengine/urlmanager.h>
 #include <celengine/visibleregion.h>
 #include <celengine/warpmesh.h>
+#include <celestia/celestiastate.h>
 #include <celestia/configfile.h>
 #include <celestia/favorites.h>
 #include <celestia/loaddso.h>
@@ -70,7 +71,6 @@
 #include <celestia/progressnotifier.h>
 #include <celestia/textprintposition.h>
 #include <celestia/viewmanager.h>
-#include <celestia/url.h>
 #include <celmath/geomutil.h>
 #include <celscript/legacy/execution.h>
 #include <celscript/legacy/cmdparser.h>
@@ -501,7 +501,6 @@ void CelestiaCore::mouseButtonUp(float x, float y, int button)
 
             Selection oldSel = sim->getSelection();
             Selection newSel = sim->pickObject(pickRay, renderer->getRenderFlags(), obsPickTolerance);
-            addToHistory();
             sim->setSelection(newSel);
             if (!oldSel.empty() && oldSel == newSel)
                 sim->centerSelection();
@@ -861,15 +860,11 @@ void CelestiaCore::keyDown(int key, int modifiers)
     case Key_PageDown:
         if (showConsole)
             console->scroll(Console::PageRows);
-        else
-            back();
         break;
 
     case Key_PageUp:
         if (showConsole)
             console->scroll(-Console::PageRows);
-        else
-            forward();
         break;
     }
 
@@ -1001,13 +996,11 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
 
     case '\007':  // Ctrl+G
         flash(_("Goto surface"));
-        addToHistory();
         sim->geosynchronousFollow();
         sim->gotoSurface(5.0);
         break;
 
     case '\006': // Ctrl+F
-        addToHistory();
         altAzimuthMode = !altAzimuthMode;
         if (altAzimuthMode)
         {
@@ -1035,7 +1028,7 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
             }
             else
             {
-                celestia::MarkerRepresentation markerRep(celestia::MarkerRepresentation::Diamond);
+                celestia::engine::MarkerRepresentation markerRep(celestia::engine::MarkerSymbol::Diamond);
                 markerRep.setSize(10.0f);
                 markerRep.setColor({0.0f, 1.0f, 0.0f, 0.9f});
 
@@ -1116,7 +1109,6 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
 
     case '\033': // Escape
         cancelScript();
-        addToHistory();
         if (hud->textEnterMode() != Hud::TextEnterMode::Normal)
         {
             setTextEnterMode(Hud::TextEnterMode::Normal);
@@ -1195,6 +1187,11 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         switch (renderer->getStarColorTable())
         {
         case ColorTableType::Enhanced:
+            renderer->setStarColorTable(ColorTableType::Illuminant_E);
+            flash(_("Star color: Blackbody Illuminant E"));
+            break;
+
+        case ColorTableType::Illuminant_E:
             renderer->setStarColorTable(ColorTableType::Blackbody_D65);
             flash(_("Star color: Blackbody D65"));
             break;
@@ -1226,12 +1223,10 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         break;
 
     case '*':
-        addToHistory();
         sim->reverseObserverOrientation();
         break;
 
     case '?':
-        addToHistory();
         if (!sim->getSelection().empty())
         {
             Vector3d v = sim->getSelection().getPosition(sim->getTime()).offsetFromKm(sim->getObserver().getPosition());
@@ -1264,8 +1259,6 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         break;
 
     case '-':
-        addToHistory();
-
         if (sim->getSelection().body() &&
             (sim->getTargetSpeed() < 0.99_c))
         {
@@ -1289,19 +1282,16 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         break;
 
     case ',':
-        addToHistory();
         if (observer->getFOV() > renderer->getProjectionMode()->getMinimumFOV())
             updateFOV(observer->getFOV() / 1.05f, std::nullopt, viewManager->activeView());
         break;
 
     case '.':
-        addToHistory();
         if (observer->getFOV() < renderer->getProjectionMode()->getMaximumFOV())
             updateFOV(observer->getFOV() * 1.05f, std::nullopt, viewManager->activeView());
         break;
 
     case '+':
-        addToHistory();
         if (observer->getDisplayedSurface() != "")
         {
             observer->setDisplayedSurface("");
@@ -1319,7 +1309,6 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         break;
 
     case '0':
-        addToHistory();
         sim->selectPlanet(-1);
         break;
 
@@ -1332,7 +1321,6 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
     case '7':
     case '8':
     case '9':
-        addToHistory();
         if (!(modifiers & ControlKey))
             sim->selectPlanet(c - '1');
         break;
@@ -1350,7 +1338,6 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         break;
 
     case 'C':
-        addToHistory();
         if (c == 'c')
             sim->centerSelection();
         else
@@ -1365,20 +1352,17 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         break;
 
     case 'F':
-        addToHistory();
         flash(_("Follow"));
         sim->follow();
         break;
 
     case 'G':
-        addToHistory();
         if (sim->getFrame()->getCoordinateSystem() == ObserverFrame::CoordinateSystem::Universal)
             sim->follow();
         sim->gotoSelection(5.0, Vector3f::UnitY(), ObserverFrame::CoordinateSystem::ObserverLocal);
         break;
 
     case 'H':
-        addToHistory();
         sim->setSelection(sim->getUniverse()->getStarCatalog()->find(0));
         break;
 
@@ -1387,7 +1371,6 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         break;
 
     case 'J':
-        addToHistory();
         sim->setTimeScale(-sim->getTimeScale());
         if (sim->getTimeScale() >= 0)
             flash(_("Time: Forward"));
@@ -1396,7 +1379,6 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         break;
 
     case 'K':
-        addToHistory();
         if (abs(sim->getTimeScale()) > TimeInfo::MinimumTimeRate)
         {
             if (c == 'k')
@@ -1409,7 +1391,6 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         break;
 
     case 'L':
-        addToHistory();
         if (abs(sim->getTimeScale()) < MaximumTimeRate)
         {
             if (c == 'l')
@@ -1477,7 +1458,6 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         break;
 
     case 'T':
-        addToHistory();
         if (sim->getTrackedObject().empty())
             sim->setTrackedObject(sim->getSelection());
         else
@@ -1508,19 +1488,16 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
 
     case 'Y':
         flash(_("Sync Orbit"));
-        addToHistory();
         sim->geosynchronousFollow();
         break;
 
     case ':':
         flash(_("Lock"));
-        addToHistory();
         sim->phaseLock();
         break;
 
     case '"':
         flash(_("Chase"));
-        addToHistory();
         sim->chase();
         break;
 
@@ -1550,7 +1527,6 @@ void CelestiaCore::charEntered(const char *c_p, int modifiers)
         break;
 
     case '\\':
-        addToHistory();
         sim->setTimeScale(1.0f);
         break;
 
@@ -1664,10 +1640,7 @@ void CelestiaCore::updateSelectionFromInput()
         sel = sim->findObjectFromPath(typedText, true);
 
     if (!sel.empty())
-    {
-        addToHistory();
         sim->setSelection(sel);
-    }
 }
 
 
@@ -2041,6 +2014,7 @@ void CelestiaCore::draw()
 
 void CelestiaCore::resize(GLsizei w, GLsizei h)
 {
+    annotationDepthFramebuffer.reset();
     if (h == 0)
         h = 1;
 
@@ -2059,69 +2033,104 @@ void CelestiaCore::resize(GLsizei w, GLsizei h)
         return;
 }
 
+bool CelestiaCore::hasAnnotationDepthBuffer(GLuint framebuffer)
+{
+    if (annotationDepthFramebuffer == framebuffer)
+        return annotationDepthAvailable;
+
+    annotationDepthFramebuffer = framebuffer;
+    annotationDepthAvailable = false;
+    GLenum attachment = framebuffer == 0 ? GL_DEPTH : GL_DEPTH_ATTACHMENT;
+    GLint type = GL_NONE;
+    glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, attachment,
+                                         GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &type);
+    if (type == GL_NONE)
+        return false;
+    GLint bits = 0;
+    glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, attachment,
+                                         GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE, &bits);
+    // Require at least the precision requested for the scene framebuffer.
+    annotationDepthAvailable = bits >= 24;
+    return annotationDepthAvailable;
+}
+
 void CelestiaCore::draw(View* view)
 {
     if (view->type != View::ViewWindow) return;
 
-    bool viewportEffectUsed = false;
+    isViewportEffectUsed = false;
 
     int nEffects = static_cast<int>(viewportEffects.size());
-    FramebufferObject *fbo = nullptr;
-    // Capture the screen framebuffer before any binding changes so we can
-    // restore it after the effect chain without relying on preprocess to save it.
-    auto screenFbo = nEffects > 0 ? std::make_optional(FramebufferObject::wrapCurrentBinding())
-                                  : std::nullopt;
-    if (nEffects > 0)
+    if (presentationEffect == nullptr || sceneDisplayEffect == nullptr)
     {
-        // create/update FBOs for viewport effect chain
-        view->updateFBOs(viewportEffects, metrics.width, metrics.height);
-        fbo = view->getFBO(0);
+        GetLogger()->error("No viewport presentation pass configured.\n");
+        return;
     }
-    bool process = fbo != nullptr && viewportEffects[0]->preprocess(renderer, fbo);
+
+    auto screenFbo = FramebufferObject::wrapCurrentBinding();
+    bool needsComposition = !presentationEffect->isIdentity() || !hasAnnotationDepthBuffer(screenFbo.id());
+    if (!view->updateFBOs(viewportEffects, metrics.width, metrics.height, needsComposition, sceneSamples))
+        return;
+
+    if (!presentationEffect->preprocess(renderer, view->getFBO(0)))
+    {
+        GetLogger()->error("Unable to prepare scene framebuffer.\n");
+        screenFbo.bind();
+        return;
+    }
 
     auto x = static_cast<int>(view->x * static_cast<float>(metrics.width));
     auto y = static_cast<int>(view->y * static_cast<float>(metrics.height));
     auto viewWidth = static_cast<int>(view->width * static_cast<float>(metrics.width));
     auto viewHeight = static_cast<int>(view->height * static_cast<float>(metrics.height));
-    // If we need to process, we draw to the FBO which starts at point zero
-    renderer->setRenderRegion(process ? 0 : x, process ? 0 : y, viewWidth, viewHeight, !view->isRootView() && !process);
+    renderer->setRenderRegion(0, 0, viewWidth, viewHeight, false);
 
     if (view->isRootView())
-        sim->render(*renderer);
+        sim->renderScene(*renderer);
     else
-        sim->render(*renderer, *view->observer);
+        sim->renderScene(*renderer, *view->observer);
 
-    if (process)
+    bool preserveDepth = renderer->annotationsRequireDepth();
+    sceneDisplayEffect->setPreserveDepth(preserveDepth);
+    if (!preserveDepth && presentationEffect->isIdentity())
+        needsComposition = false;
+
+    bool ok = true;
+    for (int i = 0; i < nEffects; i++)
     {
-        bool ok = true;
-        for (int i = 0; i < nEffects; i++)
+        bool toScreen = !needsComposition && i == nEffects - 1;
+        if (toScreen)
+            renderer->setRenderRegion(x, y, viewWidth, viewHeight);
+        FramebufferObject* dst = toScreen ? &screenFbo : view->getFBO(i + 1);
+        FramebufferObject* src = view->getFBO(i);
+        if (!viewportEffects[i]->prerender(renderer, src, dst) ||
+            !viewportEffects[i]->render(renderer, src, viewWidth, viewHeight))
         {
-            FramebufferObject* dst;
-            if (i == nEffects - 1)
-            {
-                // The last effect renders to the screen FBO, needs to be reset
-                // to start from (x,y) instead of point zero
-                dst = &screenFbo.value();
-                if (x != 0 || y != 0)
-                    renderer->setRenderRegion(x, y, viewWidth, viewHeight);
-            }
-            else
-            {
-                dst = view->getFBO(i + 1);
-            }
-
-            FramebufferObject* src = view->getFBO(i);
-            if (!viewportEffects[i]->prerender(renderer, src, dst) ||
-                !viewportEffects[i]->render(renderer, src, viewWidth, viewHeight))
-            {
-                GetLogger()->error("Unable to render viewport effect.\n");
-                ok = false;
-                break;
-            }
+            GetLogger()->error("Unable to render viewport effect.\n");
+            ok = false;
+            break;
         }
-        viewportEffectUsed = ok;
     }
-    isViewportEffectUsed = viewportEffectUsed;
+    if (!ok)
+    {
+        renderer->discardAnnotations();
+        screenFbo.bind();
+        return;
+    }
+
+    renderer->renderAnnotations();
+    if (needsComposition)
+    {
+        auto* composition = view->getFBO(nEffects);
+        screenFbo.bind();
+        renderer->setRenderRegion(x, y, viewWidth, viewHeight);
+        ok = presentationEffect->prerender(renderer, composition, &screenFbo) &&
+             presentationEffect->render(renderer, composition, viewWidth, viewHeight);
+        if (!ok)
+            GetLogger()->error("Unable to present annotated view.\n");
+    }
+    screenFbo.bind();
+    isViewportEffectUsed = ok;
 }
 
 void CelestiaCore::setSafeAreaInsets(int left, int top, int right, int bottom)
@@ -2416,8 +2425,11 @@ Eigen::Vector3f CelestiaCore::getPickRay(float x, float y, const celestia::View 
                           pickX, pickY);
     pickX *= aspectRatio;
     if (isViewportEffectUsed)
-        for (const auto& effect : viewportEffects)
-            effect->distortXY(pickX, pickY);
+    {
+        presentationEffect->distortXY(pickX, pickY);
+        for (auto effect = viewportEffects.rbegin(); effect != viewportEffects.rend(); ++effect)
+            (*effect)->distortXY(pickX, pickY);
+    }
 
     // Pick ray depends on view size, setting the size from the view
     // and then restore to the size of the window
@@ -2555,10 +2567,20 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
     if (favorites == nullptr)
         favorites = std::make_unique<FavoritesList>();
 
+    struct PendingResources
+    {
+        std::shared_ptr<engine::ResourceSystem> system{ std::make_shared<engine::ResourceSystem>() };
+        std::shared_ptr<engine::GeometryManager> geometry;
+        std::unique_ptr<Universe> universe;
+    };
+
     auto geometryPaths = std::make_shared<engine::GeometryPaths>();
-    resourceSystem = std::make_shared<engine::ResourceSystem>();
-    geometryManager = std::make_shared<engine::GeometryManager>(geometryPaths, texturePaths, *resourceSystem);
-    auto universe = std::make_unique<Universe>(geometryManager, std::make_unique<engine::UrlManager>());
+    PendingResources pendingResources;
+    pendingResources.geometry = std::make_shared<engine::GeometryManager>(
+        geometryPaths, texturePaths, *pendingResources.system);
+    pendingResources.universe = std::make_unique<Universe>(
+        pendingResources.geometry, std::make_unique<engine::UrlManager>());
+    auto& universe = pendingResources.universe;
 
     /***** Load star catalogs *****/
 
@@ -2654,7 +2676,7 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
             GetLogger()->warn("Unknown viewport effect {}\n", config->viewportEffect);
         }
         if (effect != nullptr)
-            viewportEffects.push_back(std::move(effect));
+            presentationEffect = std::move(effect);
     }
 
     if (!config->measurementSystem.empty())
@@ -2663,10 +2685,8 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
             hud->hudSettings().measurementSystem = MeasurementSystem::Imperial;
         else if (compareIgnoringCase(config->measurementSystem, "metric") == 0)
             hud->hudSettings().measurementSystem = MeasurementSystem::Metric;
-#ifdef USE_ICU
         else if (compareIgnoringCase(config->measurementSystem, "system") == 0)
             hud->hudSettings().measurementSystem = MeasurementSystem::System;
-#endif
         else
             GetLogger()->warn("Unknown measurement system {}\n", config->measurementSystem);
     }
@@ -2712,6 +2732,8 @@ bool CelestiaCore::initSimulation(const std::filesystem::path& configFileName,
     set_or_unset(observerSettings->flags, celestia::engine::ObserverFlags::AlignCameraToSurfaceOnLand, config->observer.alignCameraToSurfaceOnLand);
 
     sim = std::make_unique<Simulation>(std::move(universe), observerSettings);
+    geometryManager = std::move(pendingResources.geometry);
+    resourceSystem = std::move(pendingResources.system);
 
     // Load asterisms:
     if (!config->paths.asterismsFile.empty())
@@ -2767,19 +2789,29 @@ LoadFontHelper(const Renderer* renderer,
 
 bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
                                 std::optional<bool> sRGBRendering,
+                                std::optional<unsigned int> aaSamples,
                                 [[maybe_unused]] bool useMesaPackInvert)
 {
+    annotationDepthFramebuffer.reset();
+    GLint maxSamples = 1;
+    glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
+    sceneSamples = static_cast<int>(std::clamp(aaSamples.value_or(config->renderDetails.aaSamples),
+        1u, static_cast<unsigned int>(std::max(1, maxSamples))));
     gl::sRGBRendering = sRGBRendering.value_or(config->renderDetails.output.sRGB);
+    celestia::engine::SetTextureAnisotropy(config->renderDetails.textures.anisotropy);
 
-    if (gl::sRGBRendering)
-    {
-        // Apply sRGB output correction via software post-process.
-        // The SRGBViewportEffect shader performs the linear→sRGB conversion
-        // as the final rendering step, keeping the pipeline consistent across
-        // all GL variants without relying on GL_FRAMEBUFFER_SRGB or
-        // platform-specific sRGB surface negotiation.
-        viewportEffects.push_back(std::make_unique<PassthroughViewportEffect>(true));
-    }
+    bool useFloatScene = gl::sRGBRendering && gl::colorBufferHalfFloat;
+    if (gl::sRGBRendering && !useFloatScene)
+        GetLogger()->warn("Half-float color buffers are unavailable; using RGBA8 scene rendering "
+                         "with reduced precision and clipped HDR highlights.\n");
+
+    // Even an identity pass keeps annotations out of the scene framebuffer.
+    auto sceneEffect = std::make_unique<PassthroughViewportEffect>(
+        useFloatScene, gl::sRGBRendering, true);
+    sceneDisplayEffect = sceneEffect.get();
+    viewportEffects.push_back(std::move(sceneEffect));
+    if (presentationEffect == nullptr)
+        presentationEffect = std::make_unique<PassthroughViewportEffect>();
 
     renderer->setRenderFlags(RenderFlags::ShowStars |
                              RenderFlags::ShowPlanets |
@@ -2791,8 +2823,9 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
     detailOptions.atmosphereSegmentCount = config->renderDetails.atmosphere.segmentCount;
     detailOptions.cloudSegmentCount = config->renderDetails.atmosphere.cloudSegmentCount;
     detailOptions.atmosphereExtinctionThreshold = config->renderDetails.atmosphere.extinctionThreshold;
-    detailOptions.shadowTextureSize = config->renderDetails.shadowTextureSize;
-    detailOptions.eclipseTextureSize = config->renderDetails.eclipseTextureSize;
+    detailOptions.separateRayleighMieScaleHeights = config->renderDetails.atmosphere.separateRayleighMieScaleHeights;
+    detailOptions.shadowTextureSize = config->renderDetails.textures.shadowSize;
+    detailOptions.eclipseTextureSize = config->renderDetails.textures.eclipseSize;
     detailOptions.orbitWindowEnd = config->renderDetails.orbitWindowEnd;
     detailOptions.orbitPeriodsShown = config->renderDetails.orbitPeriodsShown;
     detailOptions.linearFadeFraction = config->renderDetails.linearFadeFraction;
@@ -2814,7 +2847,7 @@ bool CelestiaCore::initRenderer(engine::TextureResolution resolution,
         return false;
     }
 
-    renderer->colors = renderer->colors.linearize(gl::sRGBRendering);
+    renderer->colors = renderer->colors.linearizeSceneColors(gl::sRGBRendering);
     m_scriptMaps.initColorMaps(renderer->colors);
     renderer->setToneMappingMode(config->renderDetails.output.toneMapping);
 
@@ -3151,74 +3184,16 @@ const CelestiaConfig* CelestiaCore::getConfig() const
 
 bool CelestiaCore::goToUrl(std::string_view urlStr)
 {
-    Url url(this);
-    if (!url.parse(urlStr))
+    auto state = celestia::CelestiaState::parseURL(*this, urlStr);
+    if (!state.has_value())
     {
         fatalError(_("Invalid URL"));
         return false;
     }
-    url.goTo();
+
+    state->apply();
     return true;
 }
-
-
-void CelestiaCore::addToHistory()
-{
-    if (!history.empty() && historyCurrent < history.size() - 1)
-    {
-        // truncating history to current position
-        while (historyCurrent != history.size() - 1)
-            history.pop_back();
-    }
-    history.emplace_back(this);
-    historyCurrent = history.size() - 1;
-}
-
-
-void CelestiaCore::back()
-{
-    if (historyCurrent == 0)
-        return;
-
-    if (historyCurrent == history.size() - 1)
-    {
-        addToHistory();
-        historyCurrent = history.size()-1;
-    }
-    historyCurrent--;
-    history[historyCurrent].goTo();
-}
-
-
-void CelestiaCore::forward()
-{
-    if (history.empty() || historyCurrent == history.size()-1)
-        return;
-    historyCurrent++;
-    history[historyCurrent].goTo();
-}
-
-
-const vector<Url>& CelestiaCore::getHistory() const
-{
-    return history;
-}
-
-vector<Url>::size_type CelestiaCore::getHistoryCurrent() const
-{
-    return historyCurrent;
-}
-
-void CelestiaCore::setHistoryCurrent(vector<Url>::size_type curr)
-{
-    if (curr >= history.size()) return;
-    if (historyCurrent == history.size()) {
-        addToHistory();
-    }
-    historyCurrent = curr;
-    history[curr].goTo();
-}
-
 
 /*! Toggle the specified reference mark for a selection.
  *  a selection. The default value for the selection argument is
@@ -3352,14 +3327,14 @@ View* CelestiaCore::getViewByObserver(const Observer *obs) const
     return it == end ? nullptr : *it;
 }
 
-void CelestiaCore::getCaptureInfo(std::array<int, 4>& viewport, celestia::engine::PixelFormat& format) const
+void CelestiaCore::getCaptureInfo(std::span<int, 4> viewport, celestia::engine::PixelFormat& format) const
 {
     renderer->getViewport(viewport);
     format = renderer->getPreferredCaptureFormat();
 }
 
 bool CelestiaCore::captureImage(std::uint8_t* buffer,
-                                const std::array<int, 4>& viewport,
+                                std::span<const int, 4> viewport,
                                 celestia::engine::PixelFormat format) const
 {
     if (renderer->captureFrame(viewport[0], viewport[1],

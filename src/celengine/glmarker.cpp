@@ -11,31 +11,34 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <numbers>
+#include <span>
 
-#include <celcompat/numbers.h>
-#include <celmath/frustum.h>
 #include <celmath/mathlib.h>
 #include <celmath/vecgl.h>
 #include <celrender/gl/buffer.h>
 #include <celrender/gl/vertexobject.h>
 #include <celrender/linerenderer.h>
 #include "marker.h"
-#include "observer.h"
 #include "render.h"
 
-using namespace celestia;
 using celestia::render::LineRenderer;
+
+namespace gl = celestia::gl;
+namespace math = celestia::math;
+
+using MarkerSymbol = celestia::engine::MarkerSymbol;
 
 namespace
 {
-constexpr float pif = celestia::numbers::pi_v<float>;
+constexpr float pif = std::numbers::pi_v<float>;
 
 #include "markers.inc"
 
 void
 initialize(LineRenderer &lr, gl::VertexObject &vo)
 {
-    auto bo = gl::Buffer::create(gl::Buffer::TargetHint::Array, FilledMarkersData);
+    auto bo = gl::Buffer::create(gl::Buffer::TargetHint::Array, std::as_bytes(std::span{FilledMarkersData}));
 
     vo.addVertexBuffer(
         bo,
@@ -54,7 +57,7 @@ initialize(LineRenderer &lr, gl::VertexObject &vo)
 } // end unnamed namespace
 
 void
-Renderer::renderMarker(MarkerRepresentation::Symbol symbol,
+Renderer::renderMarker(MarkerSymbol symbol,
                        float size,
                        const Color &color,
                        const Matrices &m)
@@ -70,22 +73,23 @@ Renderer::renderMarker(MarkerRepresentation::Symbol symbol,
     float s = size / 2.0f * getScaleFactor();
     Eigen::Matrix4f mv = (*m.modelview) * math::scale(Eigen::Vector3f(s, s, 0));
 
+    using enum MarkerSymbol;
     switch (symbol)
     {
-    case MarkerRepresentation::Diamond:
-    case MarkerRepresentation::Plus:
-    case MarkerRepresentation::X:
-    case MarkerRepresentation::Square:
-    case MarkerRepresentation::Triangle:
-    case MarkerRepresentation::Circle:
+    case Diamond:
+    case Plus:
+    case X:
+    case Square:
+    case Triangle:
+    case Circle:
         RenderHollowMarker(*m_hollowMarkerRenderer, symbol, size, color, {m.projection, &mv});
         break;
-    case MarkerRepresentation::FilledSquare:
-    case MarkerRepresentation::RightArrow:
-    case MarkerRepresentation::LeftArrow:
-    case MarkerRepresentation::UpArrow:
-    case MarkerRepresentation::DownArrow:
-    case MarkerRepresentation::Disk:
+    case FilledSquare:
+    case RightArrow:
+    case LeftArrow:
+    case UpArrow:
+    case DownArrow:
+    case Disk:
         RenderFilledMarker(*this, *m_markerVO, symbol, size, color, {m.projection, &mv});
         break;
     default:
@@ -97,20 +101,9 @@ Renderer::renderMarker(MarkerRepresentation::Symbol symbol,
  *  should only be called when the selection lies outside the view frustum.
  */
 void
-Renderer::renderSelectionPointer(const Observer& observer,
-                                 double now,
-                                 const math::InfiniteFrustum& viewFrustum,
-                                 const Selection& sel)
+Renderer::renderSelectionPointer(Eigen::Vector3d position)
 {
     constexpr float cursorDistance = 20.0f;
-    if (sel.empty())
-        return;
-
-    // Get the position of the cursor relative to the eye
-    Eigen::Vector3d position = sel.getPosition(now).offsetFromKm(observer.getPosition());
-    if (viewFrustum.testSphere(position, sel.radius()) != math::FrustumAspect::Outside)
-        return;
-
     assert(shaderManager != nullptr);
     auto* prog = shaderManager->getShader(StaticShader::SelPointer);
     if (prog == nullptr)

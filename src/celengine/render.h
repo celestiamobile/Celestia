@@ -13,6 +13,8 @@
 #include <array>
 #include <list>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -22,6 +24,7 @@
 
 #include <celengine/body.h>
 #include <celengine/lightenv.h>
+#include <celengine/marker.h>
 #include <celengine/meshmanager.h>
 #include <celengine/universe.h>
 #include <celengine/selection.h>
@@ -127,9 +130,10 @@ class Renderer
     struct DetailOptions
     {
         unsigned int orbitPathSamplePoints{ 100 };
-        unsigned int atmosphereSegmentCount{ 6 };
+        unsigned int atmosphereSegmentCount{ 3 };
         unsigned int cloudSegmentCount{ 2 };
         float atmosphereExtinctionThreshold{ 0.000125f };
+        bool separateRayleighMieScaleHeights{ false };
         unsigned int shadowTextureSize{ 256 };
         unsigned int eclipseTextureSize{ 128 };
         double orbitWindowEnd{ 0.5 };
@@ -162,10 +166,14 @@ class Renderer
 
     void setRenderMode(RenderMode);
     void autoMag(float& faintestMag, float zoom);
-    void render(const Observer&,
-                const Universe&,
-                float faintestVisible,
-                const Selection& sel);
+    void renderScene(const Observer&,
+                     const Universe&,
+                     float faintestVisible,
+                     const Selection& sel);
+    // Draw after scene display mapping, using retained scene depth.
+    void renderAnnotations();
+    bool annotationsRequireDepth() const;
+    void discardAnnotations();
 
     bool getInfo(std::map<std::string, std::string>& info) const;
 
@@ -198,9 +206,9 @@ class Renderer
 
     // GL wrappers
     void getViewport(int* x, int* y, int* w, int* h) const;
-    void getViewport(std::array<int, 4>& viewport) const;
+    void getViewport(std::span<int, 4> viewport) const;
     void setViewport(int x, int y, int w, int h);
-    void setViewport(const std::array<int, 4>& viewport);
+    void setViewport(std::span<const int, 4> viewport);
     void setScissor(int x, int y, int w, int h);
     void removeScissor();
 
@@ -222,19 +230,25 @@ class Renderer
     void setStarColorTable(ColorTableType);
     void setSolarSystemMaxDistance(float);
     void setShadowMapSize(unsigned);
+    void setAtmosphereSegmentCount(unsigned int) noexcept;
     unsigned int getAtmosphereSegmentCount() const noexcept;
+    void setCloudSegmentCount(unsigned int) noexcept;
     unsigned int getCloudSegmentCount() const noexcept;
     float getAtmosphereExtinctionThreshold() const noexcept;
     float getAtmosphereShellHeight(float scaleHeight) const noexcept;
+    float getAtmosphereShellHeight(const Atmosphere&) const noexcept;
+    void setSeparateRayleighMieScaleHeights(bool) noexcept;
+    bool getSeparateRayleighMieScaleHeights() const noexcept;
+    bool getSeparateRayleighMieScaleHeights(const Atmosphere&) const noexcept;
 
     bool captureFrame(int, int, int, int, celestia::engine::PixelFormat format, unsigned char*) const;
 
-    void renderMarker(celestia::MarkerRepresentation::Symbol symbol,
+    void renderMarker(celestia::engine::MarkerSymbol symbol,
                       float size,
                       const Color &color,
                       const Matrices &m);
 
-    celestia::util::array_view<const Star*> getNearStars() const
+    std::span<const Star* const> getNearStars() const
     {
         return nearStars;
     }
@@ -301,6 +315,7 @@ class Renderer
     // Point Spread Function star renderer settings (StarStyle::PointSpreadFunction).
     void  setStarPointRadius(float r);
     float getStarPointRadius() const;
+    // Positive values are clamped to [0.05, 1.0]; nonpositive values disable glow.
     void  setStarOptimization(float opt);
     float getStarOptimization() const;
     void  setStarMaxIrradiance(float v);
@@ -338,31 +353,29 @@ class Renderer
     struct Annotation
     {
         std::string labelText;
-        const celestia::MarkerRepresentation* markerRep;
+        std::optional<celestia::engine::MarkerRepresentation> markerRep;
         Color color;
         Eigen::Vector3f position;
         LabelHorizontalAlignment halign : 3;
         LabelVerticalAlignment valign : 3;
         float size;
-
-        bool operator<(const Annotation&) const;
     };
 
-    void addForegroundAnnotation(const celestia::MarkerRepresentation* markerRep,
+    void addForegroundAnnotation(const celestia::engine::MarkerRepresentation* markerRep,
                                  std::string_view labelText,
                                  Color color,
                                  const Eigen::Vector3f& position,
                                  LabelHorizontalAlignment halign = LabelHorizontalAlignment::Start,
                                  LabelVerticalAlignment valign = LabelVerticalAlignment::Bottom,
                                  float size = 0.0f);
-    void addBackgroundAnnotation(const celestia::MarkerRepresentation* markerRep,
+    void addBackgroundAnnotation(const celestia::engine::MarkerRepresentation* markerRep,
                                  std::string_view labelText,
                                  Color color,
                                  const Eigen::Vector3f& position,
                                  LabelHorizontalAlignment halign = LabelHorizontalAlignment::Start,
                                  LabelVerticalAlignment valign = LabelVerticalAlignment::Bottom,
                                  float size = 0.0f);
-    void addSortedAnnotation(const celestia::MarkerRepresentation* markerRep,
+    void addSortedAnnotation(const celestia::engine::MarkerRepresentation* markerRep,
                              std::string_view labelText,
                              Color color,
                              const Eigen::Vector3f& position,
@@ -375,7 +388,7 @@ class Renderer
     // Callbacks for renderables; these belong in a special renderer interface
     // only visible in object's render methods.
     void beginObjectAnnotations();
-    void addObjectAnnotation(const celestia::MarkerRepresentation* markerRep,
+    void addObjectAnnotation(const celestia::engine::MarkerRepresentation* markerRep,
                              std::string_view labelText,
                              Color,
                              const Eigen::Vector3f&,
@@ -399,8 +412,6 @@ class Renderer
         const Star* star;
         Eigen::Vector3d origin;
         float opacity;
-
-        bool operator<(const OrbitPathListEntry&) const;
     };
 
     enum class FontStyle : std::uint8_t
@@ -451,6 +462,7 @@ class Renderer
 
  private:
     void setFieldOfView(float);
+    void preparePsfStarBuffers();
     void renderPointStars(const StarDatabase& starDB,
                           float faintestVisible,
                           const Observer& observer);
@@ -458,10 +470,7 @@ class Renderer
                               const Observer&,
                               float faintestMagNight);
     void renderSkyGrids(const Observer& observer);
-    void renderSelectionPointer(const Observer& observer,
-                                double now,
-                                const celestia::math::InfiniteFrustum& viewFrustum,
-                                const Selection& sel);
+    void renderSelectionPointer(Eigen::Vector3d position);
 
     void renderAsterisms(const Universe&, float, const Matrices&);
     void renderBoundaries(const Universe&, float, const Matrices&);
@@ -640,7 +649,7 @@ class Renderer
     void getLabelAlignmentInfo(const Annotation &annotation, const TextureFont *font, celestia::engine::TextLayout::HorizontalAlignment &halign, float &hOffset, float &vOffset) const;
 
     void addAnnotation(std::vector<Annotation>&,
-                       const celestia::MarkerRepresentation*,
+                       const celestia::engine::MarkerRepresentation*,
                        std::string_view labelText,
                        Color color,
                        const Eigen::Vector3f& position,
@@ -658,21 +667,20 @@ class Renderer
                                float vOffset,
                                float depth,
                                const Matrices&);
-    void renderAnnotations(const std::vector<Annotation>&,
+    void renderAnnotations(std::span<const Annotation>,
                            FontStyle fs);
-    void renderBackgroundAnnotations(FontStyle fs);
+    void queueBackgroundAnnotations(FontStyle fs);
     void renderForegroundAnnotations(FontStyle fs);
-    std::vector<Annotation>::iterator renderSortedAnnotations(std::vector<Annotation>::iterator,
-                                                              float nearDist,
-                                                              float farDist,
-                                                              FontStyle fs);
-    std::vector<Annotation>::iterator renderAnnotations(std::vector<Annotation>::iterator startIter,
-                                                        std::vector<Annotation>::iterator endIter,
+    std::span<const Annotation> renderSortedAnnotations(std::span<const Annotation>,
                                                         float nearDist,
                                                         float farDist,
                                                         FontStyle fs);
+    std::span<const Annotation> renderAnnotations(std::span<const Annotation>,
+                                                  float nearDist,
+                                                  float farDist,
+                                                  FontStyle fs);
 
-    void markersToAnnotations(const celestia::MarkerList &markers,
+    void markersToAnnotations(const celestia::engine::MarkerList &markers,
                               const Observer &observer,
                               double now);
 
@@ -722,8 +730,8 @@ class Renderer
     RenderFlags renderFlags{ RenderFlags::DefaultRenderFlags };
     BodyClassification bodyVisibilityMask{ ~BodyClassification::EmptyMask };
     BodyClassification orbitMask{ BodyClassification::Planet | BodyClassification::Moon | BodyClassification::Stellar };
-    float ambientLightLevel{ 0.1f };
-    float tintSaturation{ 0.5f };
+    float ambientLightLevel{ 0.0f };
+    float tintSaturation{ 1.0f };
     float brightnessBias{ 0.0f };
 
     float brightnessScale{ 1.0f };
@@ -758,6 +766,23 @@ class Renderer
     std::vector<Annotation> foregroundAnnotations;
     std::vector<Annotation> depthSortedAnnotations;
     std::vector<Annotation> objectAnnotations;
+    struct BackgroundAnnotationBatch
+    {
+        FontStyle font{ FontStyle::Normal };
+        std::size_t start{ 0 };
+        std::size_t end{ 0 };
+    };
+
+    struct ObjectAnnotationBatch
+    {
+        std::size_t start{ 0 };
+        std::size_t end{ 0 };
+    };
+
+    std::vector<BackgroundAnnotationBatch> backgroundAnnotationBatches;
+    std::vector<ObjectAnnotationBatch> objectAnnotationBatches;
+    std::optional<Eigen::Vector3d> selectionPointerPosition;
+    bool annotationsPending{ false };
     std::vector<OrbitPathListEntry> orbitPathList;
     LightingState::EclipseShadowVector eclipseShadows[MaxLights];
 
@@ -787,10 +812,11 @@ class Renderer
     const Eigen::Matrix4f *m_projectionPtr { &m_projMatrix };
 
     DetailOptions detailOptions;
-    unsigned int atmosphereSegmentCount{ 6 };
+    unsigned int atmosphereSegmentCount{ 3 };
     unsigned int cloudSegmentCount{ 2 };
     float atmosphereExtinctionThreshold{ 0.000125f };
     float atmosphereExtinctionFactor{ 0.0f };
+    bool separateRayleighMieScaleHeights{ false };
 
     std::uint32_t frameCount{ 0 };
 
@@ -814,8 +840,7 @@ class Renderer
     float minFeatureSize{ 20.0f };
     std::uint64_t locationFilter{ ~UINT64_C(0) };
 
-    ColorTemperatureTable starColors{ ColorTableType::Blackbody_D65 };
-    ColorTemperatureTable tintColors{ ColorTableType::SunWhite };
+    ColorTemperatureTable starColors{ ColorTableType::SunWhite };
 
     Selection highlightObject;
 
@@ -872,15 +897,15 @@ class Renderer
 
     // Location markers
  public:
-    celestia::MarkerRepresentation mountainRep;
-    celestia::MarkerRepresentation craterRep;
-    celestia::MarkerRepresentation observatoryRep;
-    celestia::MarkerRepresentation cityRep;
-    celestia::MarkerRepresentation genericLocationRep;
-    celestia::MarkerRepresentation galaxyRep;
-    celestia::MarkerRepresentation nebulaRep;
-    celestia::MarkerRepresentation openClusterRep;
-    celestia::MarkerRepresentation globularRep;
+    celestia::engine::MarkerRepresentation mountainRep;
+    celestia::engine::MarkerRepresentation craterRep;
+    celestia::engine::MarkerRepresentation observatoryRep;
+    celestia::engine::MarkerRepresentation cityRep;
+    celestia::engine::MarkerRepresentation genericLocationRep;
+    celestia::engine::MarkerRepresentation galaxyRep;
+    celestia::engine::MarkerRepresentation nebulaRep;
+    celestia::engine::MarkerRepresentation openClusterRep;
+    celestia::engine::MarkerRepresentation globularRep;
 
     std::list<RendererWatcher*> watchers;
 

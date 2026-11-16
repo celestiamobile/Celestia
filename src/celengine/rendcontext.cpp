@@ -9,6 +9,7 @@
 // of the License, or (at your option) any later version.
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstddef>
 
@@ -241,7 +242,7 @@ GLSL_RenderContext::initLightingEnvironment()
 void
 GLSL_RenderContext::makeCurrent(const cmod::Material& m)
 {
-    Texture* textures[4] = { nullptr, nullptr, nullptr, nullptr };
+    std::array<Texture*, 5> textures{};
     unsigned int nTextures = 0;
 
     // Set up the textures used by this object
@@ -251,6 +252,7 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
     Texture* emissiveTex = nullptr;
 
     shaderProps.texUsage = TexUsage::SharedTextureCoords;
+    shaderProps.separateRayleighMieScaleHeights = false;
 
     if (useNormals)
     {
@@ -383,7 +385,10 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
     {
         // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
         if (atmosphere->mieScaleHeight > 0.0f)
+        {
             shaderProps.texUsage |= TexUsage::Scattering;
+            shaderProps.separateRayleighMieScaleHeights = renderer->getSeparateRayleighMieScaleHeights(*atmosphere);
+        }
     }
 
     bool hasShadowMap = shadowMap != 0 && shadowMapWidth != 0 && lightMatrix != nullptr;
@@ -446,7 +451,7 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
     {
         float extinctionThreshold = renderer->getAtmosphereExtinctionThreshold();
         float atmosphereRadius = objRadius +
-                                 renderer->getAtmosphereShellHeight(atmosphere->mieScaleHeight);
+                                 renderer->getAtmosphereShellHeight(*atmosphere);
         prog->setAtmosphereParameters(*atmosphere, objRadius, objRadius, atmosphereRadius,
                                       renderer->getAtmosphereSegmentCount(),
                                       extinctionThreshold);
@@ -543,6 +548,13 @@ GLSLUnlit_RenderContext::GLSLUnlit_RenderContext(Renderer* renderer,
 GLSLUnlit_RenderContext::~GLSLUnlit_RenderContext() = default;
 
 void
+GLSLUnlit_RenderContext::drawGroup(gl::VertexObject &vao, const cmod::PrimitiveGroup& group)
+{
+    if (!diffuseTextureLoading)
+        RenderContext::drawGroup(vao, group);
+}
+
+void
 GLSLUnlit_RenderContext::initLightingEnvironment()
 {
     // Set the light and shadow environment, which is constant for the entire model.
@@ -553,6 +565,7 @@ GLSLUnlit_RenderContext::initLightingEnvironment()
 void
 GLSLUnlit_RenderContext::makeCurrent(const cmod::Material& m)
 {
+    diffuseTextureLoading = false;
     Texture* textures[4] = { nullptr, nullptr, nullptr, nullptr };
     unsigned int nTextures = 0;
 
@@ -566,6 +579,12 @@ GLSLUnlit_RenderContext::makeCurrent(const cmod::Material& m)
         diffuseMap != util::TextureHandle::Invalid && (useTexCoords || usePointSize))
     {
         baseTex = renderer->getTextureManager()->find(diffuseMap);
+        if (baseTex == nullptr && renderer->getTextureManager()->isLoading(diffuseMap))
+        {
+            // Avoid flashing the flat material color while the texture loads.
+            diffuseTextureLoading = true;
+            return;
+        }
         if (baseTex != nullptr)
         {
             shaderProps.texUsage |= TexUsage::DiffuseTexture;

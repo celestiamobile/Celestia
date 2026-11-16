@@ -136,7 +136,7 @@ CelestiaGlWidget::initializeGL()
     if (settings.contains("sRGBRendering"))
         sRGBOverride = settings.value("sRGBRendering").toBool();
 
-    if (!appCore->initRenderer(static_cast<engine::TextureResolution>(textureResolution), sRGBOverride, false))
+    if (!appCore->initRenderer(static_cast<engine::TextureResolution>(textureResolution), sRGBOverride, std::nullopt, false))
     {
         // cerr << "Failed to initialize renderer.\n";
         exit(1);
@@ -165,6 +165,10 @@ CelestiaGlWidget::initializeGL()
 
     appRenderer->setSolarSystemMaxDistance(appCore->getConfig()->renderDetails.SolarSystemMaxDistance);
     appRenderer->setShadowMapSize(appCore->getConfig()->renderDetails.ShadowMapSize);
+    auto& atmosphereConfig = appCore->getConfig()->renderDetails.atmosphere;
+    appRenderer->setSeparateRayleighMieScaleHeights(settings.value("SeparateRayleighMieScaleHeights", atmosphereConfig.separateRayleighMieScaleHeights).toBool());
+    appRenderer->setAtmosphereSegmentCount(settings.value("AtmosphereSegmentCount", atmosphereConfig.segmentCount).toUInt());
+    appRenderer->setCloudSegmentCount(settings.value("CloudSegmentCount", atmosphereConfig.cloudSegmentCount).toUInt());
     appRenderer->setStarPointRadius(
         (float) settings.value("StarPointRadius",
                                appCore->getConfig()->renderDetails.stars.pointRadius).toDouble());
