@@ -298,7 +298,7 @@ AtmosphereRenderer::computeLegacy(
             Color(brightness * color.x(),
                   brightness * color.y(),
                   brightness * color.z(),
-                  fade * (minOpacity + (1.0f - minOpacity)) * atten).get(&vtx.color[0]);
+                  fade * (minOpacity + (1.0f - minOpacity)) * atten).get(vtx.color);
         }
     }
     m_skyContour.clear();
@@ -436,6 +436,7 @@ AtmosphereRenderer::render(
         m_renderer.m_lodSphere->render(0,
                                        shellFrustum,
                                        ri.pixWidth,
+                                       {},
                                        nullptr);
     }
 
@@ -466,8 +467,8 @@ AtmosphereRenderer::render(
         m_renderer.m_lodSphere->render(0,
                                        shellFrustum,
                                        ri.pixWidth,
-                                       scatteringProg,
-                                       ringShadowTex);
+                                       std::span{&ringShadowTex, ringShadowTex ? 1U : 0U},
+                                       scatteringProg);
     }
 
     glFrontFace(GL_CCW);
