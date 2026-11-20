@@ -121,7 +121,6 @@ void PointStarRenderer::process(const Star& star, float distance, float appMag)
     // cost of a normalize per star.
     if (relPos.dot(viewNormal) > 0.0f || relPos.x() * relPos.x() < 0.1f || hasOrbit)
     {
-        Color starColor = colorTemp->lookupColor(star.getTemperature());
         float discSizeInPixels = 0.0f;
         float orbitSizeInPixels = 0.0f;
 
@@ -155,6 +154,15 @@ void PointStarRenderer::process(const Star& star, float distance, float appMag)
 
             discSizeInPixels = star.getRadius() / astro::lightYearsToKilometers(distance) / pixelSize;
         }
+
+        // Wide linear fisheye ranges can round behind-eye stars onto the near plane.
+        if (clipBackgroundStarsBehindViewer && distance > SolarSystemMaxDistance &&
+            relPos.dot(viewNormal) <= 0.0f)
+        {
+            return;
+        }
+
+        Color starColor = colorTemp->lookupColor(star.getTemperature());
 
         // Stars closer than the maximum solar system size are actually
         // added to the render list and depth sorted, since they may occlude

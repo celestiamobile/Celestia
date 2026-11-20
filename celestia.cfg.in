@@ -575,8 +575,9 @@ StarTextures
 # ToneMappingMode     "Manual"
 
 #------------------------------------------------------------------------
-# ReverseZ replaces depth-buffer partitioning with reverse-Z + an infinite
-# far plane. Requires ARB_clip_control / EXT_clip_control (or GL 4.5+);
+# ReverseZ uses FP32 depth and an infinite far plane for perspective views;
+# fisheye views retain depth partitioning.
+# Requires ARB_clip_control / EXT_clip_control (or GL 4.5+);
 # falls back to standard partitioning if unavailable.
 # The default value is false.
 #------------------------------------------------------------------------

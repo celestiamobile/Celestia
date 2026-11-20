@@ -52,6 +52,8 @@
 #include <celastro/astro.h>
 #include <celastro/date.h>
 #include <celengine/observer.h>
+#include <celengine/fisheyeprojectionmode.h>
+#include <celengine/perspectiveprojectionmode.h>
 #include <celephem/rotation.h>
 #include <celmath/frustum.h>
 #include <celmath/distance.h>
@@ -140,6 +142,14 @@ static constexpr std::uint32_t OrbitCacheRetireAge = 16;
 
 static constexpr unsigned int StarBufferCapacity = 2048;
 static constexpr unsigned int LegacyLargeStarCapacity = 512;
+
+static void setDepthInterval(int interval, float intervalSize)
+{
+    float rangeNear = static_cast<float>(interval) * intervalSize;
+    float rangeFar = static_cast<float>(interval + 1) * intervalSize;
+    glDepthRange(gl::reverseZ ? rangeNear : 1.0f - rangeFar,
+                 gl::reverseZ ? rangeFar : 1.0f - rangeNear);
+}
 
 
 // Some useful unit conversions
@@ -495,6 +505,8 @@ bool Renderer::init(int winWidth, int winHeight,
     }
     else
     {
+        if (gl::ARB_clip_control || gl::EXT_clip_control)
+            gl::setClipControl(false);
         glDepthFunc(GL_LEQUAL);
         glClearDepthf(1.0f);
     }
@@ -511,12 +523,6 @@ void Renderer::resize(int width, int height)
     viewportHeight = height;
     projectionMode->setSize(static_cast<float>(viewportWidth), static_cast<float>(viewportHeight));
     m_orthoProjMatrix = math::Ortho2D(0.0f, static_cast<float>(viewportWidth), 0.0f, static_cast<float>(viewportHeight));
-    if (gl::reverseZ)
-    {
-        // Remap Ortho2D z output from [-1, +1] to [0, +1] reverse-Z.
-        m_orthoProjMatrix(2, 2) = -0.5f;
-        m_orthoProjMatrix(2, 3) =  0.5f;
-    }
 }
 
 void Renderer::setFieldOfView(float _fov)
@@ -1674,7 +1680,8 @@ void Renderer::renderAnnotations()
     // Background annotations belong behind all scene geometry, not at the
     // midpoint of the depth buffer used by their orthographic projection.
     // This preserves opaque occlusion, but not attenuation by transparent objects.
-    glDepthRange(1.0, 1.0);
+    double backgroundDepth = gl::reverseZ ? 0.0 : 1.0;
+    glDepthRange(backgroundDepth, backgroundDepth);
     for (const auto& batch : backgroundAnnotationBatches)
         renderAnnotations(std::span(backgroundAnnotations.cbegin() + batch.start,
                                     backgroundAnnotations.cbegin() + batch.end),
@@ -1685,8 +1692,7 @@ void Renderer::renderAnnotations()
     float intervalSize = 1.0f / static_cast<float>(std::max(1, nIntervals));
     for (int interval = 0; interval < nIntervals; ++interval)
     {
-        glDepthRange(1.0f - static_cast<float>(interval + 1) * intervalSize,
-                     1.0f - static_cast<float>(interval) * intervalSize);
+        setDepthInterval(interval, intervalSize);
         const auto& partition = depthPartitions[interval];
         annotations = renderSortedAnnotations(annotations,
                                               -partition.nearZ,
@@ -4478,6 +4484,8 @@ void Renderer::renderPointStars(const StarDatabase& starDB,
     starRenderer.psf.proj              = &getCurrentProjectionMatrix();
     starRenderer.psf.modelView         = &getCurrentModelViewMatrix();
     starRenderer.cosFOV            = std::cos(math::degToRad(calcMaxFOV(fov, getAspectRatio())) / 2.0f);
+    starRenderer.clipBackgroundStarsBehindViewer =
+        gl::reverseZ && dynamic_cast<const FisheyeProjectionMode*>(projectionMode.get()) != nullptr;
 
     starRenderer.pixelSize         = pixelSize;
     starRenderer.faintestMag       = faintestMag;
@@ -6247,9 +6255,9 @@ Renderer::buildDepthPartitions()
     // coalesce partitions that have small spans in the depth buffer.
     // TODO: Implement this step!
 
-    // Collapse partitions: reverse-Z gives uniform precision, so the per-
-    // interval depth-range squeeze is pure waste.
-    if (gl::reverseZ && nIntervals > 1)
+    // Linear fisheye depth still needs partitioning, even with reverse-Z.
+    if (gl::reverseZ && dynamic_cast<PerspectiveProjectionMode*>(projectionMode.get()) != nullptr &&
+        nIntervals > 0)
     {
         float collapsedNearZ = depthPartitions[0].nearZ;
         float collapsedFarZ  = depthPartitions[0].farZ;
@@ -6294,8 +6302,7 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
 
         // Set the depth range for this interval--each interval is allocated an
         // equal section of the depth buffer.
-        glDepthRange(1.0f - static_cast<float>(interval + 1) * intervalSize,
-                     1.0f - static_cast<float>(interval) * intervalSize);
+        setDepthInterval(interval, intervalSize);
 
         // Set up a perspective projection using the current interval's near and
         // far clip planes.

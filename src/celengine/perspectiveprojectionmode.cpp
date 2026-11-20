@@ -87,8 +87,8 @@ float PerspectiveProjectionMode::getNormalizedDeviceZ(float nearZ, float farZ, f
 {
     if (gl::reverseZ)
     {
-        // -1 at near, +1 at far; Ortho2D negates this for the annotation pass.
-        return 1.0f - 2.0f * nearZ / z;
+        // Ortho2D negates this. Avoid a [-1, +1] remap that loses far-depth precision.
+        return -nearZ / z;
     }
     float d0 = farZ - nearZ;
     float d1 = -(farZ + nearZ) / d0;

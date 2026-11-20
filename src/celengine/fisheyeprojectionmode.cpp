@@ -97,8 +97,7 @@ float FisheyeProjectionMode::getNormalizedDeviceZ(float nearZ, float farZ, float
     float d0 = farZ - nearZ;
     if (gl::reverseZ)
     {
-        // Mirrors the near/far swap in getProjectionMatrix.
-        return (z - nearZ) / d0 * 2.0f - 1.0f;
+        return (z - farZ) / d0;
     }
     return 1.0f - (z - nearZ) / d0 * 2.0f;
 }

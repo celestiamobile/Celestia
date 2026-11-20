@@ -100,6 +100,7 @@ public:
     const ColorTemperatureTable* colorTemp      { nullptr };
     float SolarSystemMaxDistance                { 1.0f };
     float cosFOV                                { 1.0f };
+    bool clipBackgroundStarsBehindViewer        { false };
 
     StarStyle starStyle                         { StarStyle::FuzzyPointStars };
     PsfState  psf;

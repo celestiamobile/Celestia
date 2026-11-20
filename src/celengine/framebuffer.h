@@ -68,12 +68,12 @@ class FramebufferObject
         return m_useFloatColor;
     }
 
-    GLuint colorTexture() const;
     bool useFloatDepth() const
     {
         return m_useFloatDepth;
     }
 
+    GLuint colorTexture() const;
     GLuint depthTexture() const;
 
     bool bind();
