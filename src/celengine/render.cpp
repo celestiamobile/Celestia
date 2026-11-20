@@ -2681,7 +2681,8 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
                                 float cloudTexOffset,
                                 const math::Frustum& viewFrustum,
                                 const Matrix4f& planetMV,
-                                const Matrices& m)
+                                const Matrices& m,
+                                AtmosphereRenderPass pass)
 {
     Matrices planetMVP = { m.projection, &planetMV };
 
@@ -2702,8 +2703,9 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
         fade = 1.0f;
     }
 
-    if (fade > 0 && util::is_set(renderFlags, RenderFlags::ShowAtmospheres) && atmosphere->height > 0.0f &&
-        !insidePlanet)
+    if (pass != AtmosphereRenderPass::Clouds && fade > 0
+        && util::is_set(renderFlags, RenderFlags::ShowAtmospheres) && atmosphere->height > 0.0f
+        && !insidePlanet)
     {
         // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
         // TODO: convert old style atmopshere parameters
@@ -2736,7 +2738,7 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
     }
 
     // If there's a cloud layer, we'll render it now.
-    if (cloudTex != nullptr && !insidePlanet)
+    if (pass != AtmosphereRenderPass::Sky && cloudTex != nullptr && !insidePlanet)
     {
         float cloudScale = 1.0f + atmosphere->cloudHeight / radius;
         Matrix4f cmv = math::scale(planetMV, cloudScale);
@@ -2796,11 +2798,26 @@ void Renderer::renderPlanetAtmosphere(Body& body,
                                       const Observer& observer,
                                       float nearPlaneDistance,
                                       float farPlaneDistance,
-                                      const Matrices& m)
+                                      const Matrices& m,
+                                      const std::function<void(AtmosphereRenderPass)>& afterPass)
 {
     const BodyFeaturesManager* bodyFeaturesManager = GetBodyFeaturesManager();
     const Atmosphere* atmosphere = bodyFeaturesManager->getAtmosphere(&body);
     if (atmosphere == nullptr)
+        return;
+
+    bool showSky = util::is_set(renderFlags, RenderFlags::ShowAtmospheres)
+                   && atmosphere->height > 0.0f;
+    Texture* cloudTex = nullptr;
+    Texture* cloudNormalMap = nullptr;
+    if (util::is_set(renderFlags, RenderFlags::ShowCloudMaps)
+        && atmosphere->cloudTexture != util::TextureHandle::Invalid)
+    {
+        cloudTex = m_textureManager->find(atmosphere->cloudTexture);
+        if (cloudTex != nullptr && atmosphere->cloudNormalMap != util::TextureHandle::Invalid)
+            cloudNormalMap = m_textureManager->find(atmosphere->cloudNormalMap);
+    }
+    if (!showSky && cloudTex == nullptr)
         return;
 
     double now = observer.getTime();
@@ -2916,23 +2933,28 @@ void Renderer::renderPlanetAtmosphere(Body& body,
     auto viewFrustum = projectionMode->getFrustum(nearPlaneDistance / radius, frustumFarPlane / radius, observer.getZoom());
     viewFrustum.transform(invMV);
 
-    Texture* cloudTex       = nullptr;
-    Texture* cloudNormalMap = nullptr;
     float cloudTexOffset    = 0.0f;
-    if (util::is_set(renderFlags, RenderFlags::ShowCloudMaps))
-    {
-        if (atmosphere->cloudTexture != util::TextureHandle::Invalid)
-            cloudTex = m_textureManager->find(atmosphere->cloudTexture);
-        if (atmosphere->cloudNormalMap != util::TextureHandle::Invalid)
-            cloudNormalMap = m_textureManager->find(atmosphere->cloudNormalMap);
-    }
     if (atmosphere->cloudSpeed != 0.0f)
         cloudTexOffset = static_cast<float>(-math::pfmod(now * atmosphere->cloudSpeed * 0.5 * std::numbers::inv_pi, 1.0));
 
-    renderAtmosphere(atmosphere, ri, ls, rp, pos, distance, radius,
-                     scaleFactors, insidePlanet, lit,
-                     cloudTex, cloudNormalMap, cloudTexOffset,
-                     viewFrustum, planetMV, m);
+    auto renderPass = [&](AtmosphereRenderPass pass)
+    {
+        renderAtmosphere(atmosphere, ri, ls, rp, pos, distance, radius,
+                         scaleFactors, insidePlanet, lit,
+                         cloudTex, cloudNormalMap, cloudTexOffset,
+                         viewFrustum, planetMV, m, pass);
+        if (afterPass)
+            afterPass(pass);
+    };
+    if (afterPass)
+    {
+        if (showSky)
+            renderPass(AtmosphereRenderPass::Sky);
+        if (cloudTex != nullptr)
+            renderPass(AtmosphereRenderPass::Clouds);
+    }
+    else
+        renderPass(AtmosphereRenderPass::All);
 }
 
 
@@ -6125,6 +6147,87 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
     // Render everything that wasn't culled.
     float intervalSize = 1.0f / static_cast<float>(max(1, nIntervals));
     auto intervalEntries = engine::detail::partitionRenderList(renderList, depthPartitions, depthPartitionEntries);
+
+    struct OrbitLayer
+    {
+        const RenderListEntry* entry;
+        int interval;
+        AtmosphereRenderPass pass;
+        Eigen::Affine3d toPlanet;
+        Eigen::Vector3f semiAxes;
+        bool scattering;
+    };
+    std::vector<OrbitLayer> orbitLayers;
+    std::vector<engine::OrbitVisibilityLayer> visibilityLayers;
+    if (!orbitPathList.empty())
+    {
+        const auto* features = GetBodyFeaturesManager();
+        // Follow actual draw order, not the global transparent sort keys.
+        for (int layerInterval = 0; layerInterval < nIntervals; ++layerInterval)
+        {
+            for (const auto* item : intervalEntries[layerInterval])
+            {
+                const auto& entry = *item;
+                if (entry.renderableType != RenderListEntry::RenderableAtmosphere)
+                    continue;
+
+                const Body& body = *entry.body;
+                const auto* atmosphere = features->getAtmosphere(&body);
+                float radius = body.getRadius();
+                auto orientation = body.getGeometryOrientation().cast<double>()
+                                   * body.getRotationModel(now)->spin(now)
+                                   * body.getEclipticToEquatorial(now);
+                Vector3f semiAxes = body.getSemiAxes();
+                if (body.getGeometry() != engine::GeometryHandle::Invalid)
+                {
+                    if (const auto* geometry = m_geometryManager->find(body.getGeometry());
+                        geometry != nullptr && !geometry->isNormalized())
+                    {
+                        semiAxes = Vector3f::Constant(body.getGeometryScale());
+                    }
+                }
+                Eigen::Affine3d toPlanet = Scaling(semiAxes.cast<double>().cwiseInverse())
+                                           * orientation
+                                           * Translation3d(-entry.position.cast<double>())
+                                           * getCameraOrientation().conjugate();
+                if (body.isEllipsoid() && toPlanet.translation().squaredNorm() < 1.0)
+                    continue;
+
+                double altitude = entry.distance - radius;
+                bool sky = util::is_set(renderFlags, RenderFlags::ShowAtmospheres)
+                           && atmosphere->height > 0.0f
+                           && (altitude <= 0.0
+                               || atmosphere->height / (altitude * pixelSize)
+                                      > MinAtmosphereThicknessInPixels);
+                bool scattering = sky && atmosphere->mieScaleHeight > 0.0f;
+                auto addLayer = [&](AtmosphereRenderPass pass, float height, bool volume)
+                {
+                    orbitLayers.push_back(
+                        { item, layerInterval, pass, toPlanet, semiAxes, scattering });
+                    float shellScale
+                        = 1.0f
+                          + height
+                                / (pass == AtmosphereRenderPass::Clouds ? radius :
+                                                                          semiAxes.maxCoeff());
+                    visibilityLayers.push_back(
+                        { Eigen::Scaling(1.0 / shellScale) * toPlanet, volume });
+                };
+                if (sky)
+                {
+                    float height
+                        = scattering ? getAtmosphereShellHeight(*atmosphere) : atmosphere->height;
+                    addLayer(AtmosphereRenderPass::Sky, height, scattering);
+                }
+                if (util::is_set(renderFlags, RenderFlags::ShowCloudMaps)
+                    && atmosphere->cloudTexture != util::TextureHandle::Invalid
+                    && m_textureManager->find(atmosphere->cloudTexture) != nullptr)
+                {
+                    addLayer(AtmosphereRenderPass::Clouds, atmosphere->cloudHeight, false);
+                }
+            }
+        }
+    }
+
     m_legacyLargeStarRenderer->start();
     m_legacyLargeGlareRenderer->start();
     for (int interval = 0; interval < nIntervals; interval++)
@@ -6157,6 +6260,9 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
                 renderItem(*entry, observer, nearPlaneDistance, farPlaneDistance, m);
         }
 
+        if (!visibilityLayers.empty())
+            curvePlotVertexBuffer->beginVisibility(visibilityLayers);
+
         // Render orbit paths
         if (!orbitPathList.empty())
         {
@@ -6182,11 +6288,138 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
             }
         }
 
+        auto drawOrbitStage = [&](std::size_t stage)
+        {
+            if (!curvePlotVertexBuffer->hasStage(stage))
+                return;
+
+            PipelineState ps;
+            ps.blending = true;
+            ps.blendFunc = { GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA };
+            ps.depthTest = true;
+            ps.smoothLines = true;
+            setPipelineState(ps);
+            if (stage == 0 || !orbitLayers[stage - 1].scattering)
+            {
+                curvePlotVertexBuffer->renderStage(stage);
+                return;
+            }
+
+            const auto& layer = orbitLayers[stage - 1];
+            const auto& entry = *layer.entry;
+            Body& body = *entry.body;
+            const auto* atmosphere = GetBodyFeaturesManager()->getAtmosphere(&body);
+            RenderProperties rp;
+            LightingState lights;
+            Quaterniond q;
+            if (auto cached = planetLightingCache.find(&body); cached != planetLightingCache.end())
+            {
+                rp = cached->second.rp;
+                lights = cached->second.lights;
+            }
+            else
+                setupPlanetLighting(
+                    body,
+                    entry.position,
+                    now,
+                    nearPlaneDistance,
+                    static_cast<float>(entry.distance - body.getRadius()),
+                    rp,
+                    lights,
+                    q);
+
+            ShaderProperties props;
+            props.lightModel = LightingModel::UnlitModel;
+            props.texUsage = TexUsage::VertexColors | TexUsage::Scattering;
+            props.effects = LightingEffects::OrbitScattering;
+            props.nLights = static_cast<std::uint16_t>(std::min(lights.nLights, MaxShaderLights));
+            props.separateRayleighMieScaleHeights = getSeparateRayleighMieScaleHeights(*atmosphere);
+            if (props.nLights > 0 && lights.shadows[0] != nullptr)
+                props.setEclipseShadowCountForLight(
+                    0,
+                    std::min(
+                        MaxShaderEclipseShadows,
+                        static_cast<unsigned int>(lights.shadows[0]->size())));
+            Texture* ringShadow = nullptr;
+            if (props.nLights > 0 && lights.lights[0].castsShadows
+                && lights.shadowingRingSystem != nullptr
+                && lights.shadowingRingSystem == lights.ringShadows[0].ringSystem)
+            {
+                ringShadow = m_textureManager->findShadow(lights.shadowingRingSystem->texture);
+                if (ringShadow != nullptr)
+                {
+                    props.texUsage |= TexUsage::RingShadowTexture;
+                    props.setRingShadowForLight(0, true);
+                }
+            }
+            curvePlotVertexBuffer->renderStage(
+                stage,
+                &props,
+                [&](CelestiaGLProgram& program)
+                {
+                    program.mat4Param("orbitToPlanet") = layer.toPlanet.matrix().cast<float>();
+                    program.eyePosition = lights.eyePos_obj;
+                    program.setLightParameters(lights, Color::White, Color::Black, Color::Black);
+                    float radius = layer.semiAxes.maxCoeff();
+                    program.setAtmosphereParameters(
+                        *atmosphere,
+                        radius,
+                        radius,
+                        radius + getAtmosphereShellHeight(*atmosphere),
+                        getAtmosphereSegmentCount(),
+                        getAtmosphereExtinctionThreshold());
+                    if (props.hasEclipseShadows())
+                        program.setEclipseShadowParameters(lights, layer.semiAxes, rp.orientation);
+                    if (ringShadow != nullptr)
+                    {
+                        glActiveTexture(GL_TEXTURE0);
+                        ringShadow->bind();
+                        program.setRingShadowParameters(lights, layer.semiAxes);
+                    }
+                });
+        };
+        std::size_t nextOrbitLayer = 0;
+        if (!visibilityLayers.empty())
+        {
+            drawOrbitStage(0);
+            // A containing atmosphere may already have drawn in a farther partition.
+            while (nextOrbitLayer < orbitLayers.size()
+                   && orbitLayers[nextOrbitLayer].interval < interval)
+            {
+                drawOrbitStage(++nextOrbitLayer);
+            }
+        }
+
         // Render transparent objects in their original back-to-front order.
         for (const auto* entry : intervalEntries[interval])
         {
-            if (!entry->isOpaque || entry->discSizeInPixels <= 1.0f)
+            if (nextOrbitLayer < orbitLayers.size() && orbitLayers[nextOrbitLayer].entry == entry)
+            {
+                renderPlanetAtmosphere(
+                    *entry->body,
+                    entry->position,
+                    entry->distance,
+                    observer,
+                    nearPlaneDistance,
+                    farPlaneDistance,
+                    m,
+                    [&](AtmosphereRenderPass pass)
+                    {
+                        if (nextOrbitLayer < orbitLayers.size()
+                            && orbitLayers[nextOrbitLayer].entry == entry
+                            && orbitLayers[nextOrbitLayer].pass == pass)
+                        {
+                            drawOrbitStage(++nextOrbitLayer);
+                        }
+                    });
+            }
+            else if (!entry->isOpaque || entry->discSizeInPixels <= 1.0f)
                 renderItem(*entry, observer, nearPlaneDistance, farPlaneDistance, m);
+        }
+        if (!visibilityLayers.empty())
+        {
+            while (nextOrbitLayer < orbitLayers.size()) drawOrbitStage(++nextOrbitLayer);
+            curvePlotVertexBuffer->endVisibility();
         }
 
         Renderer::PipelineState ps;

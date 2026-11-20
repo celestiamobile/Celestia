@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cstddef>
+#include <functional>
 #include <list>
 #include <memory>
 #include <optional>
@@ -514,6 +515,13 @@ class Renderer
                       const LightingState&,
                       const Matrices&);
 
+    enum class AtmosphereRenderPass
+    {
+        All,
+        Sky,
+        Clouds
+    };
+
     void renderAtmosphere(const Atmosphere* atmosphere,
                           const RenderInfo& ri,
                           const LightingState& ls,
@@ -529,7 +537,8 @@ class Renderer
                           float cloudTexOffset,
                           const celestia::math::Frustum& viewFrustum,
                           const Eigen::Matrix4f& planetMV,
-                          const Matrices& m);
+                          const Matrices& m,
+                          AtmosphereRenderPass pass);
 
     void renderPlanet(Body& body,
                       const Eigen::Vector3f& pos,
@@ -554,7 +563,8 @@ class Renderer
                                 const Observer& observer,
                                 float nearPlaneDistance,
                                 float farPlaneDistance,
-                                const Matrices& m);
+                                const Matrices& m,
+                                const std::function<void(AtmosphereRenderPass)>& afterPass = {});
 
     void renderRingSystem(Body& body,
                           const Eigen::Vector3f& pos,

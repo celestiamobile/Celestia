@@ -155,6 +155,9 @@ public:
     //! Enable triangulation mode for dynamic lines if required
     void startUpdate();
 
+    //! End a streamed line strip, returning its tangent-padding vertex count.
+    unsigned int finishStrip();
+
     //! Add a new vertex with position and color
     void addVertex(const Vertex &vertex);
 
@@ -196,6 +199,10 @@ public:
      * @return Current line width
      */
     float getWidth() const { return m_width; }
+    bool usesTriangles() const
+    {
+        return m_useTriangles || should_triangulate();
+    }
 
     //! Triangulate lines if required, transfer data to GPU, enable shaders, etc
     void prerender();

@@ -80,6 +80,8 @@ set(CELENGINE_SOURCES
   opencluster.cpp
   opencluster.h
   orbitsampler.h
+  orbitvisibility.cpp
+  orbitvisibility.h
   overlay.cpp
   overlay.h
   imageoverlay.cpp

@@ -12,6 +12,7 @@
 #include "linerenderer.h"
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <span>
 
@@ -449,6 +450,18 @@ LineRenderer::startUpdate()
     }
 }
 
+unsigned int
+LineRenderer::finishStrip()
+{
+    assert(m_primType == PrimType::LineStrip && m_storageType != StorageType::Static);
+    if (!m_verticesTriangulated || m_loopDone)
+        return 0;
+
+    auto size = m_verticesTr.size();
+    close_strip();
+    return static_cast<unsigned int>((m_verticesTr.size() - size) / 2);
+}
+
 void
 LineRenderer::clear()
 {
@@ -545,6 +558,7 @@ LineRenderer::render(const Matrices &mvp, const Color &color, int count, int off
 
 void LineRenderer::addVertex(const Vertex &vertex)
 {
+    m_loopDone = false;
     if (!m_verticesTriangulated)
     {
         m_vertices.push_back(vertex);
@@ -559,6 +573,7 @@ void LineRenderer::addVertex(const Vertex &vertex)
 void
 LineRenderer::addVertex(const Eigen::Vector3f &pos)
 {
+    m_loopDone = false;
     if (!m_verticesTriangulated)
     {
         m_vertices.emplace_back(pos);
@@ -574,6 +589,7 @@ LineRenderer::addVertex(const Eigen::Vector3f &pos)
 void
 LineRenderer::addVertex(const Eigen::Vector3f &pos, const Color &color)
 {
+    m_loopDone = false;
     if (!m_verticesTriangulated)
     {
         m_vertices.emplace_back(pos, color);
@@ -589,6 +605,7 @@ LineRenderer::addVertex(const Eigen::Vector3f &pos, const Color &color)
 void
 LineRenderer::addVertex(float x, float y, float z)
 {
+    m_loopDone = false;
     if (!m_verticesTriangulated)
     {
         m_vertices.emplace_back(Eigen::Vector3f(x, y, z));
