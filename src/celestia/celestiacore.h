@@ -196,6 +196,10 @@ public:
                       std::optional<bool> sRGBRendering = std::nullopt,
                       std::optional<unsigned int> aaSamples = std::nullopt,
                       bool useMesaPackInvert = true);
+    unsigned int getSceneMSAASamples() const;
+    unsigned int getMaxSceneMSAASamples() const;
+    // Applied on the next draw; no current GL context is required.
+    void setSceneMSAASamples(unsigned int samples);
     void start(double t);
     void start();
     void getLightTravelDelay(double distanceKm, int&, int&, float&);
@@ -389,7 +393,7 @@ public:
     celestia::scripts::ScriptMaps& scriptMaps() { return m_scriptMaps; }
 
     void getCaptureInfo(std::span<int, 4> viewport, celestia::engine::PixelFormat& format) const;
-    bool captureImage(std::uint8_t* buffer, std::span<const int, 4> viewport, celestia::engine::PixelFormat format) const;
+    bool captureImage(std::byte* buffer, std::span<const int, 4> viewport, celestia::engine::PixelFormat format) const;
     bool saveScreenShot(const std::filesystem::path&, ContentType = ContentType::Unknown) const;
 
     void loadAsterismsFile(const std::filesystem::path &path);
@@ -535,6 +539,7 @@ private:
     std::vector<std::unique_ptr<ViewportEffect>> viewportEffects;
     PassthroughViewportEffect* sceneDisplayEffect{ nullptr };
     int sceneSamples{ 1 };
+    unsigned int maxSceneSamples{ 1 };
     std::optional<GLuint> annotationDepthFramebuffer{ std::nullopt };
     bool annotationDepthAvailable{ false };
     std::unique_ptr<ViewportEffect> presentationEffect;

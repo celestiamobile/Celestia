@@ -11,6 +11,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <list>
 #include <memory>
 #include <optional>
@@ -23,6 +24,7 @@
 #include <Eigen/Core>
 
 #include <celengine/body.h>
+#include <celengine/depthpartition.h>
 #include <celengine/lightenv.h>
 #include <celengine/marker.h>
 #include <celengine/meshmanager.h>
@@ -241,7 +243,7 @@ class Renderer
     bool getSeparateRayleighMieScaleHeights() const noexcept;
     bool getSeparateRayleighMieScaleHeights(const Atmosphere&) const noexcept;
 
-    bool captureFrame(int, int, int, int, celestia::engine::PixelFormat format, unsigned char*) const;
+    bool captureFrame(int, int, int, int, celestia::engine::PixelFormat format, std::byte*) const;
 
     void renderMarker(celestia::engine::MarkerSymbol symbol,
                       float size,
@@ -453,12 +455,7 @@ class Renderer
 	bool isStar{ false };
     };
 
-    struct DepthBufferPartition
-    {
-        int index;
-        float nearZ;
-        float farZ;
-    };
+    using DepthBufferPartition = celestia::engine::DepthBufferPartition;
 
  private:
     void setFieldOfView(float);
@@ -762,6 +759,8 @@ class Renderer
     std::vector<RenderListEntry> renderList;
     std::vector<SecondaryIlluminator> secondaryIlluminators;
     std::vector<DepthBufferPartition> depthPartitions;
+    std::vector<const RenderListEntry*> depthSortedEntries;
+    std::vector<std::vector<const RenderListEntry*>> depthPartitionEntries;
     std::vector<Annotation> backgroundAnnotations;
     std::vector<Annotation> foregroundAnnotations;
     std::vector<Annotation> depthSortedAnnotations;

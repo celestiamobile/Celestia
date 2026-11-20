@@ -68,8 +68,13 @@ applyToneMappingMode(ToneMappingMode& target, const AssociativeArray& hash, std:
         return;
     if (compareIgnoringCase(*str, "Off") == 0)
         target = ToneMappingMode::None;
-    else if (compareIgnoringCase(*str, "Manual") == 0)
+    else if (compareIgnoringCase(*str, "Manual") == 0 ||
+             compareIgnoringCase(*str, "Exponential") == 0)
         target = ToneMappingMode::Manual;
+    else if (compareIgnoringCase(*str, "ACES") == 0)
+        target = ToneMappingMode::ACES;
+    else if (compareIgnoringCase(*str, "Reinhard") == 0)
+        target = ToneMappingMode::Reinhard;
     else
         GetLogger()->error("Unknown {} value '{}'.\n", key, *str);
 }
@@ -227,6 +232,9 @@ applyRenderDetails(CelestiaConfig::RenderDetails& renderDetails, const Associati
     }
     applyBoolean(renderDetails.atmosphere.separateRayleighMieScaleHeights, hash, "SeparateRayleighMieScaleHeights"sv);
     applyNumber(renderDetails.aaSamples, hash, "AntialiasingSamples"sv);
+    if (auto samples = hash.getNumber<unsigned int>("SceneAntialiasingSamples"sv); samples.has_value())
+        renderDetails.output.sceneAaSamples = *samples;
+    applyNumber(renderDetails.output.presentAaSamples, hash, "PresentAntialiasingSamples"sv);
     applyNumber(renderDetails.textures.anisotropy, hash, "TextureAnisotropy"sv);
     renderDetails.textures.anisotropy = std::max(renderDetails.textures.anisotropy, 1);
     applyNumber(renderDetails.SolarSystemMaxDistance, hash, "SolarSystemMaxDistance"sv);

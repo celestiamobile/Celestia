@@ -11,6 +11,7 @@
 #include "shadermanager.h"
 
 #include <algorithm>
+#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cmath>
@@ -20,9 +21,10 @@
 #include <iterator>
 #include <optional>
 #include <ostream>
+#include <sstream>
 #include <string_view>
-#include <system_error>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 #include <boost/container_hash/hash.hpp>
@@ -38,7 +40,6 @@
 #include "glsupport.h"
 #include "lightenv.h"
 
-
 using celestia::util::GetLogger;
 using namespace std::string_view_literals;
 namespace gl = celestia::gl;
@@ -48,6 +49,13 @@ namespace util = celestia::util;
 
 namespace
 {
+constexpr TexUsage TransformableTexturesMask = TexUsage::DiffuseTexture
+                                             | TexUsage::SpecularTexture
+                                             | TexUsage::NormalTexture
+                                             | TexUsage::NightTexture
+                                             | TexUsage::EmissiveTexture
+                                             | TexUsage::OverlayTexture;
+
 constexpr const int ShadowSampleKernelWidth = 2;
 
 const std::filesystem::path ShaderDirectory{ "shaders" };
@@ -193,27 +201,13 @@ constexpr std::string_view CommonAttribs = R"glsl(
 layout(location = 0) in vec4 in_Position;
 layout(location = 1) in vec3 in_Normal;
 layout(location = 2) in vec4 in_TexCoord0;
-layout(location = 3) in vec4 in_TexCoord1;
-layout(location = 4) in vec4 in_TexCoord2;
-layout(location = 5) in vec4 in_TexCoord3;
 layout(location = 8) in vec4 in_Color;
-)glsl"sv;
-
-constexpr std::string_view TextureTransformUniforms = R"glsl(
-uniform vec2 texCoordBase0;
-uniform vec2 texCoordBase1;
-uniform vec2 texCoordBase2;
-uniform vec2 texCoordBase3;
-uniform vec2 texCoordDelta0;
-uniform vec2 texCoordDelta1;
-uniform vec2 texCoordDelta2;
-uniform vec2 texCoordDelta3;
 )glsl"sv;
 
 std::string
 LightProperty(unsigned int i, std::string_view property)
 {
-    return fmt::format("light{}_{}", i, property);
+    return fmt::format("light_{}[{}]", property, i);
 }
 
 std::string
@@ -281,6 +275,12 @@ std::string
 DeclareUniform(std::string_view name, ShaderVariableType type)
 {
     return fmt::format("uniform {} {};\n", ShaderTypeString(type), name);
+}
+
+std::string
+DeclareUniformArray(std::string_view name, ShaderVariableType type, unsigned int size)
+{
+    return fmt::format("uniform {} {}[{}];\n", ShaderTypeString(type), name, size);
 }
 
 std::string
@@ -365,25 +365,40 @@ inline void DumpFSSource(std::string_view source)
 }
 
 std::string
+TextureTransformUniforms(const ShaderProperties& props)
+{
+    std::string source;
+    if (props.hasTextureCoordTransform())
+    {
+        using TexUsageUnderlyingType = std::underlying_type_t<TexUsage>;
+        int nTextures = std::popcount(static_cast<TexUsageUnderlyingType>(props.texUsage & TransformableTexturesMask));
+        if (nTextures > 0)
+        {
+            source = DeclareUniformArray("texCoordTransform", Shader_Vector4, static_cast<unsigned int>(nTextures));
+        }
+    }
+
+    return source;
+}
+
+std::string
 DeclareLights(const ShaderProperties& props)
 {
-    if (props.nLights == 0)
-        return {};
-
     std::string source;
-    for (unsigned int i = 0; i < props.nLights; i++)
+    if (props.nLights > 0)
     {
-        source += DeclareUniform(fmt::format("light{}_direction", i), Shader_Vector3);
-        source += DeclareUniform(fmt::format("light{}_diffuse", i), Shader_Vector3);
+        source += DeclareUniformArray("light_direction", Shader_Vector3, props.nLights);
+        source += DeclareUniformArray("light_diffuse", Shader_Vector3, props.nLights);
         if (props.hasSpecular())
         {
-            source += DeclareUniform(fmt::format("light{}_specular", i), Shader_Vector3);
-            source += DeclareUniform(fmt::format("light{}_halfVector", i), Shader_Vector3);
+            source += DeclareUniformArray("light_specular", Shader_Vector3, props.nLights);
+            source += DeclareUniformArray("light_halfVector", Shader_Vector3, props.nLights);
         }
+
         if (props.lightModel == LightingModel::AtmosphereModel || props.hasScattering())
-            source += DeclareUniform(fmt::format("light{}_color", i), Shader_Vector3);
+            source += DeclareUniformArray("light_color", Shader_Vector3, props.nLights);
         if (util::is_set(props.texUsage, TexUsage::NightTexture))
-            source += DeclareUniform(fmt::format("light{}_brightness", i), Shader_Float);
+            source += DeclareUniformArray("light_brightness", Shader_Float, props.nLights);
     }
 
     return source;
@@ -417,7 +432,8 @@ ShadowDepth(unsigned int i)
 std::string
 TexCoord2D(unsigned int i, bool transform)
 {
-    return transform ? fmt::format("(texCoordBase{} + texCoordDelta{} * in_TexCoord{}.st)", i, i, i) : fmt::format("in_TexCoord{}.st", i);
+    using namespace std::string_literals;
+    return transform ? fmt::format("(texCoordTransform[{0}].st + texCoordTransform[{0}].pq * in_TexCoord0.st)", i) : "in_TexCoord0.st"s;
 }
 
 
@@ -451,7 +467,7 @@ NightTextureBlend()
 {
 #if 1
     // Output the blend factor for night lights textures
-    return "totalLight = 1.0 - totalLight;\ntotalLight = totalLight * totalLight * totalLight * totalLight;\n"sv;
+    return "totalLight = clamp(1.0 - totalLight, 0.0, 1.0);\ntotalLight = totalLight * totalLight * totalLight * totalLight;\n"sv;
 #else
     // Alternate night light blend function; much sharper falloff near terminator.
     return "totalLight = clamp(10.0 * (0.1 - totalLight), 0.0, 1.0);\n"sv;
@@ -714,27 +730,28 @@ ScatteringPhaseFunctions(const ShaderProperties& /*unused*/)
 
 
 std::string
-ChapmanOpticalDepth()
+ChapmanOpticalDepth(const ShaderProperties& props)
 {
-    return R"glsl(float chapmanToSpaceWithScaleHeight(float r, float mu, float inverseScaleHeight)
-{
+    // Pack Mie (x) and Rayleigh (y) columns to share ray geometry and branches.
+    std::string source = fmt::format(R"glsl({0} chapmanToSpace(float r, float mu)
+{{
+    {0} inverseScaleHeight = {1};
     mu = clamp(mu, -1.0, 1.0);
-    float X = r * inverseScaleHeight;
-    float density = exp(min((atmosphereRadius.z - r) * inverseScaleHeight, 0.0));
-    float grazing = sqrt(1.5707963267948966 * X);
+    {0} X = r * inverseScaleHeight;
+    {0} density = exp(min((atmosphereRadius.z - r) * inverseScaleHeight, 0.0));
+    {0} grazing = sqrt(1.5707963267948966 * X);
     if (mu >= 0.0)
         return (density / inverseScaleHeight) * grazing / ((grazing - 1.0) * mu + 1.0);
     float sinZenith = sqrt(max(1.0e-8, 1.0 - mu * mu));
-    float tangentDensity = exp(min((atmosphereRadius.z - r * sinZenith) * inverseScaleHeight, 0.0));
-    float upward = (density / inverseScaleHeight) * grazing / ((grazing - 1.0) * (-mu) + 1.0);
-    return max(0.0, (2.0 * tangentDensity / inverseScaleHeight) * sqrt(1.5707963267948966 * X * sinZenith) - upward);
-}
+    {0} tangentDensity = exp(min((atmosphereRadius.z - r * sinZenith) * inverseScaleHeight, 0.0));
+    {0} upward = (density / inverseScaleHeight) * grazing / ((grazing - 1.0) * (-mu) + 1.0);
+    return max((2.0 * tangentDensity / inverseScaleHeight) * sqrt(1.5707963267948966 * X * sinZenith) - upward, 0.0);
+}}
+)glsl",
+        props.separateRayleighMieScaleHeights ? "vec2" : "float",
+        props.separateRayleighMieScaleHeights ? "vec2(mieH, rayleighH)" : "mieH");
 
-float chapmanToSpace(float r, float mu)
-{
-    return chapmanToSpaceWithScaleHeight(r, mu, mieH);
-}
-
+    source += R"glsl(
 float chapmanFromAtmosphereBoundary(float mu, float grazing)
 {
     return (atmosphereExtinctionThreshold / mieH) * grazing /
@@ -746,31 +763,15 @@ float chapmanFromAtmosphereBoundaryWithScaleHeight(float mu, float columnScale, 
     return columnScale / ((grazing - 1.0) * clamp(mu, 0.0, 1.0) + 1.0);
 }
 )glsl";
-}
-
-constexpr std::string_view
-RayleighViewOpticalDepth()
-{
-    return R"glsl(
-        float rayleighViewStartColumn;
-        if (rayleighViewColumnValid && viewInward == cachedViewInward)
-            rayleighViewStartColumn = cachedRayleighViewColumn;
-        else
-            rayleighViewStartColumn = chapmanToSpaceWithScaleHeight(viewStartRadius, viewInward ? -viewStartMu : viewStartMu, rayleighH);
-        float rayleighViewEndColumn = chapmanToSpaceWithScaleHeight(viewEndRadius, viewInward ? -viewEndMu : viewEndMu, rayleighH);
-        rayleighSegmentDepth = max(0.0, viewInward ? rayleighViewEndColumn - rayleighViewStartColumn : rayleighViewStartColumn - rayleighViewEndColumn);
-        cachedRayleighViewColumn = rayleighViewEndColumn;
-        rayleighViewColumnValid = true;
-)glsl";
+    return source;
 }
 
 constexpr std::string_view
 SeparateAtmosphereScatteringAccumulation()
 {
     return R"glsl(
-            float rayleighToSpace = chapmanToSpaceWithScaleHeight(sampleRadius, sampleMu, rayleighH);
-            float rayleighOdSun = max(0.0, rayleighToSpace - chapmanFromAtmosphereBoundaryWithScaleHeight(boundaryMu, rayleighBoundaryColumnScale, rayleighBoundaryGrazing));
-            odSun = max(0.0, mieToSpace - chapmanFromAtmosphereBoundaryWithScaleHeight(boundaryMu, mieBoundaryColumnScale, atmosphereBoundaryGrazing));
+            float rayleighOdSun = max(0.0, sunColumn.y - chapmanFromAtmosphereBoundaryWithScaleHeight(boundaryMu, rayleighBoundaryColumnScale, rayleighBoundaryGrazing));
+            odSun = max(0.0, sunColumn.x - chapmanFromAtmosphereBoundaryWithScaleHeight(boundaryMu, mieBoundaryColumnScale, atmosphereBoundaryGrazing));
             vec3 sampleTransmittance = exp(-mieExtinctionCoeff * (odAtm + odSun) - rayleighExtinctionCoeff * (rayleighOdAtm + rayleighOdSun));
             vec3 segmentTau = mieExtinctionCoeff * segmentDepth + rayleighExtinctionCoeff * rayleighSegmentDepth;
             vec3 segmentIntegral = (vec3(1.0) - exp(-segmentTau)) / max(segmentTau, vec3(1.0e-18));
@@ -786,7 +787,7 @@ constexpr std::string_view
 LegacyAtmosphereScatteringAccumulation()
 {
     return R"glsl(
-            odSun = max(0.0, mieToSpace - chapmanFromAtmosphereBoundary(boundaryMu, atmosphereBoundaryGrazing));
+            odSun = max(0.0, sunColumn - chapmanFromAtmosphereBoundary(boundaryMu, atmosphereBoundaryGrazing));
             vec3 segmentTau = extinctionCoeff * segmentDepth;
             vec3 segmentIntegral = (vec3(1.0) - exp(-segmentTau)) * invExtinction;
             vec3 thinIntegral = segmentDepth * (vec3(1.0) - segmentTau * 0.5 + segmentTau * segmentTau * (1.0 / 6.0));
@@ -802,6 +803,7 @@ std::string
 AtmosphericEffects(const ShaderProperties& props, unsigned int lightIndex)
 {
     std::string source;
+    std::string_view columnType = props.separateRayleighMieScaleHeights ? "vec2"sv : "float"sv;
 
     source += "{\n";
     // Compute the intersection of the view direction and the cloud layer (currently assumed to be a sphere)
@@ -834,14 +836,9 @@ AtmosphericEffects(const ShaderProperties& props, unsigned int lightIndex)
     source += "    float atmosphereBoundaryGrazing = sqrt(1.5707963267948966 * atmosphereRadius.x * mieH);\n";
     source += "    float viewStartRadiusSq = dot(segmentStart, segmentStart);\n";
     source += "    float viewStartProjection = dot(segmentStart, viewDirection);\n";
-    source += "    float cachedViewColumn = 0.0;\n";
+    source += fmt::format("    {0} cachedViewColumn = {0}(0.0);\n", columnType);
     source += "    bool cachedViewInward = false;\n";
     source += "    bool viewColumnValid = false;\n";
-    if (props.separateRayleighMieScaleHeights)
-    {
-        source += "    float cachedRayleighViewColumn = 0.0;\n";
-        source += "    bool rayleighViewColumnValid = false;\n";
-    }
     source += "    float viewStartRadius = sqrt(viewStartRadiusSq);\n";
     source += "    float viewStartMu = viewStartProjection / viewStartRadius;\n";
     if (props.separateRayleighMieScaleHeights)
@@ -882,18 +879,23 @@ AtmosphericEffects(const ShaderProperties& props, unsigned int lightIndex)
     source += "        float viewEndRadius = sqrt(viewEndRadiusSq);\n";
     source += "        float viewEndMu = viewEndProjection / viewEndRadius;\n";
     source += "        bool viewInward = viewEndRadiusSq < viewStartRadiusSq;\n";
-    source += "        float viewStartColumn;\n";
+    source += fmt::format("        {} viewStartColumn;\n", columnType);
     source += "        if (viewColumnValid && viewInward == cachedViewInward)\n";
     source += "            viewStartColumn = cachedViewColumn;\n";
     source += "        else\n";
     source += "            viewStartColumn = chapmanToSpace(viewStartRadius, viewInward ? -viewStartMu : viewStartMu);\n";
-    source += "        float viewEndColumn = chapmanToSpace(viewEndRadius, viewInward ? -viewEndMu : viewEndMu);\n";
-    source += "        float segmentDepth = max(0.0, viewInward ? viewEndColumn - viewStartColumn : viewStartColumn - viewEndColumn);\n";
+    source += fmt::format("        {} viewEndColumn = chapmanToSpace(viewEndRadius, "
+                          "viewInward ? -viewEndMu : viewEndMu);\n", columnType);
+    source += fmt::format("        {} viewSegmentDepth = max(viewInward ? "
+                          "viewEndColumn - viewStartColumn : viewStartColumn - viewEndColumn, 0.0);\n",
+                          columnType);
     if (props.separateRayleighMieScaleHeights)
     {
-        source += "        float rayleighSegmentDepth;\n";
-        source += RayleighViewOpticalDepth();
+        source += "        float segmentDepth = viewSegmentDepth.x;\n";
+        source += "        float rayleighSegmentDepth = viewSegmentDepth.y;\n";
     }
+    else
+        source += "        float segmentDepth = viewSegmentDepth;\n";
     source += "        cachedViewColumn = viewEndColumn;\n";
     source += "        cachedViewInward = viewInward;\n";
     source += "        viewColumnValid = true;\n";
@@ -938,7 +940,7 @@ AtmosphericEffects(const ShaderProperties& props, unsigned int lightIndex)
     source += "            float sampleRadius = sqrt(sampleRadiusSq);\n";
     source += "            float sampleMu = rq / sampleRadius;\n";
     source += "            float boundaryMu = d / atmosphereRadius.x;\n";
-    source += "            float mieToSpace = chapmanToSpace(sampleRadius, sampleMu);\n";
+    source += fmt::format("            {} sunColumn = chapmanToSpace(sampleRadius, sampleMu);\n", columnType);
     source += "            float odSun;\n";
     source += props.separateRayleighMieScaleHeights
         ? SeparateAtmosphereScatteringAccumulation()
@@ -981,6 +983,7 @@ AtmosphericEffects(const ShaderProperties& props, unsigned int lightIndex)
 std::string
 AtmosphericTransmission(const ShaderProperties& props)
 {
+    std::string_view columnType = props.separateRayleighMieScaleHeights ? "vec2"sv : "float"sv;
     std::string source = R"glsl({
     float rq = dot(eyePosition, eyeDir);
     float qq = dot(eyePosition, eyePosition) - atmosphereRadius.y;
@@ -989,24 +992,21 @@ AtmosphericTransmission(const ShaderProperties& props)
     vec3 viewDirection = -eyeDir;
     float enterRadius = max(length(atmEnter), 1.0e-6);
     float leaveRadius = max(length(nposition), 1.0e-6);
-    float enterColumn = chapmanToSpace(enterRadius,
-                                       dot(atmEnter, viewDirection) / enterRadius);
-    float leaveColumn = chapmanToSpace(leaveRadius,
-                                       dot(nposition, viewDirection) / leaveRadius);
-    float opticalDepth = max(0.0, enterColumn - leaveColumn);
 )glsl";
+    source += fmt::format(R"glsl(
+    {0} enterColumn = chapmanToSpace(enterRadius,
+                                       dot(atmEnter, viewDirection) / enterRadius);
+    {0} leaveColumn = chapmanToSpace(leaveRadius,
+                                       dot(nposition, viewDirection) / leaveRadius);
+    {0} opticalDepth = max(enterColumn - leaveColumn, 0.0);
+)glsl", columnType);
     if (props.separateRayleighMieScaleHeights)
     {
         source += R"glsl(
-        float rayleighEnterColumn = chapmanToSpaceWithScaleHeight(
-            enterRadius, dot(atmEnter, viewDirection) / enterRadius, rayleighH);
-        float rayleighLeaveColumn = chapmanToSpaceWithScaleHeight(
-            leaveRadius, dot(nposition, viewDirection) / leaveRadius, rayleighH);
-        float rayleighOpticalDepth = max(0.0, rayleighEnterColumn - rayleighLeaveColumn);
         vec3 mieExtinctionCoeff = max(vec3(mieCoeff), vec3(0.0));
         vec3 rayleighExtinctionCoeff = max(extinctionCoeff - mieExtinctionCoeff, vec3(0.0));
-        scatterEx = exp(-mieExtinctionCoeff * opticalDepth -
-                        rayleighExtinctionCoeff * rayleighOpticalDepth);
+        scatterEx = exp(-mieExtinctionCoeff * opticalDepth.x -
+                        rayleighExtinctionCoeff * opticalDepth.y);
 )glsl";
     }
     else
@@ -1033,7 +1033,7 @@ ScatteringConstantDeclarations(const ShaderProperties& props)
     if (props.separateRayleighMieScaleHeights)
         source += DeclareUniform("rayleighH", Shader_Float);
     source += DeclareUniform("extinctionCoeff", Shader_Vector3);
-    source += ChapmanOpticalDepth();
+    source += ChapmanOpticalDepth(props);
 
     return source;
 }
@@ -1091,22 +1091,10 @@ TextureCoordDeclarations(const ShaderProperties& props, ShaderInOut inOut)
 
     auto declare = inOut == Shader_In ? DeclareInput : DeclareOutput;
 
-    if (props.hasSharedTextureCoords())
+    if (props.hasTextureCoordTransform())
     {
-        // If the shared texture coords flag is set, use the diffuse texture
-        // coordinate for sampling all the texture maps.
-        if (util::is_set(props.texUsage, TexUsage::DiffuseTexture  |
-                                         TexUsage::NormalTexture   |
-                                         TexUsage::SpecularTexture |
-                                         TexUsage::NightTexture    |
-                                         TexUsage::EmissiveTexture |
-                                         TexUsage::OverlayTexture))
-        {
-            source += declare("diffTexCoord", Shader_Vector2);
-        }
-    }
-    else
-    {
+        // Texture coordinate transforms may be different per texture, so
+        // output separate texture coordinates
         if (util::is_set(props.texUsage, TexUsage::DiffuseTexture))
             source += declare("diffTexCoord", Shader_Vector2);
         if (util::is_set(props.texUsage, TexUsage::NormalTexture))
@@ -1119,6 +1107,10 @@ TextureCoordDeclarations(const ShaderProperties& props, ShaderInOut inOut)
             source += declare("emissiveTexCoord", Shader_Vector2);
         if (util::is_set(props.texUsage, TexUsage::OverlayTexture))
             source += declare("overlayTexCoord", Shader_Vector2);
+    }
+    else if (util::is_set(props.texUsage, TransformableTexturesMask))
+    {
+        source += declare("diffTexCoord", Shader_Vector2);
     }
 
     if (util::is_set(props.texUsage, TexUsage::ShadowMapTexture))
@@ -1212,28 +1204,23 @@ float calculateShadow()
 std::string
 ReadShaderFile(const std::filesystem::path &path)
 {
-    std::error_code ec;
-    std::uintmax_t size = std::filesystem::file_size(path, ec);
-    if (ec)
-    {
-        GetLogger()->error("Failed to get file size of {}.\n", path);
-        return {};
-    }
-
     std::ifstream in(path);
-    if (!in.good())
+    if (!in)
     {
         GetLogger()->error("Failed to open {}.\n", path);
         return {};
     }
 
-    std::string s(size, '\0');
-    in.read(&s[0], size); /* Flawfinder: ignore */
+    std::ostringstream s;
+    s << in.rdbuf();
 
-    if (!in.good() && !in.eof())
+    if (s.fail() || (in.fail() && !in.eof()))
+    {
+        GetLogger()->error("Failed to read {}.\n", path);
         return {};
+    }
 
-    return s;
+    return std::move(s).str();
 }
 
 GLProgram
@@ -1356,8 +1343,7 @@ R"glsl(
     source += CommonHeader;
     source += VertexHeader;
     source += CommonAttribs;
-    if (props.hasTextureCoordTransform())
-        source += TextureTransformUniforms;
+    source += TextureTransformUniforms(props);
 
     source += DeclareLights(props);
     source += TextureCoordDeclarations(props, Shader_Out);
@@ -1380,7 +1366,11 @@ R"glsl(
 
     if (props.isViewDependent() || props.hasScattering() ||
         props.hasEclipseShadows() || props.hasRingShadows())
+    {
+        if (props.hasScattering())
+            source += "centroid ";
         source += DeclareOutput("position", Shader_Vector3);
+    }
 
     // Shadow parameters
     if (props.hasRingShadows())
@@ -1438,51 +1428,48 @@ R"glsl(
     // Output the texture coordinates. Use just a single texture coordinate if all textures are mapped
     // identically. The texture offset is added for cloud maps; specular and night texture are not offset
     // because cloud layers never have these textures.
-    bool hasTexCoordTransform = props.hasTextureCoordTransform();
-    if (props.hasSharedTextureCoords())
-    {
-        if (util::is_set(props.texUsage, TexUsage::DiffuseTexture  |
-                                         TexUsage::NormalTexture   |
-                                         TexUsage::SpecularTexture |
-                                         TexUsage::NightTexture    |
-                                         TexUsage::EmissiveTexture |
-                                         TexUsage::OverlayTexture))
-        {
-            source += "diffTexCoord = " + TexCoord2D(nTexCoords, hasTexCoordTransform) + ";\n";
-            source += "diffTexCoord.x += texCoordOffset;\n";
-        }
-    }
-    else
+    if (props.hasTextureCoordTransform())
     {
         if (util::is_set(props.texUsage, TexUsage::DiffuseTexture))
         {
-            source += "diffTexCoord = " + TexCoord2D(nTexCoords, hasTexCoordTransform) + " + vec2(texCoordOffset, 0.0);\n";
-            nTexCoords++;
+            source += "diffTexCoord = " + TexCoord2D(nTexCoords, true) + " + vec2(texCoordOffset, 0.0);\n";
+            ++nTexCoords;
         }
 
         if (util::is_set(props.texUsage, TexUsage::NormalTexture))
         {
-            source += "normTexCoord = " + TexCoord2D(nTexCoords, hasTexCoordTransform) + " + vec2(texCoordOffset, 0.0);\n";
-            nTexCoords++;
+            source += "normTexCoord = " + TexCoord2D(nTexCoords, true) + " + vec2(texCoordOffset, 0.0);\n";
+            ++nTexCoords;
         }
 
         if (util::is_set(props.texUsage, TexUsage::SpecularTexture))
         {
-            source += "specTexCoord = " + TexCoord2D(nTexCoords, hasTexCoordTransform) + ";\n";
-            nTexCoords++;
+            source += "specTexCoord = " + TexCoord2D(nTexCoords, true) + ";\n";
+            ++nTexCoords;
         }
 
         if (util::is_set(props.texUsage, TexUsage::NightTexture))
         {
-            source += "nightTexCoord = " + TexCoord2D(nTexCoords, hasTexCoordTransform) + ";\n";
-            nTexCoords++;
+            source += "nightTexCoord = " + TexCoord2D(nTexCoords, true) + ";\n";
+            ++nTexCoords;
         }
 
         if (util::is_set(props.texUsage, TexUsage::EmissiveTexture))
         {
-            source += "emissiveTexCoord = " + TexCoord2D(nTexCoords, hasTexCoordTransform) + ";\n";
+            source += "emissiveTexCoord = " + TexCoord2D(nTexCoords, true) + ";\n";
+            ++nTexCoords;
+        }
+
+        if (util::is_set(props.texUsage, TexUsage::OverlayTexture))
+        {
+            source += "overlayTexCoord = " + TexCoord2D(nTexCoords, true) + ";\n";
             nTexCoords++;
         }
+    }
+    else if (util::is_set(props.texUsage, TransformableTexturesMask))
+    {
+        source += "diffTexCoord = " + TexCoord2D(0, false) + ";\n";
+        source += "diffTexCoord.x += texCoordOffset;\n";
     }
 
     // Ring texture coordinates are smooth across the ring plane. The fragment
@@ -1551,12 +1538,6 @@ R"glsl(
         }
     }
 
-    if (util::is_set(props.texUsage, TexUsage::OverlayTexture) && !props.hasSharedTextureCoords())
-    {
-        source += "overlayTexCoord = " + TexCoord2D(nTexCoords, hasTexCoordTransform) + ";\n";
-        nTexCoords++;
-    }
-
     if (util::is_set(props.texUsage, TexUsage::PointSprite))
         source += PointSizeCalculation();
     else if (util::is_set(props.texUsage, TexUsage::StaticPointSize))
@@ -1585,16 +1566,26 @@ buildFragmentShader(const ShaderProperties& props)
     source += FragmentHeader;
 
     std::string diffTexCoord("diffTexCoord");
-    std::string specTexCoord("specTexCoord");
-    std::string nightTexCoord("nightTexCoord");
-    std::string emissiveTexCoord("emissiveTexCoord");
-    std::string normTexCoord("normTexCoord");
-    if (props.hasSharedTextureCoords())
+    std::string specTexCoord;
+    std::string nightTexCoord;
+    std::string normTexCoord;
+    std::string emissiveTexCoord;
+    std::string overlayTexCoord;
+    if (props.hasTextureCoordTransform())
+    {
+        specTexCoord = "specTexCoord";
+        nightTexCoord = "nightTexCoord";
+        emissiveTexCoord = "emissiveTexCoord";
+        normTexCoord = "normTexCoord";
+        overlayTexCoord = "overlayTexCoord";
+    }
+    else
     {
         specTexCoord     = diffTexCoord;
         nightTexCoord    = diffTexCoord;
         normTexCoord     = diffTexCoord;
         emissiveTexCoord = diffTexCoord;
+        overlayTexCoord  = diffTexCoord;
     }
 
     source += TextureSamplerDeclarations(props);
@@ -1616,7 +1607,11 @@ buildFragmentShader(const ShaderProperties& props)
 
     if (props.isViewDependent() || props.hasScattering() ||
         props.hasEclipseShadows() || props.hasRingShadows())
+    {
+        if (props.hasScattering())
+            source += "centroid ";
         source += DeclareInput("position", Shader_Vector3);
+    }
 
     if (props.lightModel != LightingModel::UnlitModel)
     {
@@ -1899,7 +1894,7 @@ buildFragmentShader(const ShaderProperties& props)
     // Mix in the overlay color with the base color
     if (util::is_set(props.texUsage, TexUsage::OverlayTexture))
     {
-        source += "vec4 overlayColor = texture(overlayTex, overlayTexCoord.st);\n";
+        source += "vec4 overlayColor = texture(overlayTex, " + overlayTexCoord + ".st);\n";
         source += "color.rgb = mix(color.rgb, overlayColor.rgb, overlayColor.a);\n";
     }
 
@@ -2162,8 +2157,6 @@ buildAtmosphereVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
     source += CommonHeader;
     source += VertexHeader;
     source += CommonAttribs;
-    if (props.hasTextureCoordTransform())
-        source += TextureTransformUniforms;
 
     source += DeclareLights(props);
     source += DeclareUniform("eyePosition", Shader_Vector3);
@@ -2288,8 +2281,7 @@ buildEmissiveVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
     source += CommonHeader;
     source += VertexHeader;
     source += CommonAttribs;
-    if (props.hasTextureCoordTransform())
-        source += TextureTransformUniforms;
+    source += TextureTransformUniforms(props);
 
     source += DeclareUniform("opacity", Shader_Float);
 
@@ -2298,7 +2290,7 @@ buildEmissiveVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
     // models, the material color is premultiplied with the light color.
     // Emissive shaders interoperate better with other shaders if they also
     // take the color from light source 0.
-    source += DeclareUniform("light0_diffuse", Shader_Vector3);
+    source += DeclareUniformArray("light_diffuse", Shader_Vector3, 1);
 
     if (props.usePointSize())
         source += PointSizeDeclaration();
@@ -2406,8 +2398,7 @@ buildParticleVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
     source += CommonHeader;
     source += VertexHeader;
     source += CommonAttribs;
-    if (props.hasTextureCoordTransform())
-        source += TextureTransformUniforms;
+    source += TextureTransformUniforms(props);
 
     source += "// PARTICLE SHADER\n";
     fmt::format_to(std::back_inserter(source), "// shadow count: {:x}\n", static_cast<std::uint32_t>(props.shadowCounts));
@@ -2599,6 +2590,11 @@ buildProgram(std::string_view vs, std::string_view fs, bool fisheyeEnabled,
 {
     std::string_view toneMapDefine =
         util::is_set(options, StaticShaderOptions::ToneMap) ? "#define TONE_MAP\n"sv : ""sv;
+    std::string_view toneMapCurveDefine;
+    if (util::is_set(options, StaticShaderOptions::ToneMapACES))
+        toneMapCurveDefine = "#define TONE_MAP_ACES\n"sv;
+    else if (util::is_set(options, StaticShaderOptions::ToneMapReinhard))
+        toneMapCurveDefine = "#define TONE_MAP_REINHARD\n"sv;
     std::string_view billboardDefine =
         util::is_set(options, StaticShaderOptions::Billboard) ? "#define BILLBOARD\n"sv : ""sv;
     std::string_view convertToSRGBDefine =
@@ -2606,7 +2602,7 @@ buildProgram(std::string_view vs, std::string_view fs, bool fisheyeEnabled,
     std::string_view preserveDepthDefine =
         util::is_set(options, StaticShaderOptions::PreserveDepth) ? "#define PRESERVE_DEPTH\n"sv : ""sv;
     std::string vsSrc = fmt::format("{}{}{}{}{}{}\n", VersionHeader, CommonHeader, VertexHeader, billboardDefine, VPFunction(fisheyeEnabled), vs);
-    std::string fsSrc = fmt::format("{}{}{}{}{}{}{}{}\n", VersionHeader, CommonHeader, FragmentHeader, toneMapDefine, billboardDefine, convertToSRGBDefine, preserveDepthDefine, fs);
+    std::string fsSrc = fmt::format("{}{}{}{}{}{}{}{}{}\n", VersionHeader, CommonHeader, FragmentHeader, toneMapDefine, toneMapCurveDefine, billboardDefine, convertToSRGBDefine, preserveDepthDefine, fs);
 
     DumpVSSource(vsSrc);
     DumpFSSource(fsSrc);
@@ -2743,14 +2739,6 @@ ShaderProperties::hasShadowsForLight(unsigned int light) const
            hasRingShadowForLight(light)    ||
            hasSelfShadowForLight(light)    ||
            hasCloudShadowForLight(light);
-}
-
-// Returns true if diffuse, specular, bump, and night textures all use the
-// same texture coordinate set.
-bool
-ShaderProperties::hasSharedTextureCoords() const
-{
-    return util::is_set(texUsage, TexUsage::SharedTextureCoords);
 }
 
 bool
@@ -2997,14 +2985,14 @@ CelestiaGLProgram::initParameters()
     initCommonParameters();
     for (unsigned int i = 0; i < props.nLights; i++)
     {
-        lights[i].direction  = vec3Param(LightProperty(i, "direction").c_str());
-        lights[i].diffuse    = vec3Param(LightProperty(i, "diffuse").c_str());
-        lights[i].specular   = vec3Param(LightProperty(i, "specular").c_str());
-        lights[i].halfVector = vec3Param(LightProperty(i, "halfVector").c_str());
+        lights.direction[i]  = vec3Param(LightProperty(i, "direction").c_str());
+        lights.diffuse[i]    = vec3Param(LightProperty(i, "diffuse").c_str());
+        lights.specular[i]   = vec3Param(LightProperty(i, "specular").c_str());
+        lights.halfVector[i] = vec3Param(LightProperty(i, "halfVector").c_str());
         if (util::is_set(props.texUsage, TexUsage::NightTexture))
-            lights[i].brightness = floatParam(LightProperty(i, "brightness").c_str());
+            lights.brightness[i] = floatParam(LightProperty(i, "brightness").c_str());
         if (props.lightModel == LightingModel::AtmosphereModel || props.hasScattering())
-            lights[i].color = vec3Param(LightProperty(i, "color").c_str());
+            lights.color[i] = vec3Param(LightProperty(i, "color").c_str());
 
         if (props.hasRingShadowForLight(i))
             ringShadowLOD[i] = floatParam(IndexedParameter("ringShadowLOD", i).c_str());
@@ -3024,21 +3012,14 @@ CelestiaGLProgram::initParameters()
     if (props.hasTextureCoordTransform())
     {
         for (unsigned int i = 0; i < texCoordTransforms.size(); ++i)
-        {
-            texCoordTransforms[i].base = vec2Param(fmt::format("texCoordBase{}", i).c_str());
-            texCoordTransforms[i].delta = vec2Param(fmt::format("texCoordDelta{}", i).c_str());
-        }
+            texCoordTransforms[i] = vec4Param(fmt::format("texCoordTransform[{}]", i).c_str());
     }
 
     if (props.hasSpecular())
-    {
         shininess            = floatParam("shininess");
-    }
 
     if (props.isViewDependent() || props.hasScattering())
-    {
         eyePosition          = vec3Param("eyePosition");
-    }
 
     opacity      = floatParam("opacity");
     ambientColor = vec3Param("ambientColor");
@@ -3071,22 +3052,16 @@ CelestiaGLProgram::initParameters()
         cloudHorizon = floatParam("cloudHorizon");
 
     if (util::is_set(props.texUsage, TexUsage::ShadowMapTexture))
-    {
         ShadowMatrix0       = mat4Param("ShadowMatrix0");
-    }
 
     if (props.hasScattering())
         initAtmosphereParameters();
 
     if (util::is_set(props.lightModel, LightingModel::LunarLambertModel))
-    {
         lunarLambert         = floatParam("lunarLambert");
-    }
 
     if (props.usePointSize())
-    {
         pointScale           = floatParam("pointScale");
-    }
 
     if (util::is_set(props.texUsage, TexUsage::LineAsTriangles))
     {
@@ -3172,31 +3147,42 @@ CelestiaGLProgram::setLightParameters(const LightingState& ls,
                                       Color materialSpecular,
                                       Color materialEmissive)
 {
-    unsigned int nLights = std::min(MaxShaderLights, ls.nLights);
+    setLightParameters(ls,
+                       materialDiffuse.toVector3(),
+                       materialSpecular.toVector3(),
+                       materialEmissive.toVector3(),
+                       materialDiffuse.alpha());
+}
 
-    Eigen::Vector3f diffuseColor = materialDiffuse.toVector3();
-    Eigen::Vector3f specularColor = materialSpecular.toVector3();
+void
+CelestiaGLProgram::setLightParameters(const LightingState& ls,
+                                      const Eigen::Vector3f& materialDiffuse,
+                                      const Eigen::Vector3f& materialSpecular,
+                                      const Eigen::Vector3f& materialEmissive,
+                                      float materialOpacity)
+{
+    unsigned int nLights = std::min(MaxShaderLights, ls.nLights);
 
     for (unsigned int i = 0; i < nLights; i++)
     {
         const DirectionalLight& light = ls.lights[i];
 
         Eigen::Vector3f lightColor = light.color.toVector3() * light.irradiance;
-        lights[i].color = light.color.toVector3();
-        lights[i].direction = light.direction_obj;
-        lights[i].diffuse = lightColor.cwiseProduct(diffuseColor);
-        lights[i].brightness = lightColor.maxCoeff();
-        lights[i].specular = lightColor.cwiseProduct(specularColor);
+        lights.color[i] = light.color.toVector3();
+        lights.direction[i] = light.direction_obj;
+        lights.diffuse[i] = lightColor.cwiseProduct(materialDiffuse);
+        lights.brightness[i] = lightColor.maxCoeff();
+        lights.specular[i] = lightColor.cwiseProduct(materialSpecular);
 
         Eigen::Vector3f halfAngle_obj = ls.eyeDir_obj + light.direction_obj;
         if (halfAngle_obj.norm() != 0.0f)
             halfAngle_obj.normalize();
-        lights[i].halfVector = halfAngle_obj;
+        lights.halfVector[i] = halfAngle_obj;
     }
 
     eyePosition = ls.eyePos_obj;
-    ambientColor = ls.ambientColor.cwiseProduct(diffuseColor) + materialEmissive.toVector3();
-    opacity = materialDiffuse.alpha();
+    ambientColor = ls.ambientColor.cwiseProduct(materialDiffuse) + materialEmissive;
+    opacity = materialOpacity;
 }
 
 /** Set GLSL shader constants for shadows from ellipsoid occluders; shadows from

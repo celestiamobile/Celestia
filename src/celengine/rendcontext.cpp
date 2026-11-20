@@ -251,7 +251,7 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
     Texture* specTex = nullptr;
     Texture* emissiveTex = nullptr;
 
-    shaderProps.texUsage = TexUsage::SharedTextureCoords;
+    shaderProps.texUsage = TexUsage::None;
     shaderProps.separateRayleighMieScaleHeights = false;
 
     if (useNormals)
@@ -422,12 +422,26 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
         prog->floatParam("shadowMapSize") = static_cast<float>(shadowMapWidth);
     }
 
-    // setLightParameters() expects opacity in the alpha channel of the diffuse color
-    Color diffuse(m.diffuse.red(), m.diffuse.green(), m.diffuse.blue(), m.opacity);
-    Color specular(m.specular.red(), m.specular.green(), m.specular.blue());
-    Color emissive(m.emissive.red(), m.emissive.green(), m.emissive.blue());
+    const auto diffuse = m.diffuse.linearize(gl::sRGBRendering);
+    const auto specular = m.specular.linearize(gl::sRGBRendering);
+    const auto emissive = m.emissive.linearize(gl::sRGBRendering);
 
-    prog->setLightParameters(lightingState, diffuse, specular, emissive);
+    if (gl::sRGBRendering)
+    {
+        prog->setLightParameters(lightingState,
+                                 diffuse.toVector3(),
+                                 specular.toVector3(),
+                                 emissive.toVector3(),
+                                 m.opacity);
+    }
+    else
+    {
+        // Preserve the legacy 8-bit material path when sRGB rendering is disabled.
+        prog->setLightParameters(lightingState,
+                                 Color(diffuse.red(), diffuse.green(), diffuse.blue(), m.opacity),
+                                 Color(specular.toVector3()),
+                                 Color(emissive.toVector3()));
+    }
 
     if (shaderProps.hasEclipseShadows() != 0)
         prog->setEclipseShadowParameters(lightingState, objScale, objOrientation);
@@ -573,7 +587,7 @@ GLSLUnlit_RenderContext::makeCurrent(const cmod::Material& m)
     Texture* baseTex = nullptr;
 
     shaderProps.lightModel = LightingModel::EmissiveModel;
-    shaderProps.texUsage = TexUsage::SharedTextureCoords;
+    shaderProps.texUsage = TexUsage::None;
 
     if (util::TextureHandle diffuseMap = m.getMap(cmod::TextureSemantic::DiffuseMap);
         diffuseMap != util::TextureHandle::Invalid && (useTexCoords || usePointSize))
@@ -615,7 +629,7 @@ GLSLUnlit_RenderContext::makeCurrent(const cmod::Material& m)
         textures[i]->bind();
     }
 
-    prog->lights[0].diffuse = m.diffuse.toVector3();
+    prog->lights.diffuse[0] = m.diffuse.linearize(gl::sRGBRendering).toVector3();
     prog->opacity = m.opacity;
 
     if (usePointSize)

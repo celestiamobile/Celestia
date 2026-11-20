@@ -16,14 +16,19 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <utility>
 
 #include <doctest.h>
 
+#include <celengine/texmanager.h>
 #include <celengine/texture.h>
 #include <celengine/virtualtex.h>
 #include <celimage/image.h>
 #include <celimage/imageformats.h>
 #include <celestia/celestiacore.h>
+#include <celestia/configfile.h>
+#include <celutil/logger.h>
 
 namespace
 {
@@ -202,6 +207,82 @@ TEST_CASE("Simulation initialization can retry after a failed star catalog")
         REQUIRE_FALSE(core.initSimulation(configPath));
         CHECK(core.getSimulation() == nullptr);
     }
+}
+
+TEST_CASE("Tone mapping configuration accepts new curves and preserves legacy modes")
+{
+    celestia::util::CreateLogger();
+    TemporaryDirectory directory;
+    const auto path = directory.getPath("tone-mapping.cfg");
+    for (const auto& [name, expected] : std::array{
+             std::pair{ "Off", ToneMappingMode::None },
+             std::pair{ "Manual", ToneMappingMode::Manual },
+             std::pair{ "Exponential", ToneMappingMode::Manual },
+             std::pair{ "aces", ToneMappingMode::ACES },
+             std::pair{ "rEiNhArD", ToneMappingMode::Reinhard },
+             std::pair{ "Unknown", ToneMappingMode::ACES } })
+    {
+        CAPTURE(name);
+        {
+            std::ofstream out(path);
+            out << "Configuration { ToneMappingMode \"" << name << "\" }";
+            REQUIRE(out.good());
+        }
+        CelestiaConfig config;
+        config.renderDetails.output.toneMapping = ToneMappingMode::ACES;
+        celestia::engine::TexturePaths textures;
+        REQUIRE(ReadCelestiaConfig(path, config, textures));
+        CHECK(config.renderDetails.output.toneMapping == expected);
+    }
+}
+
+TEST_CASE("MSAA configuration separates scene sampling from presentation")
+{
+    celestia::util::CreateLogger();
+    TemporaryDirectory directory;
+    const auto path = directory.getPath("msaa.cfg");
+    for (const auto& [settings, expectedScene, expectedPresent] : std::array{
+             std::tuple{ "AntialiasingSamples 4", 4u, 1u },
+             std::tuple{ "AntialiasingSamples 4 SceneAntialiasingSamples 1", 1u, 1u },
+             std::tuple{ "AntialiasingSamples 4 PresentAntialiasingSamples 2", 4u, 2u },
+             std::tuple{ "AntialiasingSamples 4 SceneAntialiasingSamples 8 PresentAntialiasingSamples 2", 8u, 2u },
+         })
+    {
+        CAPTURE(settings);
+        {
+            std::ofstream out(path);
+            out << "Configuration { " << settings << " }";
+            REQUIRE(out.good());
+        }
+        CelestiaConfig config;
+        celestia::engine::TexturePaths textures;
+        REQUIRE(ReadCelestiaConfig(path, config, textures));
+        CHECK(config.renderDetails.getSceneAASamples() == expectedScene);
+        CHECK(config.renderDetails.output.presentAaSamples == expectedPresent);
+    }
+}
+
+TEST_CASE("Layered MSAA configuration preserves explicit per-target overrides")
+{
+    celestia::util::CreateLogger();
+    TemporaryDirectory directory;
+    const auto path = directory.getPath("msaa.cfg");
+    CelestiaConfig config;
+    celestia::engine::TexturePaths textures;
+    {
+        std::ofstream out(path);
+        out << "Configuration { AntialiasingSamples 4 SceneAntialiasingSamples 2 }";
+        REQUIRE(out.good());
+    }
+    REQUIRE(ReadCelestiaConfig(path, config, textures));
+    {
+        std::ofstream out(path);
+        out << "Configuration { AntialiasingSamples 8 PresentAntialiasingSamples 1 }";
+        REQUIRE(out.good());
+    }
+    REQUIRE(ReadCelestiaConfig(path, config, textures));
+    CHECK(config.renderDetails.getSceneAASamples() == 2);
+    CHECK(config.renderDetails.output.presentAaSamples == 1);
 }
 
 TEST_SUITE_END();

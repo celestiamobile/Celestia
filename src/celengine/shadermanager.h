@@ -48,13 +48,15 @@ enum class StaticShader
 };
 
 // Compile-time options that select variants of a static shader via #define injection.
-enum class StaticShaderOptions : std::uint8_t
+enum class StaticShaderOptions : std::uint16_t
 {
-    None          = 0,
-    ToneMap       = 0x01,
-    Billboard     = 0x02,
-    ConvertToSRGB = 0x04,
-    PreserveDepth = 0x08,
+    None            = 0,
+    ToneMap         = 0x01,
+    Billboard       = 0x02,
+    ConvertToSRGB   = 0x04,
+    PreserveDepth   = 0x08,
+    ToneMapACES     = 0x100,
+    ToneMapReinhard = 0x200,
 };
 
 ENUM_CLASS_BITWISE_OPS(StaticShaderOptions);
@@ -91,7 +93,6 @@ enum class TexUsage : std::uint32_t
     VertexColors            =  0x1000,
     Scattering              =  0x2000,
     PointSprite             =  0x4000,
-    SharedTextureCoords     =  0x8000,
     StaticPointSize         = 0x10000,
     LineAsTriangles         = 0x20000,
     TextureCoordTransform   = 0x40000,
@@ -172,7 +173,6 @@ struct ShaderProperties
     bool hasShadowMap() const;
 
     bool hasShadowsForLight(unsigned int) const;
-    bool hasSharedTextureCoords() const;
     bool hasTextureCoordTransform() const;
     bool hasSpecular() const;
     bool hasScattering() const;
@@ -210,12 +210,12 @@ constexpr inline unsigned int MaxShaderEclipseShadows = 3;
 
 struct CelestiaGLProgramLight
 {
-    Vec3ShaderParameter direction;
-    Vec3ShaderParameter color;
-    Vec3ShaderParameter diffuse;
-    Vec3ShaderParameter specular;
-    Vec3ShaderParameter halfVector;
-    FloatShaderParameter brightness; // max of diffuse r, g, b
+    std::array<Vec3ShaderParameter, MaxShaderLights> direction;
+    std::array<Vec3ShaderParameter, MaxShaderLights> color;
+    std::array<Vec3ShaderParameter, MaxShaderLights> diffuse;
+    std::array<Vec3ShaderParameter, MaxShaderLights> specular;
+    std::array<Vec3ShaderParameter, MaxShaderLights> halfVector;
+    std::array<FloatShaderParameter, MaxShaderLights> brightness; // max of diffuse r, g, b
 };
 
 struct CelestiaGLProgramShadow
@@ -224,12 +224,6 @@ struct CelestiaGLProgramShadow
     Vec4ShaderParameter texGenT;
     FloatShaderParameter falloff;
     FloatShaderParameter maxDepth;
-};
-
-struct CelestiaGLProgramTextureTransform
-{
-    Vec2ShaderParameter base;
-    Vec2ShaderParameter delta;
 };
 
 class CelestiaGLProgram
@@ -245,6 +239,11 @@ public:
                             Color materialDiffuse,
                             Color materialSpecular,
                             Color materialEmissive);
+    void setLightParameters(const LightingState& ls,
+                            const Eigen::Vector3f& materialDiffuse,
+                            const Eigen::Vector3f& materialSpecular,
+                            const Eigen::Vector3f& materialEmissive,
+                            float materialOpacity);
     void setEclipseShadowParameters(const LightingState& ls,
                                     const Eigen::Vector3f& scale,
                                     const Eigen::Quaternionf& orientation);
@@ -278,8 +277,8 @@ public:
         CenterAttributeIndex        = 15,
     };
 
-    CelestiaGLProgramLight lights[MaxShaderLights];
-    FloatShaderParameter ringShadowLOD[MaxShaderLights];
+    CelestiaGLProgramLight lights;
+    std::array<FloatShaderParameter, MaxShaderLights> ringShadowLOD;
     Vec3ShaderParameter eyePosition;
     FloatShaderParameter shininess;
     Vec3ShaderParameter ambientColor;
@@ -306,7 +305,7 @@ public:
     FloatShaderParameter shadowTextureOffset;
     FloatShaderParameter cloudHorizon;
 
-    std::array<CelestiaGLProgramTextureTransform, 4> texCoordTransforms;
+    std::array<Vec4ShaderParameter, 6> texCoordTransforms;
 
     // Parameters for atmospheric scattering; all distances are normalized for
     // a unit sphere.

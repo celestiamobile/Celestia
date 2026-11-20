@@ -13,8 +13,21 @@
 #include <array>
 #include <cassert>
 
+#include <celutil/logger.h>
+
 namespace
 {
+
+inline bool
+hasTextureStorage()
+{
+#ifdef GL_ES
+    return true;
+#else
+    return celestia::gl::checkVersion(celestia::gl::GL_4_2)
+        || celestia::gl::ARB_texture_storage;
+#endif
+}
 
 // glInvalidateFramebuffer: core in GLES 3.0 and desktop GL 4.3 (or via GL_ARB_invalidate_subdata).
 inline bool
@@ -45,6 +58,7 @@ FramebufferObject::FramebufferObject(GLuint width, GLuint height, Attachment att
     m_depthTexId(0),
     m_fboId(0),
     m_samples(samples > 1 ? samples : 1),
+    m_requestedSamples(m_samples),
     m_useFloatColor(useFloatColor),
     m_status(GL_FRAMEBUFFER_UNSUPPORTED),
     m_owned(true)
@@ -62,6 +76,7 @@ FramebufferObject::FramebufferObject(GLuint fboId) :
     m_depthTexId(0),
     m_fboId(fboId),
     m_samples(1),
+    m_requestedSamples(1),
     m_useFloatColor(false),
     m_status(GL_FRAMEBUFFER_COMPLETE),
     m_owned(false)
@@ -85,6 +100,7 @@ FramebufferObject::FramebufferObject(FramebufferObject &&other) noexcept:
     m_colorRboId(other.m_colorRboId),
     m_depthRboId(other.m_depthRboId),
     m_samples(other.m_samples),
+    m_requestedSamples(other.m_requestedSamples),
     m_useFloatColor(other.m_useFloatColor),
     m_status(other.m_status),
     m_owned(other.m_owned)
@@ -108,6 +124,7 @@ FramebufferObject& FramebufferObject::operator=(FramebufferObject &&other) noexc
     m_colorRboId    = other.m_colorRboId;
     m_depthRboId    = other.m_depthRboId;
     m_samples       = other.m_samples;
+    m_requestedSamples = other.m_requestedSamples;
     m_useFloatColor = other.m_useFloatColor;
     m_status        = other.m_status;
     m_owned         = other.m_owned;
@@ -170,7 +187,10 @@ FramebufferObject::generateColorTexture()
     GLenum format = m_useFloatColor ? GL_RGBA : GL_RGB;
     GLenum type = m_useFloatColor ? GL_FLOAT : GL_UNSIGNED_BYTE;
 #endif
-    glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, m_width, m_height, 0, format, type, nullptr);
+    if (hasTextureStorage())
+        glTexStorage2D(GL_TEXTURE_2D, 1, internalFormat, m_width, m_height);
+    else
+        glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, m_width, m_height, 0, format, type, nullptr);
 
     // Unbind the texture
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -200,8 +220,10 @@ FramebufferObject::generateDepthTexture()
 
     // Set the texture dimensions
     GLint internalFormat = GL_DEPTH_COMPONENT24;
-    GLenum type = GL_UNSIGNED_INT;
-    glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, m_width, m_height, 0, GL_DEPTH_COMPONENT, type, nullptr);
+    if (hasTextureStorage())
+        glTexStorage2D(GL_TEXTURE_2D, 1, internalFormat, m_width, m_height);
+    else
+        glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, m_width, m_height, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
 
     // Unbind the texture
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -309,6 +331,9 @@ FramebufferObject::generateMSAAFbo(Attachment attachments)
 
     if (m_status != GL_FRAMEBUFFER_COMPLETE)
     {
+        celestia::util::GetLogger()->warn("Unable to create {}x MSAA framebuffer (status {:#x}); "
+                                          "falling back to single-sample rendering.\n",
+                                          m_requestedSamples, m_status);
         // MSAA FBO creation failed; clean up MSAA resources and fall back to
         // the texture-based FBO without MSAA.
         glDeleteFramebuffers(1, &m_msaaFboId);

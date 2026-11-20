@@ -35,6 +35,7 @@
 #include <celengine/starcolors.h>
 #include <celengine/texmanager.h>
 #include <celestia/celestiacore.h>
+#include <celestia/configfile.h>
 #include <celutil/gettext.h>
 #include <celutil/tzutil.h>
 
@@ -226,6 +227,21 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
     ui.cloudSegmentCountSpinBox->setValue(static_cast<int>(renderer->getCloudSegmentCount()));
 
     {
+        QSignalBlocker blocker(ui.sceneMSAACombo);
+        ui.sceneMSAACombo->addItem(_("Use config default"), 0u);
+        ui.sceneMSAACombo->addItem(_("Off"), 1u);
+        auto maxSamples = appCore->getMaxSceneMSAASamples();
+        for (unsigned int samples = 2; samples <= maxSamples; samples *= 2)
+            ui.sceneMSAACombo->addItem(QString::number(samples) + "x", samples);
+        auto currentSamples = appCore->getSceneMSAASamples();
+        if (ui.sceneMSAACombo->findData(currentSamples) < 0)
+            ui.sceneMSAACombo->addItem(QString::number(currentSamples) + "x", currentSamples);
+        QSettings settings;
+        SetComboBoxValue(ui.sceneMSAACombo,
+                         settings.contains("SceneAntialiasingSamples") ? currentSamples : 0u);
+    }
+
+    {
         QSignalBlocker blocker(ui.sRGBRenderingCombo);
         ui.sRGBRenderingCombo->addItem(_("Use config default"));
         ui.sRGBRenderingCombo->addItem(_("Enabled"));
@@ -239,16 +255,17 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, CelestiaCore* core) :
     {
         QSignalBlocker blocker(ui.toneMappingCombo);
         ui.toneMappingCombo->addItem(_("Off"));
-        ui.toneMappingCombo->addItem(_("Manual exposure"));
+        ui.toneMappingCombo->addItem(_("Exponential"));
+        ui.toneMappingCombo->addItem(_("ACES (fitted)"));
+        ui.toneMappingCombo->addItem(_("Reinhard"));
         ui.toneMappingCombo->setCurrentIndex(
             static_cast<int>(renderer->getToneMappingMode()));
     }
     ui.toneMappingExposureSpinBox->setValue(renderer->getToneMappingExposure());
-    // Exposure only applies in Manual tone mapping mode.
     {
-        bool manual = ui.toneMappingCombo->currentIndex() == 1;
-        ui.toneMappingExposureLabel->setVisible(manual);
-        ui.toneMappingExposureSpinBox->setVisible(manual);
+        bool toneMapping = ui.toneMappingCombo->currentIndex() > 0;
+        ui.toneMappingExposureLabel->setVisible(toneMapping);
+        ui.toneMappingExposureSpinBox->setVisible(toneMapping);
     }
 
     switch (renderer->getResolution())
@@ -788,6 +805,23 @@ PreferencesDialog::on_featureSizeSpinBox_valueChanged(int value)
 }
 
 void
+PreferencesDialog::on_sceneMSAACombo_currentIndexChanged(int index)
+{
+    auto samples = ui.sceneMSAACombo->itemData(index).toUInt();
+    QSettings settings;
+    if (samples == 0)
+    {
+        settings.remove("SceneAntialiasingSamples");
+        samples = appCore->getConfig()->renderDetails.getSceneAASamples();
+    }
+    else
+    {
+        settings.setValue("SceneAntialiasingSamples", samples);
+    }
+    appCore->setSceneMSAASamples(samples);
+}
+
+void
 PreferencesDialog::on_antialiasLinesCheck_stateChanged(int state)
 {
     setRenderFlag(appCore, ::RenderFlags::ShowSmoothLines, state);
@@ -825,10 +859,10 @@ void
 PreferencesDialog::on_toneMappingCombo_currentIndexChanged(int index) const
 {
     Renderer* renderer = appCore->getRenderer();
-    renderer->setToneMappingMode(static_cast<ToneMappingMode>(std::clamp(index, 0, 1)));
-    // Exposure only applies in Manual tone mapping mode.
-    ui.toneMappingExposureLabel->setVisible(index == 1);
-    ui.toneMappingExposureSpinBox->setVisible(index == 1);
+    renderer->setToneMappingMode(static_cast<ToneMappingMode>(
+        std::clamp(index, 0, static_cast<int>(ToneMappingMode::Reinhard))));
+    ui.toneMappingExposureLabel->setVisible(index > 0);
+    ui.toneMappingExposureSpinBox->setVisible(index > 0);
 }
 
 void
