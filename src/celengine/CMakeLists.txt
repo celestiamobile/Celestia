@@ -23,6 +23,8 @@ set(CELENGINE_SOURCES
   curveplot.h
   deepskyobj.cpp
   deepskyobj.h
+  depthpartition.cpp
+  depthpartition.h
   dsobrowser.cpp
   dsobrowser.h
   dsodb.cpp
@@ -78,6 +80,8 @@ set(CELENGINE_SOURCES
   opencluster.cpp
   opencluster.h
   orbitsampler.h
+  orbitvisibility.cpp
+  orbitvisibility.h
   overlay.cpp
   overlay.h
   imageoverlay.cpp

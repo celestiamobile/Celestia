@@ -8,7 +8,6 @@
 // as published by the Free Software Foundation; either version 2
 // of the License, or (at your option) any later version.
 
-#define DEBUG_COALESCE               0
 #define DEBUG_SECONDARY_ILLUMINATION 0
 #define DEBUG_ORBIT_CACHE            0
 
@@ -2682,7 +2681,8 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
                                 float cloudTexOffset,
                                 const math::Frustum& viewFrustum,
                                 const Matrix4f& planetMV,
-                                const Matrices& m)
+                                const Matrices& m,
+                                AtmosphereRenderPass pass)
 {
     Matrices planetMVP = { m.projection, &planetMV };
 
@@ -2703,8 +2703,9 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
         fade = 1.0f;
     }
 
-    if (fade > 0 && util::is_set(renderFlags, RenderFlags::ShowAtmospheres) && atmosphere->height > 0.0f &&
-        !insidePlanet)
+    if (pass != AtmosphereRenderPass::Clouds && fade > 0
+        && util::is_set(renderFlags, RenderFlags::ShowAtmospheres) && atmosphere->height > 0.0f
+        && !insidePlanet)
     {
         // Only use new atmosphere code in OpenGL 2.0 path when new style parameters are defined.
         // TODO: convert old style atmopshere parameters
@@ -2737,7 +2738,7 @@ void Renderer::renderAtmosphere(const Atmosphere* atmosphere, // NOSONAR(cpp:S10
     }
 
     // If there's a cloud layer, we'll render it now.
-    if (cloudTex != nullptr && !insidePlanet)
+    if (pass != AtmosphereRenderPass::Sky && cloudTex != nullptr && !insidePlanet)
     {
         float cloudScale = 1.0f + atmosphere->cloudHeight / radius;
         Matrix4f cmv = math::scale(planetMV, cloudScale);
@@ -2797,7 +2798,8 @@ void Renderer::renderPlanetAtmosphere(Body& body,
                                       const Observer& observer,
                                       float nearPlaneDistance,
                                       float farPlaneDistance,
-                                      const Matrices& m)
+                                      const Matrices& m,
+                                      AtmosphereRenderPass pass)
 {
     const BodyFeaturesManager* bodyFeaturesManager = GetBodyFeaturesManager();
     const Atmosphere* atmosphere = bodyFeaturesManager->getAtmosphere(&body);
@@ -2933,7 +2935,7 @@ void Renderer::renderPlanetAtmosphere(Body& body,
     renderAtmosphere(atmosphere, ri, ls, rp, pos, distance, radius,
                      scaleFactors, insidePlanet, lit,
                      cloudTex, cloudNormalMap, cloudTexOffset,
-                     viewFrustum, planetMV, m);
+                     viewFrustum, planetMV, m, pass);
 }
 
 
@@ -5775,11 +5777,26 @@ Renderer::removeInvisibleItems(const math::InfiniteFrustum &frustum)
         case RenderListEntry::RenderableRingSystem:
         case RenderListEntry::RenderableRingSystemNear:
         case RenderListEntry::RenderableRingSystemFar:
-        case RenderListEntry::RenderableAtmosphere:
             radius = ri.radius;
             cullRadius = radius;
             convex = false;
             break;
+
+        case RenderListEntry::RenderableAtmosphere:
+        {
+            const Atmosphere* atmosphere = bodyFeaturesManager->getAtmosphere(ri.body);
+            float shellHeight = atmosphere->mieScaleHeight > 0.0f ?
+                                    getAtmosphereShellHeight(*atmosphere) :
+                                    atmosphere->height;
+            if (util::is_set(renderFlags, RenderFlags::ShowCloudMaps)
+                && atmosphere->cloudTexture != util::TextureHandle::Invalid)
+                shellHeight = std::max(shellHeight, atmosphere->cloudHeight);
+            // ri.radius may be the ring radius for transparent sorting only.
+            radius = ri.body->getRadius() + shellHeight;
+            cullRadius = radius;
+            convex = false;
+            break;
+        }
 
         case RenderListEntry::RenderableBody:
             radius = ri.body->getBoundingRadius();
@@ -6084,145 +6101,26 @@ Renderer::buildNearSystemsLists(const Universe &universe,
 int
 Renderer::buildDepthPartitions()
 {
-    // Since we're rendering objects of a huge range of sizes spread over
-    // vast distances, we can't just rely on the hardware depth buffer to
-    // handle hidden surface removal without a little help. We'll partition
-    // the depth buffer into spans that can be rendered without running
-    // into terrible depth buffer precision problems. Typically, each body
-    // with an apparent size greater than one pixel is allocated its own
-    // depth buffer interval. However, this will not correctly handle
-    // overlapping objects.  If two objects overlap in depth, we must
-    // assign them to the same interval.
-
-    depthPartitions.clear();
-    int nIntervals = 0;
-    int nEntries = (int)renderList.size();
-    float prevNear = -1e12f; // ~ 1 light year
-    if (nEntries > 0)
-        prevNear = renderList[nEntries - 1].farZ * 1.01f;
-
-    int i;
-
-    // Completely partition the depth buffer. Scan from back to front
-    // through all the renderable items that passed the culling test.
-    for (i = nEntries - 1; i >= 0; i--)
+    std::optional<float> nearestAnnotationZ;
+    for (const auto& orbit : orbitPathList)
     {
-        // Only consider renderables that will occupy more than one pixel.
-        if (renderList[i].discSizeInPixels > 1.0f)
-        {
-            if (nIntervals == 0 ||
-                renderList[i].farZ >= depthPartitions[nIntervals - 1].nearZ)
-            {
-                // This object spans a depth interval that's disjoint with
-                // the current interval, so create a new one for it, and
-                // another interval to fill the gap between the last
-                // interval.
-                DepthBufferPartition partition;
-                partition.index = nIntervals;
-                partition.nearZ = renderList[i].farZ;
-                partition.farZ = prevNear;
-
-                // Omit null intervals
-                // TODO: Is this necessary? Shouldn't the >= test prevent this?
-                if (partition.nearZ != partition.farZ)
-                {
-                    depthPartitions.push_back(partition);
-                    nIntervals++;
-                }
-
-                partition.index = nIntervals;
-                partition.nearZ = renderList[i].nearZ;
-                partition.farZ = renderList[i].farZ;
-                depthPartitions.push_back(partition);
-                nIntervals++;
-
-                prevNear = partition.nearZ;
-            }
-            else
-            {
-                // This object overlaps the current span; expand the
-                // interval so that it completely contains the object.
-                DepthBufferPartition& partition = depthPartitions[nIntervals - 1];
-                partition.nearZ = max(partition.nearZ, renderList[i].nearZ);
-                partition.farZ = min(partition.farZ, renderList[i].farZ);
-                prevNear = partition.nearZ;
-            }
-        }
+        float nearZ = min(-MinNearPlaneDistance, orbit.centerZ + orbit.radius);
+        nearestAnnotationZ = max(nearestAnnotationZ.value_or(nearZ), nearZ);
     }
-
-    // Scan the list of orbit paths and find the closest one. We'll need
-    // adjust the nearest interval to accommodate it.
-    float zNearest = prevNear;
-    for (i = 0; i < (int)orbitPathList.size(); i++)
-    {
-        const OrbitPathListEntry& o = orbitPathList[i];
-        float minNearDistance = min(-MinNearPlaneDistance, o.centerZ + o.radius);
-        if (minNearDistance > zNearest)
-            zNearest = minNearDistance;
-    }
-
-    // Adjust the nearest interval to include the closest marker (if it's
-    // closer to the observer than anything else).
     if (!depthSortedAnnotations.empty())
     {
-        // Factor of 0.999 ensures that the near plane does not fall
-        // exactly at the marker's z coordinate (in which case the marker
-        // would be susceptible to getting clipped.)
-        float closestZ = depthSortedAnnotations.back().position.z();
-        if (-closestZ > zNearest)
-            zNearest = -closestZ * 0.999f;
+        // Keep markers off the near clip plane.
+        float nearZ = -depthSortedAnnotations.back().position.z() * 0.999f;
+        nearestAnnotationZ = max(nearestAnnotationZ.value_or(nearZ), nearZ);
     }
 
-#if DEBUG_COALESCE
-    clog << "nEntries: " << nEntries << ",   zNearest: " << zNearest
-         << ",   prevNear: " << prevNear << "\n";
-#endif
-
-    // If the nearest distance wasn't set, nothing should appear
-    // in the frontmost depth buffer interval (so we can set the near plane
-    // of the front interval to whatever we want as long as it's less than
-    // the far plane distance.
-    if (zNearest == prevNear)
-        zNearest = 0.0f;
-
-    // Add one last interval for the span from 0 to the front of the
-    // nearest object
-    // TODO: closest object may not be at entry 0, since objects are
-    // sorted by far distance.
-    float closest = zNearest;
-    if (nEntries > 0)
-    {
-        closest = max(closest, renderList[0].nearZ);
-
-        // Setting a the near plane distance to zero results in unreliable rendering, even
-        // if we don't care about the depth buffer. Compromise and set the near plane
-        // distance to a small fraction of distance to the nearest object.
-        if (closest == 0.0f)
-        {
-            closest = renderList[0].nearZ * 0.01f;
-        }
-    }
-
-    DepthBufferPartition partition;
-    partition.index = nIntervals;
-    partition.nearZ = closest;
-    partition.farZ = prevNear;
-    depthPartitions.push_back(partition);
-
-    nIntervals++;
-
-    // If orbits are enabled, adjust the farthest partition so that it
-    // can contain the orbit.
+    std::optional<float> farthestOrbitZ;
     if (!orbitPathList.empty())
-    {
-        depthPartitions[0].farZ = min(depthPartitions[0].farZ,
-                                      orbitPathList.back().centerZ - orbitPathList.back().radius);
-    }
+        farthestOrbitZ = orbitPathList.back().centerZ - orbitPathList.back().radius;
 
-    // We want to avoid overpartitioning the depth buffer. In this stage, we
-    // coalesce partitions that have small spans in the depth buffer.
-    // TODO: Implement this step!
-    return nIntervals;
+    depthPartitions
+        = engine::detail::buildDepthPartitions(renderList, nearestAnnotationZ, farthestOrbitZ);
+    return static_cast<int>(depthPartitions.size());
 }
 
 void
@@ -6232,7 +6130,88 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
 {
     // Render everything that wasn't culled.
     float intervalSize = 1.0f / static_cast<float>(max(1, nIntervals));
-    int i = static_cast<int>(renderList.size()) - 1;
+    auto intervalEntries = engine::detail::partitionRenderList(renderList, depthPartitions);
+
+    struct OrbitLayer
+    {
+        const RenderListEntry* entry;
+        int interval;
+        AtmosphereRenderPass pass;
+        Eigen::Affine3d toPlanet;
+        Eigen::Vector3f semiAxes;
+        bool scattering;
+    };
+    std::vector<OrbitLayer> orbitLayers;
+    std::vector<engine::OrbitVisibilityLayer> visibilityLayers;
+    if (!orbitPathList.empty())
+    {
+        const auto* features = GetBodyFeaturesManager();
+        // Follow actual draw order, not the global transparent sort keys.
+        for (int layerInterval = 0; layerInterval < nIntervals; ++layerInterval)
+        {
+            for (const auto* item : intervalEntries[layerInterval])
+            {
+                const auto& entry = *item;
+                if (entry.renderableType != RenderListEntry::RenderableAtmosphere)
+                    continue;
+
+                const Body& body = *entry.body;
+                const auto* atmosphere = features->getAtmosphere(&body);
+                float radius = body.getRadius();
+                auto orientation = body.getGeometryOrientation().cast<double>()
+                                   * body.getRotationModel(now)->spin(now)
+                                   * body.getEclipticToEquatorial(now);
+                Vector3f semiAxes = body.getSemiAxes();
+                if (body.getGeometry() != engine::GeometryHandle::Invalid)
+                {
+                    if (const auto* geometry = m_geometryManager->find(body.getGeometry());
+                        geometry != nullptr && !geometry->isNormalized())
+                    {
+                        semiAxes = Vector3f::Constant(body.getGeometryScale());
+                    }
+                }
+                Eigen::Affine3d toPlanet = Scaling(semiAxes.cast<double>().cwiseInverse())
+                                           * orientation
+                                           * Translation3d(-entry.position.cast<double>())
+                                           * getCameraOrientation().conjugate();
+                if (body.isEllipsoid() && toPlanet.translation().squaredNorm() < 1.0)
+                    continue;
+
+                double altitude = entry.distance - radius;
+                bool sky = util::is_set(renderFlags, RenderFlags::ShowAtmospheres)
+                           && atmosphere->height > 0.0f
+                           && (altitude <= 0.0
+                               || atmosphere->height / (altitude * pixelSize)
+                                      > MinAtmosphereThicknessInPixels);
+                bool scattering = sky && atmosphere->mieScaleHeight > 0.0f;
+                auto addLayer = [&](AtmosphereRenderPass pass, float height, bool volume)
+                {
+                    orbitLayers.push_back(
+                        { item, layerInterval, pass, toPlanet, semiAxes, scattering });
+                    float shellScale
+                        = 1.0f
+                          + height
+                                / (pass == AtmosphereRenderPass::Clouds ? radius :
+                                                                          semiAxes.maxCoeff());
+                    visibilityLayers.push_back(
+                        { Eigen::Scaling(1.0 / shellScale) * toPlanet, volume });
+                };
+                if (sky)
+                {
+                    float height
+                        = scattering ? getAtmosphereShellHeight(*atmosphere) : atmosphere->height;
+                    addLayer(AtmosphereRenderPass::Sky, height, scattering);
+                }
+                if (util::is_set(renderFlags, RenderFlags::ShowCloudMaps)
+                    && atmosphere->cloudTexture != util::TextureHandle::Invalid
+                    && m_textureManager->find(atmosphere->cloudTexture) != nullptr)
+                {
+                    addLayer(AtmosphereRenderPass::Clouds, atmosphere->cloudHeight, false);
+                }
+            }
+        }
+    }
+
     m_legacyLargeStarRenderer->start();
     m_legacyLargeGlareRenderer->start();
     for (int interval = 0; interval < nIntervals; interval++)
@@ -6256,22 +6235,17 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
 
         setCurrentProjectionMatrix(proj);
 
-        int firstInInterval = i;
-
         // Render just the opaque objects in the first pass
-        while (i >= 0 && renderList[i].farZ < depthPartitions[interval].nearZ)
+        for (const auto* entry : intervalEntries[interval])
         {
-            // This interval should completely contain the item
-            // Unless it's just a point?
-            // assert(renderList[i].nearZ <= depthPartitions[interval].near);
-
             // Treat objects that are smaller than one pixel as transparent and
             // render them in the second pass.
-            if (renderList[i].isOpaque && renderList[i].discSizeInPixels > 1.0f)
-                renderItem(renderList[i], observer, nearPlaneDistance, farPlaneDistance, m);
-
-            i--;
+            if (entry->isOpaque && entry->discSizeInPixels > 1.0f)
+                renderItem(*entry, observer, nearPlaneDistance, farPlaneDistance, m);
         }
+
+        if (!visibilityLayers.empty())
+            curvePlotVertexBuffer->beginVisibility(visibilityLayers);
 
         // Render orbit paths
         if (!orbitPathList.empty())
@@ -6298,14 +6272,136 @@ Renderer::renderSolarSystemObjects(const Observer &observer,
             }
         }
 
-        // Render transparent objects in the second pass
-        i = firstInInterval;
-        while (i >= 0 && renderList[i].farZ < depthPartitions[interval].nearZ)
+        auto drawOrbitStage = [&](std::size_t stage)
         {
-            if (!renderList[i].isOpaque || renderList[i].discSizeInPixels <= 1.0f)
-                renderItem(renderList[i], observer, nearPlaneDistance, farPlaneDistance, m);
+            PipelineState ps;
+            ps.blending = true;
+            ps.blendFunc = { GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA };
+            ps.depthTest = true;
+            ps.smoothLines = true;
+            setPipelineState(ps);
+            if (stage == 0 || !orbitLayers[stage - 1].scattering)
+            {
+                curvePlotVertexBuffer->renderStage(stage);
+                return;
+            }
 
-            i--;
+            const auto& layer = orbitLayers[stage - 1];
+            const auto& entry = *layer.entry;
+            Body& body = *entry.body;
+            const auto* atmosphere = GetBodyFeaturesManager()->getAtmosphere(&body);
+            RenderProperties rp;
+            LightingState lights;
+            Quaterniond q;
+            if (auto cached = planetLightingCache.find(&body); cached != planetLightingCache.end())
+            {
+                rp = cached->second.rp;
+                lights = cached->second.lights;
+            }
+            else
+                setupPlanetLighting(
+                    body,
+                    entry.position,
+                    now,
+                    nearPlaneDistance,
+                    static_cast<float>(entry.distance - body.getRadius()),
+                    rp,
+                    lights,
+                    q);
+
+            ShaderProperties props;
+            props.lightModel = LightingModel::UnlitModel;
+            props.texUsage = TexUsage::VertexColors | TexUsage::Scattering;
+            props.effects = LightingEffects::OrbitScattering;
+            props.nLights = static_cast<std::uint16_t>(std::min(lights.nLights, MaxShaderLights));
+            props.separateRayleighMieScaleHeights = getSeparateRayleighMieScaleHeights(*atmosphere);
+            if (props.nLights > 0 && lights.shadows[0] != nullptr)
+                props.setEclipseShadowCountForLight(
+                    0,
+                    std::min(
+                        MaxShaderEclipseShadows,
+                        static_cast<unsigned int>(lights.shadows[0]->size())));
+            Texture* ringShadow = nullptr;
+            if (props.nLights > 0 && lights.lights[0].castsShadows
+                && lights.shadowingRingSystem != nullptr
+                && lights.shadowingRingSystem == lights.ringShadows[0].ringSystem)
+            {
+                ringShadow = m_textureManager->findShadow(lights.shadowingRingSystem->texture);
+                if (ringShadow != nullptr)
+                {
+                    props.texUsage |= TexUsage::RingShadowTexture;
+                    props.setRingShadowForLight(0, true);
+                }
+            }
+            curvePlotVertexBuffer->renderStage(
+                stage,
+                &props,
+                [&](CelestiaGLProgram& program)
+                {
+                    program.mat4Param("orbitToPlanet") = layer.toPlanet.matrix().cast<float>();
+                    program.eyePosition = lights.eyePos_obj;
+                    program.setLightParameters(lights, Color::White, Color::Black, Color::Black);
+                    float radius = layer.semiAxes.maxCoeff();
+                    program.setAtmosphereParameters(
+                        *atmosphere,
+                        radius,
+                        radius,
+                        radius + getAtmosphereShellHeight(*atmosphere),
+                        getAtmosphereSegmentCount(),
+                        getAtmosphereExtinctionThreshold());
+                    if (props.hasEclipseShadows())
+                        program.setEclipseShadowParameters(lights, layer.semiAxes, rp.orientation);
+                    if (ringShadow != nullptr)
+                    {
+                        glActiveTexture(GL_TEXTURE0);
+                        ringShadow->bind();
+                        program.setRingShadowParameters(lights, layer.semiAxes);
+                    }
+                });
+        };
+        std::size_t nextOrbitLayer = 0;
+        if (!visibilityLayers.empty())
+        {
+            drawOrbitStage(0);
+            // A containing atmosphere may already have drawn in a farther partition.
+            while (nextOrbitLayer < orbitLayers.size()
+                   && orbitLayers[nextOrbitLayer].interval < interval)
+            {
+                drawOrbitStage(++nextOrbitLayer);
+            }
+        }
+
+        // Render transparent objects in their original back-to-front order.
+        for (const auto* entry : intervalEntries[interval])
+        {
+            if (nextOrbitLayer < orbitLayers.size() && orbitLayers[nextOrbitLayer].entry == entry)
+            {
+                for (auto pass : { AtmosphereRenderPass::Sky, AtmosphereRenderPass::Clouds })
+                {
+                    renderPlanetAtmosphere(
+                        *entry->body,
+                        entry->position,
+                        entry->distance,
+                        observer,
+                        nearPlaneDistance,
+                        farPlaneDistance,
+                        m,
+                        pass);
+                    if (nextOrbitLayer < orbitLayers.size()
+                        && orbitLayers[nextOrbitLayer].entry == entry
+                        && orbitLayers[nextOrbitLayer].pass == pass)
+                    {
+                        drawOrbitStage(++nextOrbitLayer);
+                    }
+                }
+            }
+            else if (!entry->isOpaque || entry->discSizeInPixels <= 1.0f)
+                renderItem(*entry, observer, nearPlaneDistance, farPlaneDistance, m);
+        }
+        if (!visibilityLayers.empty())
+        {
+            while (nextOrbitLayer < orbitLayers.size()) drawOrbitStage(++nextOrbitLayer);
+            curvePlotVertexBuffer->endVisibility();
         }
 
         Renderer::PipelineState ps;

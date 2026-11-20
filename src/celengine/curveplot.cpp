@@ -260,6 +260,13 @@ CurvePlotVertexBuffer::CurvePlotVertexBuffer(const Renderer& _renderer) :
 void
 CurvePlotVertexBuffer::setup(const Color& _color)
 {
+    if (!visibilityLayers.empty())
+    {
+        endStage();
+        previousVertex.reset();
+        color = _color;
+        return;
+    }
     stripLengths.clear();
     currentStripLength = 0;
     color = _color;
@@ -279,12 +286,46 @@ CurvePlotVertexBuffer::setup(const Color& _color)
 void
 CurvePlotVertexBuffer::finish()
 {
-    lr->finish();
+    if (visibilityLayers.empty())
+        lr->finish();
 }
 
 void
 CurvePlotVertexBuffer::vertex(const Eigen::Vector4d& v, float opacity)
 {
+    if (!visibilityLayers.empty())
+    {
+        Eigen::Vector3d position = v.head(3);
+        if (previousVertex.has_value())
+        {
+            Eigen::Vector3d delta = position - *previousVertex;
+            for (const auto& segment :
+                 celestia::engine::splitOrbitSegment(*previousVertex, position, visibilityLayers))
+            {
+                if (previousStage != segment.stage)
+                {
+                    endStage();
+                    previousStage = segment.stage;
+                }
+                auto& stage = stages[segment.stage];
+                auto addVertex = [&](double t)
+                {
+                    float alpha
+                        = previousOpacity + static_cast<float>(t) * (opacity - previousOpacity);
+                    stage.lines->addVertex(
+                        (*previousVertex + t * delta).cast<float>(),
+                        { color, color.alpha() * alpha });
+                    ++stage.length;
+                };
+                if (stage.length == 0)
+                    addVertex(segment.begin);
+                addVertex(segment.end);
+            }
+        }
+        previousVertex = position;
+        previousOpacity = opacity;
+        return;
+    }
     Eigen::Vector3f pos = v.head(3).cast<float>();
     lr->addVertex(pos, {color, color.alpha() * opacity});
     ++currentStripLength;
@@ -293,6 +334,12 @@ CurvePlotVertexBuffer::vertex(const Eigen::Vector4d& v, float opacity)
 void
 CurvePlotVertexBuffer::end()
 {
+    if (!visibilityLayers.empty())
+    {
+        endStage();
+        previousVertex.reset();
+        return;
+    }
     if (currentStripLength > 1)
         stripLengths.push_back(currentStripLength);
     else if (currentStripLength == 1)
@@ -303,6 +350,11 @@ CurvePlotVertexBuffer::end()
 void
 CurvePlotVertexBuffer::flush()
 {
+    if (!visibilityLayers.empty())
+    {
+        end();
+        return;
+    }
     if (currentStripLength > 1)
         end();
 
@@ -317,6 +369,88 @@ CurvePlotVertexBuffer::flush()
     stripLengths.clear();
     lr->clear();
     currentStripLength = 0;
+}
+
+void
+CurvePlotVertexBuffer::endStage()
+{
+    if (previousStage.has_value())
+    {
+        auto& stage = stages[*previousStage];
+        if (stage.length > 1)
+            stage.strips.push_back({ stage.length, stage.lines->finishStrip() });
+        stage.length = 0;
+        previousStage.reset();
+    }
+}
+
+void
+CurvePlotVertexBuffer::beginVisibility(
+    std::span<const celestia::engine::OrbitVisibilityLayer> layers)
+{
+    visibilityLayers = layers;
+    stages.resize(layers.size() + 1);
+    for (auto& stage : stages)
+    {
+        if (stage.lines == nullptr)
+        {
+            stage.lines = std::make_unique<LineRenderer>(
+                *renderer,
+                OrbitThickness,
+                LineRenderer::PrimType::LineStrip,
+                LineRenderer::StorageType::Stream,
+                LineRenderer::VertexFormat::P3F_C4UB);
+        }
+        stage.lines->startUpdate();
+    }
+}
+
+void
+CurvePlotVertexBuffer::renderStage(
+    std::size_t index,
+    const ShaderProperties* properties,
+    const std::function<void(CelestiaGLProgram&)>& setup)
+{
+    auto& stage = stages[index];
+    if (stage.strips.empty())
+        return;
+
+    if (properties != nullptr)
+    {
+        ShaderProperties props = *properties;
+        if (stage.lines->usesTriangles())
+            props.texUsage |= TexUsage::LineAsTriangles;
+        auto* program = renderer->getShaderManager().getShader(props);
+        if (program == nullptr)
+        {
+            stage.lines->clear();
+            stage.strips.clear();
+            return;
+        }
+        program->use();
+        if (setup)
+            setup(*program);
+        stage.lines->setCustomShader(program);
+    }
+    stage.lines->prerender();
+    Matrices m{ &renderer->getCurrentProjectionMatrix(), &ModelViewMatrix };
+    unsigned int offset = 0;
+    for (const auto& strip : stage.strips)
+    {
+        stage.lines->render(m, strip.count, offset);
+        offset += strip.count + strip.padding;
+    }
+    stage.lines->finish();
+    stage.lines->clear();
+    stage.strips.clear();
+}
+
+void
+CurvePlotVertexBuffer::endVisibility()
+{
+    visibilityLayers = {};
+    previousVertex.reset();
+    previousStage.reset();
 }
 
 CurvePlot::CurvePlot(CurvePlotVertexBuffer& vbuf) :

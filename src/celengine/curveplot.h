@@ -30,16 +30,22 @@
 #pragma once
 
 #include <deque>
+#include <functional>
 #include <memory>
+#include <optional>
+#include <span>
 #include <vector>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
 #include <celutil/color.h>
+#include "orbitvisibility.h"
 
 class Color;
 class Renderer;
+class CelestiaGLProgram;
+struct ShaderProperties;
 
 class CurvePlotVertexBuffer
 {
@@ -51,8 +57,31 @@ public:
     void vertex(const Eigen::Vector4d& v, float opacity = 1.0f);
     void end();
     void flush();
+    void beginVisibility(std::span<const celestia::engine::OrbitVisibilityLayer> layers);
+    void renderStage(
+        std::size_t stage,
+        const ShaderProperties* properties = nullptr,
+        const std::function<void(CelestiaGLProgram&)>& setup = {});
+    void endVisibility();
 
 private:
+    struct Strip
+    {
+        unsigned int count;
+        unsigned int padding;
+    };
+    struct Stage
+    {
+        std::unique_ptr<celestia::render::LineRenderer> lines;
+        std::vector<Strip> strips;
+        unsigned int length{ 0 };
+    };
+    void endStage();
+    std::span<const celestia::engine::OrbitVisibilityLayer> visibilityLayers;
+    std::vector<Stage> stages;
+    std::optional<Eigen::Vector3d> previousVertex;
+    float previousOpacity{ 1.0f };
+    std::optional<std::size_t> previousStage;
     unsigned int currentStripLength { 0 };
     std::vector<unsigned int> stripLengths;
     std::unique_ptr<celestia::render::LineRenderer> lr;

@@ -1400,6 +1400,9 @@ R"glsl(
     if (util::is_set(props.texUsage, TexUsage::LineAsTriangles))
         source += LineDeclaration();
 
+    if (props.effects == LightingEffects::OrbitScattering)
+        source += DeclareUniform("orbitToPlanet", Shader_Matrix4);
+
     source += VPFunction(props.fishEyeOverride != FisheyeOverrideMode::Disabled && fisheyeEnabled);
 
     // Begin main() function
@@ -1409,7 +1412,9 @@ R"glsl(
 
     if (props.isViewDependent() || props.hasScattering() ||
         props.hasEclipseShadows() || props.hasRingShadows())
-        source += "position = in_Position.xyz;\n";
+        source += props.effects == LightingEffects::OrbitScattering ?
+                      "position = (orbitToPlanet * in_Position).xyz;\n" :
+                      "position = in_Position.xyz;\n";
 
     if (props.usesTangentSpaceLighting())
         source += "tangent = in_Tangent;\n";
@@ -1690,7 +1695,10 @@ buildFragmentShader(const ShaderProperties& props)
         source += "vec3 N = normalize(normal);\n";
 
     if (props.isViewDependent() || props.hasScattering() || props.hasEclipseShadows())
-        source += "vec3 nposition = normalize(position);\n";
+        // Orbit endpoints have varying altitude, unlike the sphere's unit vertices.
+        source += props.effects == LightingEffects::OrbitScattering ?
+                      "vec3 nposition = position;\n" :
+                      "vec3 nposition = normalize(position);\n";
 
     if (props.lightModel != LightingModel::UnlitModel)
         source += "vec4 diff = vec4(ambientColor, opacity);\n";
@@ -1857,7 +1865,7 @@ buildFragmentShader(const ShaderProperties& props)
                 source += ApplyShadow(true);
         }
     }
-    else if (props.usesShadows())
+    else if (props.usesShadows() && props.effects != LightingEffects::OrbitScattering)
     {
         source += "float shadowMapCoeff = 1.0;\n";
 
@@ -1936,10 +1944,20 @@ buildFragmentShader(const ShaderProperties& props)
     // Include the effect of atmospheric scattering.
     if (props.hasScattering())
     {
+        if (props.effects == LightingEffects::OrbitScattering)
+            source += "if (dot(nposition, nposition) < atmosphereRadius.y)\n{\n";
         source += DeclareLocal("scatterEx", Shader_Vector3);
         source += DeclareLocal("scatterColor", Shader_Vector3);
-        source += AtmosphericEffects(props, 0);
+        if (props.effects == LightingEffects::OrbitScattering && props.nLights == 0)
+        {
+            source += AtmosphericTransmission(props);
+            source += "scatterColor = vec3(0.0);\n";
+        }
+        else
+            source += AtmosphericEffects(props, 0);
         source += "fragColor.rgb = fragColor.rgb * scatterEx + scatterColor;\n";
+        if (props.effects == LightingEffects::OrbitScattering)
+            source += "}\n";
     }
 
     // Limb darkening
