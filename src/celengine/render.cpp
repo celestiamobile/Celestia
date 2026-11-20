@@ -4982,8 +4982,8 @@ Renderer::renderAnnotations(std::span<const Annotation> annotations,
     for (; iter != annotations.end() && iter->position.z() > nearDist; ++iter)
     {
         // Compute normalized device z
-        float z = getProjectionMode()->getNormalizedDeviceZ(nearDist, farDist, iter->position.z());
-        float ndc_z = std::clamp(z, -1.0f, 1.0f);
+        float ndc_z = getProjectionMode()->getClampedNormalizedDeviceZ(
+            nearDist, farDist, iter->position.z());
 
         if (iter->markerRep)
         {

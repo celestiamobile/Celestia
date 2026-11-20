@@ -51,6 +51,7 @@ public:
     virtual double getViewConeAngleMax(float zoom) const = 0;
 
     virtual float getNormalizedDeviceZ(float nearZ, float farZ, float z) const = 0;
+    float getClampedNormalizedDeviceZ(float nearZ, float farZ, float z) const;
 
     virtual Eigen::Vector3f getPickRay(float x, float y, float zoom) const = 0;
     virtual void configureShaderManager(ShaderManager *) const = 0;

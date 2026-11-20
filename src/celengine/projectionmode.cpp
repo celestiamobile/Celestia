@@ -9,6 +9,10 @@
 
 #include "projectionmode.h"
 
+#include <algorithm>
+
+#include <celengine/glsupport.h>
+
 namespace celestia::engine
 {
 
@@ -23,6 +27,12 @@ ProjectionMode::ProjectionMode(float width, float height, int distanceToScreen, 
 std::tuple<float, float> ProjectionMode::getDefaultDepthRange() const
 {
     return std::make_tuple(0.5f, 1.0e9f);
+}
+
+float ProjectionMode::getClampedNormalizedDeviceZ(float nearZ, float farZ, float z) const
+{
+    // Ortho2D negates this input; zero-to-one clipping requires [-1, 0].
+    return std::clamp(getNormalizedDeviceZ(nearZ, farZ, z), -1.0f, gl::reverseZ ? 0.0f : 1.0f);
 }
 
 void ProjectionMode::setScreenDpi(int dpi)

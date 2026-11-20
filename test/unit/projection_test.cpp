@@ -1,5 +1,6 @@
 #include <doctest.h>
 
+#include <algorithm>
 #include <vector>
 
 #include <celengine/fisheyeprojectionmode.h>
@@ -73,5 +74,31 @@ TEST_CASE("Fisheye background stars behind the viewer are rejected before render
         star.setPosition(position);
         renderer.process(star, position.norm(), 0.0f);
         CHECK(entries.empty());
+    }
+
+}
+
+TEST_CASE("Fisheye annotations outside scene depth clamp to the active clip range")
+{
+    ReverseZScope scope;
+    celestia::engine::FisheyeProjectionMode projection(1200, 800, 96);
+    constexpr float nearZ = 1.0f;
+    constexpr float farZ = 1000.0f;
+    const auto annotations = celestia::math::Ortho2D(0.0f, 1200.0f, 0.0f, 800.0f);
+    for (bool reverse : {false, true})
+    {
+        celestia::gl::reverseZ = reverse;
+        for (float distance : {nearZ * 0.5f, nearZ, 500.0f, farZ, farZ * 4.0f})
+        {
+            CAPTURE(reverse);
+            CAPTURE(distance);
+            float z = projection.getClampedNormalizedDeviceZ(nearZ, farZ, distance);
+            Eigen::Vector4f annotation = annotations * Eigen::Vector4f(0, 0, z, 1);
+            float depth = reverse ? annotation.z() : annotation.z() * 0.5f + 0.5f;
+            float forwardDepth = std::clamp((distance - nearZ) / (farZ - nearZ), 0.0f, 1.0f);
+            CHECK(depth == doctest::Approx(reverse ? 1.0f - forwardDepth : forwardDepth));
+            CHECK(depth >= 0.0f);
+            CHECK(depth <= 1.0f);
+        }
     }
 }
