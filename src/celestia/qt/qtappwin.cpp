@@ -973,7 +973,6 @@ CelestiaAppWindow::slotOpenScriptDialog()
 
     if (!scriptFileName.isEmpty())
     {
-        m_appCore->cancelScript();
         m_appCore->runScript(QStringToPath(scriptFileName));
 
         QFileInfo scriptFile(scriptFileName);
@@ -989,7 +988,6 @@ CelestiaAppWindow::slotOpenScript()
     QAction* action = qobject_cast<QAction*>(sender());
     if (action != nullptr)
     {
-        m_appCore->cancelScript();
         m_appCore->runScript(QStringToPath(action->data().toString()));
     }
 }
@@ -1000,7 +998,6 @@ CelestiaAppWindow::slotRunDemo()
     const auto& demoScriptFile = m_appCore->getConfig()->paths.demoScriptFile;
     if (!demoScriptFile.empty())
     {
-        m_appCore->cancelScript();
         m_appCore->runScript(demoScriptFile);
     }
 }

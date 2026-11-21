@@ -349,6 +349,15 @@ StarTextures
 
 
 #------------------------------------------------------------------------
+# ScriptRunMode controls whether launching a script replaces existing
+# scripts ("replace", the default) or runs alongside them ("concurrent").
+# CELX celestia:runscript uses this setting when its mode is omitted or
+# "default"; an explicit "replace" or "concurrent" overrides the setting.
+#------------------------------------------------------------------------
+  ScriptRunMode "replace"
+
+
+#------------------------------------------------------------------------
 # CELX-scripts can request permission to perform dangerous operations,
 # such as reading, writing and deleting files or executing external
 # programs. If granted, a malicious script could use this to destroy

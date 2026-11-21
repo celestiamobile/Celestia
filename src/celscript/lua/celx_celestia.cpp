@@ -2094,6 +2094,7 @@ static int celestia_requestkeyboard(lua_State* l)
         mode = mode & ~Hud::TextEnterMode::PassToScript;
     }
     appCore->setTextEnterMode(mode);
+    getLuaStateObject(l)->requestKeyboard(lua_toboolean(l, 2) != 0);
 
     return 0;
 }
@@ -2237,12 +2238,30 @@ static int celestia_getscriptpath(lua_State* l)
 
 static int celestia_runscript(lua_State* l)
 {
-    Celx_CheckArgs(l, 2, 2, "One argument expected for celestia:runscript");
+    Celx_CheckArgs(l, 2, 3, "One or two arguments expected for celestia:runscript");
     const char* scriptfile = Celx_SafeGetString(l, 2, AllErrors, "Argument to celestia:runscript must be a string");
+    auto mode = CelestiaCore::ScriptRunMode::Default;
+    if (lua_gettop(l) == 3)
+    {
+        std::string_view modeName = Celx_SafeGetString(l, 3, AllErrors, "Second argument to celestia:runscript must be a mode string");
+        if (modeName == "concurrent")
+        {
+            mode = CelestiaCore::ScriptRunMode::Concurrent;
+        }
+        else if (modeName == "replace")
+        {
+            mode = CelestiaCore::ScriptRunMode::Replace;
+        }
+        else if (modeName != "default")
+        {
+            Celx_DoError(l, "Script mode for celestia:runscript must be 'default', 'replace' or 'concurrent'");
+            return 0;
+        }
+    }
 
     std::filesystem::path base_dir = GetScriptPath(l);
     CelestiaCore* appCore = this_celestia(l);
-    appCore->runScript(base_dir / scriptfile);
+    appCore->runScript(base_dir / scriptfile, true, mode);
     return 0;
 }
 
