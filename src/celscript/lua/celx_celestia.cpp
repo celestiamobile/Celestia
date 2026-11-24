@@ -21,6 +21,7 @@
 #include <celengine/texture.h>
 #ifdef USE_FFMPEG
 #include <celengine/videooverlay.h>
+#include <celestia/ffmpegcapture.h>
 #endif
 #include <celestia/audiosession.h>
 #include <celestia/configfile.h>
@@ -372,6 +373,32 @@ int celestia_getwindowdimension(lua_State* l)
     lua_pushnumber(l, get<0>(dimension));
     lua_pushnumber(l, get<1>(dimension));
     return 2;
+}
+
+// celestia:resize(width, height) -- request that the host application
+// resize its window. Celestia's rendering core does not own the window on
+// every platform (e.g. Mac Catalyst, where MobileCelestia owns the
+// UIWindowScene), so this only takes effect where the host has installed
+// a CelestiaCore::WindowResizeHandler. Returns true if a handler was
+// present and the request was forwarded, false otherwise (e.g. desktop
+// builds where the script should resize the window itself).
+static int celestia_resize(lua_State* l)
+{
+    Celx_CheckArgs(l, 3, 3, "Two arguments expected for celestia:resize");
+    CelestiaCore* appCore = this_celestia(l);
+    int width  = static_cast<int>(Celx_SafeGetNumber(l, 2, AllErrors, "First argument to celestia:resize must be a number (width)"));
+    int height = static_cast<int>(Celx_SafeGetNumber(l, 3, AllErrors, "Second argument to celestia:resize must be a number (height)"));
+
+    auto* handler = appCore->getWindowResizeHandler();
+    if (handler == nullptr || width <= 0 || height <= 0)
+    {
+        lua_pushboolean(l, 0);
+        return 1;
+    }
+
+    handler->requestResize(width, height);
+    lua_pushboolean(l, 1);
+    return 1;
 }
 
 int celestia_getsafeareainsets(lua_State* l)
@@ -2658,6 +2685,106 @@ static int celestia_setvideooverlayoffset(lua_State* l)
     lua_pushboolean(l, this_celestia(l)->setVideoOverlayOffset(id, x, y) ? 1 : 0);
     return 1;
 }
+
+// celestia:capturemovie(filename, width, height, fps [, bitrate]) --
+// start recording the rendered scene to a video file using Celestia's
+// built-in FFmpeg movie capture (H.264/mp4). Recording begins immediately
+// and continues automatically on every subsequent frame until
+// stopmoviecapture() is called (or pausemoviecapture()/resumemoviecapture()
+// toggle it). Only one capture can be active at a time. The output has no
+// audio track. Returns true on success, false if a capture is already
+// active or the file could not be opened.
+static int celestia_capturemovie(lua_State* l)
+{
+    Celx_CheckArgs(l, 5, 6, "Four or five arguments expected for celestia:capturemovie");
+
+    CelestiaCore* appCore = this_celestia(l);
+    if (appCore->isCaptureActive())
+    {
+        lua_pushboolean(l, 0);
+        return 1;
+    }
+
+    const char* filename = Celx_SafeGetString(l, 2, AllErrors, "First argument to celestia:capturemovie must be a string (filename)");
+    int width  = static_cast<int>(Celx_SafeGetNumber(l, 3, AllErrors, "Second argument to celestia:capturemovie must be a number (width)"));
+    int height = static_cast<int>(Celx_SafeGetNumber(l, 4, AllErrors, "Third argument to celestia:capturemovie must be a number (height)"));
+    float fps  = static_cast<float>(Celx_SafeGetNumber(l, 5, AllErrors, "Fourth argument to celestia:capturemovie must be a number (fps)"));
+    auto bitrate = static_cast<std::int64_t>(Celx_SafeGetNumber(l, 6, WrongType,
+        "Fifth argument to celestia:capturemovie must be a number (bitrate)", 4000000.0));
+
+    if (filename == nullptr || width <= 0 || height <= 0 || fps <= 0.0f)
+    {
+        lua_pushboolean(l, 0);
+        return 1;
+    }
+
+    auto* capture = new FFMPEGCapture(appCore->getRenderer());
+    capture->setVideoCodec(AV_CODEC_ID_H264);
+    capture->setBitRate(bitrate);
+    capture->setEncoderOptions(appCore->getConfig()->x264EncoderOptions);
+
+    if (!capture->start(std::filesystem::path(filename), width, height, fps))
+    {
+        delete capture;
+        lua_pushboolean(l, 0);
+        return 1;
+    }
+
+    appCore->initMovieCapture(capture);
+    appCore->recordBegin();
+    lua_pushboolean(l, 1);
+    return 1;
+}
+
+// celestia:stopmoviecapture() -- finalize and close a movie capture started
+// with capturemovie(). Returns true if a capture was active.
+static int celestia_stopmoviecapture(lua_State* l)
+{
+    Celx_CheckArgs(l, 1, 1, "No arguments expected for celestia:stopmoviecapture");
+    CelestiaCore* appCore = this_celestia(l);
+    bool wasActive = appCore->isCaptureActive();
+    if (wasActive)
+        appCore->recordEnd();
+    lua_pushboolean(l, wasActive ? 1 : 0);
+    return 1;
+}
+
+// celestia:pausemoviecapture() -- pause an active movie capture without
+// finalizing the output file. Returns true if a capture was active.
+static int celestia_pausemoviecapture(lua_State* l)
+{
+    Celx_CheckArgs(l, 1, 1, "No arguments expected for celestia:pausemoviecapture");
+    CelestiaCore* appCore = this_celestia(l);
+    bool wasActive = appCore->isCaptureActive();
+    if (wasActive)
+        appCore->recordPause();
+    lua_pushboolean(l, wasActive ? 1 : 0);
+    return 1;
+}
+
+// celestia:resumemoviecapture() -- resume a movie capture previously
+// paused with pausemoviecapture(). Returns true if a capture was active.
+static int celestia_resumemoviecapture(lua_State* l)
+{
+    Celx_CheckArgs(l, 1, 1, "No arguments expected for celestia:resumemoviecapture");
+    CelestiaCore* appCore = this_celestia(l);
+    bool wasActive = appCore->isCaptureActive();
+    if (wasActive)
+        appCore->recordBegin();
+    lua_pushboolean(l, wasActive ? 1 : 0);
+    return 1;
+}
+
+// celestia:ismoviecapturing() -- whether a movie capture is currently
+// active and actively recording frames (false if never started, stopped,
+// or paused).
+static int celestia_ismoviecapturing(lua_State* l)
+{
+    Celx_CheckArgs(l, 1, 1, "No arguments expected for celestia:ismoviecapturing");
+    CelestiaCore* appCore = this_celestia(l);
+    lua_pushboolean(l, (appCore->isCaptureActive() && appCore->isRecording()) ? 1 : 0);
+    return 1;
+}
 #endif // USE_FFMPEG
 
 static int celestia_verbosity(lua_State* l)
@@ -2948,6 +3075,7 @@ void CreateCelestiaMetaTable(lua_State* l)
     Celx_RegisterMethod(l, "setrenderflags", celestia_setrenderflags);
     Celx_RegisterMethod(l, "getscreendimension", celestia_getscreendimension);
     Celx_RegisterMethod(l, "getwindowdimension", celestia_getwindowdimension);
+    Celx_RegisterMethod(l, "resize", celestia_resize);
     Celx_RegisterMethod(l, "getsafeareainsets", celestia_getsafeareainsets);
     Celx_RegisterMethod(l, "setsafeareainsets", celestia_setsafeareainsets);
     Celx_RegisterMethod(l, "getlayoutdirection", celestia_getlayoutdirection);
@@ -3054,6 +3182,11 @@ void CreateCelestiaMetaTable(lua_State* l)
     Celx_RegisterMethod(l, "resumevideooverlay", celestia_resumevideooverlay);
     Celx_RegisterMethod(l, "setvideooverlaysize", celestia_setvideooverlaysize);
     Celx_RegisterMethod(l, "setvideooverlayoffset", celestia_setvideooverlayoffset);
+    Celx_RegisterMethod(l, "capturemovie", celestia_capturemovie);
+    Celx_RegisterMethod(l, "stopmoviecapture", celestia_stopmoviecapture);
+    Celx_RegisterMethod(l, "pausemoviecapture", celestia_pausemoviecapture);
+    Celx_RegisterMethod(l, "resumemoviecapture", celestia_resumemoviecapture);
+    Celx_RegisterMethod(l, "ismoviecapturing", celestia_ismoviecapturing);
 #endif
     Celx_RegisterMethod(l, "verbosity", celestia_verbosity);
 

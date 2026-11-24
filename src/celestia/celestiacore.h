@@ -357,6 +357,22 @@ public:
     void setContextMenuHandler(ContextMenuHandler*);
     ContextMenuHandler* getContextMenuHandler() const;
 
+    // Celestia's rendering core does not own the application window on
+    // every platform (e.g. Mac Catalyst, where MobileCelestia owns the
+    // UIWindowScene). A host app that can resize its own window installs
+    // a WindowResizeHandler; celx's celestia:resize() then forwards the
+    // request to it. Platforms without a handler installed simply ignore
+    // the request (resize() returns false).
+    class WindowResizeHandler
+    {
+    public:
+        virtual ~WindowResizeHandler() = default;
+        virtual void requestResize(int width, int height) = 0;
+    };
+
+    void setWindowResizeHandler(WindowResizeHandler*);
+    WindowResizeHandler* getWindowResizeHandler() const;
+
     bool setHudFont(const std::filesystem::path& fontPath, int collectionIndex, int fontSize);
     bool setHudTitleFont(const std::filesystem::path& fontPath, int collectionIndex, int fontSize);
     bool setRendererFont(const std::filesystem::path& fontPath, int collectionIndex, int fontSize, Renderer::FontStyle fontStyle);
@@ -514,6 +530,13 @@ private:
 
     MovieCapture* movieCapture{ nullptr };
     bool recording{ false };
+    // Accumulated real (wall-clock) time since the last captured movie
+    // frame. draw() may be called much more often than the movie's target
+    // frame rate (e.g. on a high refresh-rate / ProMotion display), so
+    // frames are paced using this accumulator rather than captured on
+    // every draw() call -- otherwise the recorded video plays back in
+    // slow motion relative to real time.
+    double movieCaptureAccumTime{ 0.0 };
 
 #ifdef USE_MINIAUDIO
     std::map<int, std::shared_ptr<celestia::AudioSession>> audioSessions;
@@ -525,6 +548,7 @@ private:
     CursorHandler* cursorHandler{ nullptr };
     CursorShape defaultCursorShape{ CelestiaCore::CrossCursor };
     ContextMenuHandler* contextMenuHandler{ nullptr };
+    WindowResizeHandler* windowResizeHandler{ nullptr };
     std::optional<std::function<ScriptSystemAccessPolicy()>> scriptSystemAccessHandler{ std::nullopt };
 
     std::string startURL;

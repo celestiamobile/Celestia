@@ -15,6 +15,7 @@ extern "C"
 #include <cstddef>
 #include <iostream>
 #include <vector>
+#include <cctype>
 #include <fmt/format.h>
 
 #include <celengine/render.h>
@@ -90,8 +91,36 @@ bool FFMPEGCapturePrivate::init(const std::filesystem::path& filename)
     }
 #endif
 
-    // always use matroska (*.mkv) as a container
-    avformat_alloc_output_context2(&oc, nullptr, "matroska", util::PathToString(filename).c_str());
+    // Pick the container format based on the output filename's extension
+    // (e.g. ".mp4" -> MP4, ".mkv" -> Matroska) instead of always forcing
+    // Matroska, so a recording saved with a given extension is actually
+    // that container and playable by software that only recognizes it
+    // (e.g. QuickTime Player / Douyin's uploader require real MP4, not a
+    // Matroska stream renamed to .mp4). MP4-family extensions request the
+    // "mp4" muxer explicitly (rather than relying on extension-guessing)
+    // so the result is deterministic. Fall back to Matroska -- the
+    // historical default -- if the extension isn't recognized or the mp4
+    // muxer isn't available in this ffmpeg build.
+    std::string outName = util::PathToString(filename);
+    std::string ext = filename.extension().string();
+    for (char& c : ext)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    if (ext == ".mp4" || ext == ".m4v" || ext == ".mov")
+        avformat_alloc_output_context2(&oc, nullptr, "mp4", outName.c_str());
+    else if (ext == ".mkv")
+        avformat_alloc_output_context2(&oc, nullptr, "matroska", outName.c_str());
+    else
+        avformat_alloc_output_context2(&oc, nullptr, nullptr, outName.c_str());
+
+    if (oc == nullptr)
+        avformat_alloc_output_context2(&oc, nullptr, "matroska", outName.c_str());
+
+    if (oc != nullptr)
+    {
+        cout << "FFMPEGCapture: using muxer \"" << (oc->oformat->name != nullptr ? oc->oformat->name : "?")
+             << "\" for output file " << outName << "\n";
+    }
 
     return oc != nullptr;
 }

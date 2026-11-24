@@ -22,6 +22,7 @@
 #include <cwctype>
 #include <cstring>
 #include <cassert>
+#include <cmath>
 #include <ctime>
 #include <cinttypes>
 #include <filesystem>
@@ -1738,7 +1739,10 @@ void CelestiaCore::tick(double dt)
     // The time step is normally driven by the system clock; however, when
     // recording a movie, we fix the time step the frame rate of the movie.
     if (movieCapture != nullptr && recording)
+    {
+        movieCaptureAccumTime += dt;
         dt = 1.0 / static_cast<double>(movieCapture->getFrameRate());
+    }
 
     // Pause script execution
     if (scriptState == ScriptPaused)
@@ -2010,7 +2014,22 @@ void CelestiaCore::draw()
         renderer->enableMSAA();
 
     if (movieCapture != nullptr && recording)
-        movieCapture->captureFrame();
+    {
+        // Pace captured frames to the movie's target frame rate using the
+        // real-time accumulator updated in tick(), instead of capturing on
+        // every draw() call. draw() can be invoked far more often than the
+        // requested output fps (e.g. on a 120 Hz / ProMotion display), and
+        // capturing every call would encode far more frames than the real
+        // elapsed time warrants, producing a video that plays back in slow
+        // motion. Capture (at most) once per interval, dropping any excess
+        // draw() calls that happen faster than that.
+        double frameInterval = 1.0 / static_cast<double>(movieCapture->getFrameRate());
+        if (movieCaptureAccumTime >= frameInterval)
+        {
+            movieCapture->captureFrame();
+            movieCaptureAccumTime = std::fmod(movieCaptureAccumTime, frameInterval);
+        }
+    }
 
     // Frame rate counter
     nFrames++;
@@ -2994,6 +3013,16 @@ CelestiaCore::ContextMenuHandler* CelestiaCore::getContextMenuHandler() const
     return contextMenuHandler;
 }
 
+void CelestiaCore::setWindowResizeHandler(WindowResizeHandler* handler)
+{
+    windowResizeHandler = handler;
+}
+
+CelestiaCore::WindowResizeHandler* CelestiaCore::getWindowResizeHandler() const
+{
+    return windowResizeHandler;
+}
+
 bool CelestiaCore::setHudFont(const std::filesystem::path& fontPath, int collectionIndex, int fontSize)
 {
     if (auto f = LoadTextureFont(renderer, fontPath, collectionIndex, fontSize); f != nullptr)
@@ -3169,6 +3198,7 @@ void CelestiaCore::recordBegin()
     if (movieCapture != nullptr)
     {
         recording = true;
+        movieCaptureAccumTime = 0.0;
         movieCapture->recordingStatus(true);
     }
 }

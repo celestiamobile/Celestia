@@ -64,6 +64,11 @@ constexpr Color LightTravelColor = Color(0.42f, 1.0f, 1.0f, 1.0f);
 constexpr Color WarningColor     = Color(1.0f, 0.0f, 0.0f, 1.0f);
 constexpr Color EditModeColor    = Color(1.0f, 0.0f, 1.0f, 1.0f);
 
+// Margin, in pixels, kept between the movie-capture border overlay and the
+// actual captured region so the border can never bleed into the recorded
+// frame (see Hud::renderMovieCapture).
+constexpr int MovieCaptureBorderMargin = 8;
+
 // Ye olde wolde conſtantes for ye olde wolde units
 constexpr double OneMiInKm = 1.609344;
 constexpr double OneFtInKm = 0.0003048;
@@ -971,8 +976,21 @@ Hud::renderOverlay(const WindowMetrics& metrics,
     if (m_hudSettings.showMessage)
         renderTextMessages(metrics, timeInfo.currentTime);
 
-    if (movieCapture != nullptr)
+    // Only draw the capture-area border when there's enough
+    // spare window space around the recorded frame to keep the border
+    // (drawn MovieCaptureBorderMargin px outside the capture rect) fully
+    // outside of it. When the capture fills the window, or nearly does
+    // (e.g. the mobile/Catalyst case, where the whole app window is the
+    // recording and point/backing scale-factor rounding can leave only a
+    // few px of slack), the border would land inside the frame and get
+    // permanently baked into the output video as a visible line, so skip
+    // it entirely in that case.
+    if (movieCapture != nullptr &&
+        metrics.width  - movieCapture->getWidth()  > MovieCaptureBorderMargin * 2 &&
+        metrics.height - movieCapture->getHeight() > MovieCaptureBorderMargin * 2)
+    {
         renderMovieCapture(metrics, *movieCapture);
+    }
 
     if (editMode)
     {
@@ -1281,43 +1299,17 @@ Hud::renderMovieCapture(const WindowMetrics& metrics, const MovieCapture& movieC
     m_overlay->savePos();
     const Color& color = WarningColor;
     m_overlay->setColor(color);
-    celestia::Rect r(static_cast<float>((metrics.width - movieWidth) / 2 - 1),
-                     static_cast<float>((metrics.height - movieHeight) / 2 - 1),
-                     static_cast<float>(movieWidth + 1),
-                     static_cast<float>(movieHeight + 1));
+    // Push the border well outside the actual captured region (rather than
+    // just 1px) so it can never bleed into the recorded frame -- even if
+    // the window is only marginally larger than the capture area (e.g. due
+    // to backing/point scale-factor rounding after a programmatic resize).
+    celestia::Rect r(static_cast<float>((metrics.width - movieWidth) / 2 - MovieCaptureBorderMargin),
+                     static_cast<float>((metrics.height - movieHeight) / 2 - MovieCaptureBorderMargin),
+                     static_cast<float>(movieWidth + MovieCaptureBorderMargin * 2),
+                     static_cast<float>(movieHeight + MovieCaptureBorderMargin * 2));
     r.setColor(color);
     r.setType(celestia::Rect::Type::BorderOnly);
     m_overlay->drawRectangle(r);
-    m_overlay->moveBy(static_cast<float>((metrics.width - movieWidth) / 2),
-                      static_cast<float>((metrics.height + movieHeight) / 2 + 2));
-    m_overlay->beginText();
-    m_overlay->print(loc, fmt::runtime(_("{}x{} at {:.2f} fps  {}")),
-                     movieWidth, movieHeight,
-                     movieCapture.getFrameRate(),
-                     movieCapture.recordingStatus() ? _("Recording") : _("Paused"));
-
-    m_overlay->endText();
-    m_overlay->restorePos();
-
-    m_overlay->savePos();
-    m_overlay->moveBy(static_cast<float>((metrics.width + movieWidth) / 2 - m_hudFonts.emWidth() * 5),
-                      static_cast<float>((metrics.height + movieHeight) / 2 + 2));
-    float sec = static_cast<float>(movieCapture.getFrameCount()) / movieCapture.getFrameRate();
-    auto min = static_cast<int>(sec / 60.0f);
-    sec -= static_cast<float>(min) * 60.0f;
-    m_overlay->beginText();
-    m_overlay->print(loc, "{:3d}:{:05.2f}", min, sec);
-    m_overlay->endText();
-    m_overlay->restorePos();
-
-    m_overlay->savePos();
-    m_overlay->moveBy(static_cast<float>((metrics.width - movieWidth) / 2),
-                      static_cast<float>((metrics.height - movieHeight) / 2 - m_hudFonts.fontHeight() - 2));
-    m_overlay->beginText();
-    m_overlay->print(_("F11 Start/Pause    F12 Stop"));
-    m_overlay->endText();
-    m_overlay->restorePos();
-
     m_overlay->restorePos();
 }
 
