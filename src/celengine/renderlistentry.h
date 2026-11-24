@@ -49,7 +49,7 @@ struct RenderListEntry
     float nearZ;
     float farZ;
     float discSizeInPixels;
-    float appMag;
+    float irradiance;
     RenderableType renderableType;
     bool isOpaque;
     std::optional<Eigen::Quaternionf> orientation;
