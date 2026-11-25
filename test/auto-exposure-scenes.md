@@ -42,6 +42,52 @@ pixel-identical output.
 
 ## Production-shader GPU tests
 
+### Dust-tail scattering
+
+sRGB comet tails use optically thin single scattering of calibrated visual
+stellar light, rather than constant emissive brightness. The existing straight
+tail is retained as a volume bound. Its radius grows as the square root of
+axial distance; a smooth radial/longitudinal density integrates to the specified
+dust extinction cross-section. Eight-point quadrature estimates line-of-sight
+columns, illumination and a normalized Henyey-Greenstein phase function.
+For close sources, quadrature splits at the closest point on the ray and uses
+logarithmic distance spacing to resolve steep illumination without raising the
+eight-sample order. Distant illumination retains a single linear interval.
+The existing tail mesh bounds the integral and uses ordinary surface depth
+testing. Entry faces draw outside views; exit faces draw inside views or rays
+whose entry is near-clipped, without adding the column twice. No scene-depth
+snapshot is allocated or sampled. The existing limitation
+with opaque objects embedded inside a tail remains: depth testing its boundary
+does not truncate the integrated dust column.
+
+SSC controls (also preserved by `Modify`):
+
+| Property | Default | Meaning / accepted range |
+| --- | --- | --- |
+| `TailDustCrossSection` | `1000000` | Extinction cross-section at 1 AU, km^2; 0 to 1e12 |
+| `TailDustAlbedo` | `0.1` | Single-scattering albedo; 0 to 1 |
+| `TailDustAsymmetry` | `0.6` | Phase asymmetry; -0.95 to 0.95, positive is forward scattering |
+| `TailActivityExponent` | `2` | Cross-section varies as dominant-source distance in AU raised to minus this exponent; 0 to 8 |
+
+These are reference dust parameters, not measured comet photometry. Set the
+cross-section from tail/coma measurements with a stated aperture, phase,
+activity and color model. `TailColor` is an sRGB dust-reflectance tint.
+Zero cross-section or albedo disables the scattered light.
+Activity and column normalization use double precision; unrepresentable derived
+columns are reported and rejected rather than uploading infinity or NaN.
+Shader products that overflow or underflow before exposure are reevaluated in
+log space, separately for display and physical metering. Only the final exposed
+values saturate at the FP16 sensor limit; a clipped display does not clip the
+independently exposed meter.
+
+The four strongest visual sources illuminate the volume, including their
+colors and inverse-square dilution. Activity changes dust content separately
+from illumination. Observer dilution results from the angular size, without
+another inverse-square factor on resolved radiance. Calibrated photons enter
+the existing physical meter before display adaptation. Legacy non-sRGB tails
+retain their old shading/fade. This is not an ion-tail fluorescence, sublimation,
+multiple-scattering, or orbital dust-dynamics model.
+
 ### Authored surface emission
 
 SSC bodies and alternate surfaces accept `NightLuminance` and

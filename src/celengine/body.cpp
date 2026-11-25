@@ -102,6 +102,7 @@ Body::setDefaultProperties()
     clickable = true;
     manager->unsetOrbitColor(this);
     manager->unsetCometTailColor(this);
+    manager->unsetCometTailProperties(this);
     orbitVisibility = UseClassVisibility;
     recomputeCullingRadius();
 }
@@ -1509,6 +1510,7 @@ BodyFeaturesManager::removeFeatures(Body* body)
     locations.erase(body);
     orbitColors.erase(body);
     cometTailColors.erase(body);
+    cometTailProperties.erase(body);
     body->features = BodyFeatures::None;
     // could recompute the culling radius here - not currently necessary
     // as we only use this when we're deleting the Body
@@ -1519,4 +1521,23 @@ GetBodyFeaturesManager()
 {
     static BodyFeaturesManager* const manager = std::make_unique<BodyFeaturesManager>().release(); //NOSONAR
     return manager;
+}
+
+CometTailProperties
+BodyFeaturesManager::getCometTailProperties(const Body* body) const
+{
+    auto it = cometTailProperties.find(body);
+    return it == cometTailProperties.end() ? CometTailProperties{} : it->second;
+}
+
+void
+BodyFeaturesManager::setCometTailProperties(Body* body, const CometTailProperties& properties)
+{
+    cometTailProperties[body] = properties;
+}
+
+void
+BodyFeaturesManager::unsetCometTailProperties(Body* body)
+{
+    cometTailProperties.erase(body);
 }

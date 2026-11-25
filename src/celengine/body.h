@@ -31,6 +31,13 @@
 #include "surface.h"
 
 struct Atmosphere;
+struct CometTailProperties
+{
+    float dustCrossSection{ 1.0e6f }; // extinction cross-section at 1 AU, km^2
+    float albedo{ 0.1f };
+    float asymmetry{ 0.6f };
+    float activityExponent{ 2.0f };
+};
 class Body;
 class FrameTree;
 class Location;
@@ -485,6 +492,9 @@ public:
     Color getCometTailColor(const Body*) const;
     void setCometTailColor(Body*, const Color&);
     void unsetCometTailColor(Body*);
+    CometTailProperties getCometTailProperties(const Body*) const;
+    void setCometTailProperties(Body*, const CometTailProperties&);
+    void unsetCometTailProperties(Body*);
 
     void removeFeatures(Body*);
 
@@ -497,6 +507,7 @@ private:
     std::unordered_map<const Body*, BodyLocations> locations;
     std::unordered_map<const Body*, Color> orbitColors;
     std::unordered_map<const Body*, Color> cometTailColors;
+    std::unordered_map<const Body*, CometTailProperties> cometTailProperties;
     std::unordered_multimap<const Body*, std::unique_ptr<ReferenceMark>> referenceMarks;
 };
 

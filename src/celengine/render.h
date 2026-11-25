@@ -258,6 +258,7 @@ class Renderer
     {
         return nearStars;
     }
+    std::span<const LightSource> getLightSources() const { return lightSourceList; }
 
     const Eigen::Matrix4f& getModelViewMatrix() const
     {

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <numbers>
 #include <span>
 
 #include <doctest.h>
@@ -16,6 +17,7 @@
 #include <celengine/glsupport.h>
 #include <celengine/lightenv.h>
 #include <celengine/pointstarvertexbuffer.h>
+#include <celengine/radiometry.h>
 #include <celengine/rendcontext.h>
 #include <celengine/render.h>
 #include <celengine/shadermanager.h>
@@ -100,9 +102,358 @@ struct MeterFixture
 constexpr auto Attachments =
     FramebufferObject::Attachment::Color | FramebufferObject::Attachment::Meter;
 
+struct DustRayFixture : MeterFixture
+{
+    struct Pixel
+    {
+        std::array<float, 4> display{};
+        std::array<float, 4> meter{};
+    };
+
+    DustRayFixture() :
+        MeterFixture(true),
+        target(32, 32, Attachments | FramebufferObject::Attachment::Depth, 1, true),
+        triangle(celestia::gl::VertexObject::Primitive::Triangles)
+    {
+        REQUIRE(target.isValid());
+        renderer.setViewport(0, 0, 32, 32);
+        constexpr std::array vertices{ -1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f };
+        buffer = celestia::gl::Buffer::create(celestia::gl::Buffer::TargetHint::Array,
+            std::as_bytes(std::span{ vertices }), celestia::gl::Buffer::BufferUsage::StaticDraw);
+        triangle.addVertexBuffer(buffer, CelestiaGLProgram::VertexCoordAttributeIndex, 2,
+            celestia::gl::VertexObject::DataType::Float, false, 2 * sizeof(float), 0).setCount(3);
+        auto& manager = renderer.getShaderManager();
+        manager.setCameraExposure(1);
+        shader = manager.getShader(StaticShader::Comet);
+        REQUIRE(shader != nullptr);
+        shader->use();
+        shader->intParam("calibratedDust") = 1;
+        shader->vec3Param("tailAxis") = Eigen::Vector3f(0, 1, 0);
+        shader->floatParam("columnScale") = 1;
+        shader->floatParam("dustAsymmetry") = 0;
+        shader->intParam("dustLightCount") = 1;
+        shader->vec3Param("dustLightColor[0]") = Eigen::Vector3f::Ones();
+        setRay(Eigen::Vector3f(0, .5f, -10), Eigen::Vector3f(0, .5f, 0),
+               Eigen::Vector3f(0, 0, -1));
+    }
+
+    void setRay(const Eigen::Vector3f& camera, const Eigen::Vector3f& boundary,
+                const Eigen::Vector3f& normal)
+    {
+        shader->use();
+        Eigen::Matrix4f projection = Eigen::Matrix4f::Identity();
+        projection(2, 2) = 1e-12f;
+        shader->setMVPMatrices(projection);
+        shader->vec3Param("cameraTail") = camera;
+        shader->vec3Param("tailOrigin") = -boundary * 1e10f;
+        shader->floatParam("tailLength") = 1e10f;
+        glVertexAttrib3f(CelestiaGLProgram::NormalAttributeIndex, normal.x(), normal.y(), normal.z());
+    }
+
+    Pixel pixel(bool occluded = false)
+    {
+        REQUIRE(target.bind());
+        Renderer::PipelineState state;
+        state.depthMask = true;
+        renderer.setPipelineState(state);
+        const float depth = occluded ? .25f : 1;
+        glClearBufferfv(GL_DEPTH, 0, &depth);
+        state.depthMask = false;
+        state.depthTest = true;
+        renderer.setPipelineState(state);
+        const float black[]{ 0, 0, 0, 0 };
+        glClearBufferfv(GL_COLOR, 0, black);
+        glClearBufferfv(GL_COLOR, 1, black);
+        shader->use();
+        triangle.draw();
+        Pixel result;
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glReadPixels(16, 16, 1, 1, GL_RGBA, GL_FLOAT, result.display.data());
+        glReadBuffer(GL_COLOR_ATTACHMENT1);
+        glReadPixels(16, 16, 1, 1, GL_RGBA, GL_FLOAT, result.meter.data());
+        REQUIRE(glGetError() == GL_NO_ERROR);
+        return result;
+    }
+
+    float radiance(bool occluded = false)
+    {
+        return pixel(occluded).display[0];
+    }
+
+    FramebufferObject target;
+    celestia::gl::Buffer::SharedPtr buffer;
+    celestia::gl::VertexObject triangle;
+    CelestiaGLProgram* shader{};
+};
+
 } // namespace
 
 TEST_SUITE_BEGIN("Automatic exposure GPU");
+
+TEST_CASE("Dust columns survive near-plane clipping without double scattering")
+{
+    DustRayFixture fixture;
+    constexpr float radius = .0707106781f;
+    constexpr float length = 1e10f;
+    const std::array vertices{
+        -1.0f, -1.0f, -radius * length, 3.0f, -1.0f, -radius * length,
+        -1.0f, 3.0f, -radius * length,
+        -1.0f, -1.0f, radius * length, 3.0f, -1.0f, radius * length,
+        -1.0f, 3.0f, radius * length,
+    };
+    auto buffer = celestia::gl::Buffer::create(celestia::gl::Buffer::TargetHint::Array,
+        std::as_bytes(std::span{ vertices }), celestia::gl::Buffer::BufferUsage::StaticDraw);
+    celestia::gl::VertexObject mesh(celestia::gl::VertexObject::Primitive::Triangles);
+    mesh.addVertexBuffer(buffer, CelestiaGLProgram::VertexCoordAttributeIndex, 3,
+        celestia::gl::VertexObject::DataType::Float, false, 3 * sizeof(float), 0);
+    fixture.renderer.getShaderManager().setPhysicalLightScale(.25f);
+    fixture.shader->use();
+    fixture.shader->vec4Param("dustLightPosition[0]") = Eigen::Vector4f(10000, .5f, 0, 1e-8f);
+    fixture.shader->vec3Param("dustLightColor[0]") = Eigen::Vector3f::Constant(1e8f);
+
+    for (bool reverse : { false, true })
+    for (bool perspective : { false, true })
+    {
+        CAPTURE(reverse);
+        CAPTURE(perspective);
+        fixture.setRay(Eigen::Vector3f(0, .5f, reverse ? 10 : -10),
+                       Eigen::Vector3f(0, .5f, 0), Eigen::Vector3f(0, 0, -1));
+        auto draw = [&](float clipOffset, bool occluded = false)
+        {
+            REQUIRE(fixture.target.bind());
+            Renderer::PipelineState state;
+            state.depthMask = true;
+            fixture.renderer.setPipelineState(state);
+            const float depth = occluded ? 0 : 1;
+            const float black[]{ 0, 0, 0, 0 };
+            glClearBufferfv(GL_DEPTH, 0, &depth);
+            glClearBufferfv(GL_COLOR, 0, black);
+            glClearBufferfv(GL_COLOR, 1, black);
+            state.depthMask = false;
+            state.depthTest = true;
+            state.blending = true;
+            state.blendFunc.src = GL_ONE;
+            state.blendFunc.dst = GL_ONE;
+            fixture.renderer.setPipelineState(state);
+            Eigen::Matrix4f projection = Eigen::Matrix4f::Identity();
+            projection(2, 2) = (reverse ? -1 : 1) / length;
+            projection(2, 3) = clipOffset;
+            projection(3, 2) = perspective ? .1f * projection(2, 2) : 0;
+            fixture.shader->use();
+            fixture.shader->setMVPMatrices(projection);
+            glVertexAttrib3f(CelestiaGLProgram::NormalAttributeIndex, 0, 0, -1);
+            mesh.draw(3, 0);
+            glVertexAttrib3f(CelestiaGLProgram::NormalAttributeIndex, 0, 0, 1);
+            mesh.draw(3, 3);
+            DustRayFixture::Pixel pixel;
+            glReadBuffer(GL_COLOR_ATTACHMENT0);
+            glReadPixels(16, 16, 1, 1, GL_RGBA, GL_FLOAT, pixel.display.data());
+            glReadBuffer(GL_COLOR_ATTACHMENT1);
+            glReadPixels(16, 16, 1, 1, GL_RGBA, GL_FLOAT, pixel.meter.data());
+            REQUIRE(glGetError() == GL_NO_ERROR);
+            return pixel;
+        };
+        auto ordinary = draw(0);
+        REQUIRE(ordinary.display[0] > 0);
+        REQUIRE(ordinary.meter[0] > 0);
+        for (float offset : { -.92f, -.94f, -.98f, -1.02f })
+        {
+            CAPTURE(offset);
+            auto clipped = draw(offset);
+            for (int channel = 0; channel < 3; ++channel)
+            {
+                CHECK(clipped.display[channel] ==
+                      doctest::Approx(ordinary.display[channel]).epsilon(.002).scale(0));
+                CHECK(clipped.meter[channel] ==
+                      doctest::Approx(ordinary.meter[channel]).epsilon(.002).scale(0));
+            }
+        }
+        auto blocked = draw(-.98f, true);
+        CHECK(blocked.display[0] == 0);
+        CHECK(blocked.meter[0] == 0);
+    }
+}
+
+TEST_CASE("Dust columns scatter multiple lights with independent display and meter exposure")
+{
+    DustRayFixture fixture;
+    auto& manager = fixture.renderer.getShaderManager();
+    const Eigen::Vector3f tint(1.0f, 0.5f, 0.25f);
+    for (bool inside : { false, true })
+    for (bool occluded : { false, true })
+    for (int lights : { 0, 1, 2 })
+        for (float exposure : { 0.5f, 4.0f })
+        {
+            CAPTURE(inside);
+            CAPTURE(occluded);
+            CAPTURE(lights);
+            CAPTURE(exposure);
+            manager.setCameraExposure(exposure);
+            manager.setPhysicalLightScale(0.25f / exposure);
+            fixture.setRay(Eigen::Vector3f(0, .5f, inside ? 0 : -10),
+                           Eigen::Vector3f(0, .5f, inside ? std::sqrt(.005f) : 0),
+                           Eigen::Vector3f(0, 0, inside ? 1 : -1));
+            fixture.shader->intParam("dustLightCount") = lights;
+            for (int i = 0; i < lights; ++i)
+            {
+                auto index = std::to_string(i);
+                fixture.shader->vec4Param(("dustLightPosition[" + index + "]").c_str()) =
+                    Eigen::Vector4f(10000.0f, 0.5f, 0.0f, 1.0e-8f);
+                fixture.shader->vec3Param(("dustLightColor[" + index + "]").c_str()) = tint * 1.0e8f;
+            }
+            auto pixel = fixture.pixel(occluded);
+            float column = 0.25f * std::sqrt(0.005f) * 16.0f / 15.0f;
+            if (occluded)
+                column = 0;
+            else if (inside)
+                column *= 0.5f;
+            for (int channel = 0; channel < 3; ++channel)
+            {
+                float expected = lights * tint[channel] * column / (4.0f * std::numbers::pi_v<float>);
+                if (expected == 0)
+                {
+                    CHECK(pixel.display[channel] == 0);
+                    CHECK(pixel.meter[channel] == 0);
+                }
+                else
+                {
+                    CHECK(pixel.display[channel] == doctest::Approx(expected * exposure).epsilon(0.01).scale(0));
+                    CHECK(pixel.meter[channel] == doctest::Approx(expected * 0.25f).epsilon(0.01).scale(0));
+                }
+            }
+            CHECK(glGetError() == GL_NO_ERROR);
+        }
+}
+
+TEST_CASE("Dust sungrazer columns resolve steep illumination from either viewing direction")
+{
+    DustRayFixture fixture;
+    for (double distance : { .001, .01, .1 })
+    for (float asymmetry : { -.6f, 0.0f, .95f })
+    for (bool reverse : { false, true })
+    {
+        CAPTURE(distance);
+        CAPTURE(asymmetry);
+        CAPTURE(reverse);
+        fixture.setRay(Eigen::Vector3f(0, reverse ? 4 : -3, 0),
+                       Eigen::Vector3f(0, reverse ? 1 : 0, 0),
+                       Eigen::Vector3f(0, reverse ? 1 : -1, 0));
+        fixture.shader->floatParam("dustAsymmetry") = asymmetry;
+        fixture.shader->vec4Param("dustLightPosition[0]") =
+            Eigen::Vector4f(0, -distance, 0, .25 * distance * distance);
+        double a = 1 + distance;
+        double integral = a * a * (1 / distance - 1 / a) -
+                          2 * a * std::log(a / distance) + 1;
+        double phase = celestia::engine::detail::dustScatteringPhase(reverse ? 1 : -1, asymmetry);
+        CHECK(fixture.radiance() ==
+              doctest::Approx(integral * phase).epsilon(.002).scale(0));
+    }
+}
+
+TEST_CASE("Dust exposure recovers extreme finite products independently for display and metering")
+{
+    DustRayFixture fixture;
+    fixture.setRay(Eigen::Vector3f(0, -3, 0), Eigen::Vector3f::Zero(), Eigen::Vector3f(0, -1, 0));
+    fixture.shader->vec4Param("dustLightPosition[0]") = Eigen::Vector4f(0, -5e-6f, 0, 1e-14f);
+    auto scale = celestia::engine::detail::cometDustColumnScale(
+        1e6f, 1000.0 / 149597870.7, 8, 1e7f, .001);
+    REQUIRE(scale.has_value());
+    float light = celestia::astro::lumToIrradiance(.01f, 1e8f) * .1f;
+    struct Scenario
+    {
+        float columnScale;
+        float light;
+        float exposure;
+        float meterScale;
+    };
+    const std::array scenarios{
+        Scenario{ *scale, light, 1e-37f, 1 },
+        Scenario{ *scale, light, 1, 1 },
+        Scenario{ *scale, light, 1, 1e-37f },
+        Scenario{ 1e-25f, 1e-20f, 1e38f, .25f },
+        Scenario{ 1e-20f, 1e-20f, 1e-4f, 1e38f },
+        Scenario{ *scale, light, 1e-37f, 0 },
+        Scenario{ 0, light, 1, 1 },
+    };
+    constexpr double distance = 5e-6;
+    double column = (1 / distance + 2 - 2 * (1 + distance) * std::log((1 + distance) / distance)) /
+                    (4 * std::numbers::pi);
+    for (const auto& scenario : scenarios)
+    {
+        CAPTURE(scenario.columnScale);
+        CAPTURE(scenario.light);
+        CAPTURE(scenario.exposure);
+        CAPTURE(scenario.meterScale);
+        auto& manager = fixture.renderer.getShaderManager();
+        manager.setCameraExposure(scenario.exposure);
+        manager.setPhysicalLightScale(scenario.meterScale);
+        fixture.shader->use();
+        fixture.shader->floatParam("columnScale") = scenario.columnScale;
+        fixture.shader->vec3Param("dustLightColor[0]") =
+            Eigen::Vector3f(scenario.light, 0, scenario.light * .5f);
+        auto pixel = fixture.pixel();
+        for (int channel = 0; channel < 3; ++channel)
+        {
+            double tint = channel == 0 ? 1 : (channel == 1 ? 0 : .5);
+            double exposed = column * scenario.columnScale * scenario.light * tint * scenario.exposure;
+            auto check = [](float actual, double expected)
+            {
+                CHECK(std::isfinite(actual));
+                expected = std::min(expected, 65504.0);
+                if (expected < 0x1p-25)
+                    CHECK(actual == 0);
+                else
+                    CHECK(actual == doctest::Approx(expected).epsilon(.005).scale(0));
+            };
+            check(pixel.display[channel], exposed);
+            check(pixel.meter[channel], exposed * scenario.meterScale);
+        }
+    }
+}
+
+TEST_CASE("Dust close-source quadrature covers both sides of each light's closest approach")
+{
+    DustRayFixture fixture;
+    fixture.shader->intParam("dustLightCount") = 2;
+    constexpr std::array sources{ std::array{ .01, .2 }, std::array{ -.04, .8 } };
+    for (unsigned int light = 0; light < sources.size(); ++light)
+    {
+        auto index = std::to_string(light);
+        fixture.shader->vec4Param(("dustLightPosition[" + index + "]").c_str()) =
+            Eigen::Vector4f(sources[light][0], sources[light][1], 0, 1e-8f);
+        fixture.shader->vec3Param(("dustLightColor[" + index + "]").c_str()) = Eigen::Vector3f::Ones();
+    }
+    for (float asymmetry : { -.6f, 0.0f, .95f })
+    for (double start : { 0.0, .5 })
+    {
+        CAPTURE(asymmetry);
+        CAPTURE(start);
+        fixture.setRay(Eigen::Vector3f(0, start == 0 ? -3 : start, 0),
+                       Eigen::Vector3f(0, start == 0 ? 0 : 1, 0),
+                       Eigen::Vector3f(0, start == 0 ? -1 : 1, 0));
+        fixture.shader->floatParam("dustAsymmetry") = asymmetry;
+        double expected = 0;
+        constexpr int intervals = 16384;
+        for (int i = 0; i <= intervals; ++i)
+        {
+            double y = start + (1 - start) * i / intervals;
+            double weight = i == 0 || i == intervals ? 1 : (i % 2 == 0 ? 2 : 4);
+            for (const auto& source : sources)
+            {
+                double dy = y - source[1];
+                double squaredDistance = source[0] * source[0] + dy * dy;
+                double cosine = -dy / std::sqrt(squaredDistance);
+                double denominator = 1 + asymmetry * asymmetry - 2 * asymmetry * cosine;
+                double phase = (1 - asymmetry * asymmetry) /
+                               (4 * std::numbers::pi * denominator * std::sqrt(denominator));
+                expected += weight * (1 - y) * (1 - y) * phase / squaredDistance;
+            }
+        }
+        expected *= (1 - start) / (3 * intervals);
+        CHECK(fixture.radiance() ==
+              doctest::Approx(expected).epsilon(.005).scale(0));
+    }
+}
 
 TEST_CASE("Night and material emission bypass reflected albedo and preserve physical metering")
 {

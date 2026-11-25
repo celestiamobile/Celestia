@@ -2728,7 +2728,7 @@ buildProgram(
         bloomPrefilterDefine,
         bloomCoarseDefine,
         fmt::format(
-            "#define main sceneMain\n{}\n#undef main\nvoid main() {{ sceneMain(); {} meterColor.rgb *= physicalLightScale; }}\n",
+            "#define main sceneMain\n{}\n#undef main\nvoid main() {{ sceneMain(); {} }}\n",
             fs,
             meterOutput));
 
@@ -3010,13 +3010,22 @@ ShaderManager::loadShader(StaticShaderProperties props)
                           props.shader == StaticShader::Tidal;
     bool visualOnly = util::is_set(props.options, StaticShaderOptions::VisualOnly);
     cameraExposure = cameraExposure && !visualOnly;
-    std::string_view meterOutput = "meterColor = fragColor;"sv;
+    std::string_view meterOutput =
+        "meterColor = fragColor; meterColor.rgb *= physicalLightScale;"sv;
     if (props.shader == StaticShader::PsfStarPoint)
-        meterOutput = ""sv; // The point shader writes its unclipped radiance.
+    {
+        // The point shader writes its unclipped radiance.
+        meterOutput = "meterColor.rgb *= physicalLightScale;"sv;
+    }
     else if (
         visualOnly ||
         props.shader == StaticShader::PsfStarGlow || props.shader == StaticShader::PsfStarGlowLarge)
         meterOutput = "meterColor = vec4(0.0);"sv;
+    else if (props.shader == StaticShader::Comet)
+    {
+        // Dust applies display and meter exposure before saturation.
+        meterOutput = ""sv;
+    }
     result = buildProgram(vs, fs, m_fisheyeEnabled, props.options, cameraExposure, meterOutput);
     if (result && cameraExposure)
         result->bindCameraExposure(m_cameraExposure);

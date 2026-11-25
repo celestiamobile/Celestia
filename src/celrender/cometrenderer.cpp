@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <vector>
 
 #include <Eigen/Geometry>
 
@@ -20,11 +21,13 @@
 #include <celengine/body.h>
 #include <celengine/glsupport.h>
 #include <celengine/observer.h>
+#include <celengine/radiometry.h>
 #include <celengine/render.h>
 #include <celengine/shadermanager.h>
 #include <celmath/mathlib.h>
 #include <celmath/vecgl.h>
 #include <celutil/indexlist.h>
+#include <celutil/logger.h>
 
 using celestia::util::BuildIndexList;
 using celestia::util::IndexListCapacity;
@@ -37,8 +40,8 @@ namespace
 {
 constexpr int MaxCometTailPoints = 120;
 constexpr int MaxCometTailSlices = 48;
-constexpr int MaxVertices = MaxCometTailPoints*MaxCometTailSlices;
-constexpr int MaxIndices = IndexListCapacity(MaxCometTailSlices, MaxCometTailPoints);
+constexpr int MaxVertices = MaxCometTailPoints*MaxCometTailSlices + MaxCometTailSlices + 1;
+constexpr int MaxIndices = IndexListCapacity(MaxCometTailSlices, MaxCometTailPoints) + 3 * MaxCometTailSlices;
 
 // Distance from the Sun at which comet tails will start to fade out
 constexpr float CometTailAttenDistSol = astro::AUtoKilometers(5.0f);
@@ -116,6 +119,27 @@ CometRenderer::render(const Body &body,
         return;
 
     double now = observer.getTime();
+    bool calibrated = gl::sRGBRendering;
+    const auto parameters = GetBodyFeaturesManager()->getCometTailProperties(&body);
+    if (calibrated && (parameters.dustCrossSection == 0.0f || parameters.albedo == 0.0f))
+        return;
+    std::vector<const LightSource*> dustLights;
+    if (calibrated)
+    {
+        for (const auto& light : m_renderer.getLightSources())
+            if (light.luminosity > 0.0f)
+                dustLights.push_back(&light);
+        if (dustLights.empty())
+            return;
+        auto count = std::min(dustLights.size(), static_cast<std::size_t>(MaxShaderLights));
+        std::partial_sort(dustLights.begin(), dustLights.begin() + count, dustLights.end(),
+                         [&](const auto* a, const auto* b)
+                         {
+                             return a->luminosity / (pos.cast<double>() - a->position).squaredNorm() >
+                                    b->luminosity / (pos.cast<double>() - b->position).squaredNorm();
+                         });
+        dustLights.resize(count);
+    }
 
     Eigen::Vector3f cometPoints[MaxCometTailPoints];
 #if 0
@@ -137,7 +161,7 @@ CometRenderer::render(const Body &body,
     Eigen::Vector3d sunPos(Eigen::Vector3d::Zero());
     for (const auto star : m_renderer.getNearStars())
     {
-        if (star->getVisibility())
+        if (!calibrated && star->getVisibility())
         {
             Eigen::Vector3d p = star->getPosition(now).offsetFromKm(observer.getPosition());
             float distanceFromSun = static_cast<float>((pos.cast<double>() - p).norm());
@@ -150,6 +174,8 @@ CometRenderer::render(const Body &body,
             }
         }
     }
+    if (calibrated)
+        sunPos = dustLights.front()->position;
 
     float fadeDistance = 1.0f / (CometTailAttenDistSol * std::sqrt(irradiance_max));
 
@@ -162,7 +188,7 @@ CometRenderer::render(const Body &body,
 
     for (int i = 0; i < nTailPoints; i++)
     {
-        float alpha = static_cast<float>(i) / static_cast<float>(nTailPoints);
+        float alpha = static_cast<float>(i) / static_cast<float>(calibrated ? nTailPoints - 1 : nTailPoints);
         alpha = alpha * alpha;
         cometPoints[i] = origin + sunDir * (dustTailLength * alpha);
     }
@@ -215,14 +241,18 @@ CometRenderer::render(const Body &body,
             w0 = w0 / d;
         }
 
-        float radius = static_cast<float>(i) / static_cast<float>(nTailPoints) * dustTailRadius;
+        float radius = static_cast<float>(i) /
+                       static_cast<float>(calibrated ? nTailPoints - 1 : nTailPoints) * dustTailRadius;
         for (int j = 0; j < nTailSlices; j++)
         {
             float theta = 2.0f * std::numbers::pi_v<float> * static_cast<float>(j) / static_cast<float>(nTailSlices);
             float s, c;
             math::sincos(theta, s, c);
             CometTailVertex& vtx = m_vertices[i * nTailSlices + j];
-            vtx.normal = u * (s * w1) + w * (c * w1) + v * w0;
+            if (calibrated)
+                vtx.normal = (u * s + w * c) * (2.0f * radius) - v * (0.1f * dustTailRadius);
+            else
+                vtx.normal = u * (s * w1) + w * (c * w1) + v * w0;
             vtx.normal.normalize();
             s *= radius;
             c *= radius;
@@ -233,14 +263,30 @@ CometRenderer::render(const Body &body,
     }
 
     BuildIndexList(static_cast<ushort>(nTailPoints-1), static_cast<ushort>(nTailSlices), m_indices.get());
+    int count = IndexListCapacity(nTailSlices, nTailPoints);
+    if (calibrated)
+    {
+        int center = nTailPoints * nTailSlices;
+        m_vertices[center] = { cometPoints[nTailPoints - 1], sunDir, 0.0f };
+        for (int j = 0; j < nTailSlices; ++j)
+        {
+            m_vertices[center + 1 + j] = {
+                m_vertices[center - nTailSlices + j].point, sunDir, 0.0f };
+            m_indices[count + 3 * j] = static_cast<ushort>(center);
+            m_indices[count + 3 * j + 1] = static_cast<ushort>(center + 1 + j);
+            m_indices[count + 3 * j + 2] = static_cast<ushort>(center + 1 + (j + 1) % nTailSlices);
+        }
+    }
 
     // If fadeDistFromSun = x/x0 >= 1.0, comet tail starts fading,
     // i.e. fadeFactor quickly transits from 1 to 0.
-    float fadeFactor = 0.5f * (1.0f - std::tanh(fadeDistance - 1.0f / fadeDistance));
+    float fadeFactor = calibrated ? 1.0f :
+        0.5f * (1.0f - std::tanh(fadeDistance - 1.0f / fadeDistance));
 
     Renderer::PipelineState ps;
     ps.blending = true;
-    ps.blendFunc = {GL_SRC_ALPHA, GL_ONE};
+    ps.blendFunc.src = calibrated ? GL_ONE : GL_SRC_ALPHA;
+    ps.blendFunc.dst = GL_ONE;
     ps.depthTest = true;
     m_renderer.setPipelineState(ps);
 
@@ -249,13 +295,56 @@ CometRenderer::render(const Body &body,
     m_prog->vec3Param("color") = GetBodyFeaturesManager()->getCometTailColor(&body).toVector3();
     m_prog->vec3Param("viewDir") = pos.normalized();
     m_prog->floatParam("fadeFactor") = fadeFactor;
+    m_prog->intParam("calibratedDust") = calibrated ? 1 : 0;
+    m_prog->vec3Param("tailOrigin") = origin;
+    m_prog->floatParam("tailLength") = dustTailLength;
+    if (calibrated)
+    {
+        double sourceDistance = std::max((pos.cast<double>() - sunPos).norm(),
+                                        static_cast<double>(dustLights.front()->radius));
+        double distanceAU = astro::kilometersToAU(sourceDistance);
+        double angularWidth = m_renderer.getLogicalPixelAngularWidth();
+        auto columnScale = engine::detail::cometDustColumnScale(
+            parameters.dustCrossSection, distanceAU, parameters.activityExponent, dustTailRadius, angularWidth);
+        if (!columnScale.has_value())
+        {
+            util::GetLogger()->error("Nonfinite or unrepresentable comet dust column for {}\n", body.getName());
+            return;
+        }
+        m_prog->floatParam("columnScale") = *columnScale;
+        m_prog->floatParam("dustAsymmetry") = parameters.asymmetry;
+        m_prog->vec3Param("cameraTail") = (-pos - origin) / dustTailLength;
+        m_prog->vec3Param("tailAxis") = sunDir;
+        m_prog->intParam("dustLightCount") = static_cast<int>(dustLights.size());
+        const auto tint = GetBodyFeaturesManager()->getCometTailColor(&body).linearize().toVector3();
+        for (std::size_t i = 0; i < dustLights.size(); ++i)
+        {
+            const auto& light = *dustLights[i];
+            Eigen::Vector3f position = ((light.position - pos.cast<double>()).cast<float>() - origin) / dustTailLength;
+            float radius = light.radius / dustTailLength;
+            auto index = std::to_string(i);
+            m_prog->vec4Param(("dustLightPosition[" + index + "]").c_str()) =
+                Eigen::Vector4f(position.x(), position.y(), position.z(), std::max(radius * radius, 1.0e-16f));
+            Eigen::Vector3f lightColor = light.color.toVector3().cwiseProduct(tint) *
+                (astro::lumToIrradiance(light.luminosity, dustTailLength) * parameters.albedo);
+            if (!position.allFinite() || !lightColor.allFinite() || !std::isfinite(radius * radius))
+            {
+                util::GetLogger()->error("Nonfinite comet dust illumination for {}\n", body.getName());
+                return;
+            }
+            m_prog->vec3Param(("dustLightColor[" + index + "]").c_str()) = lightColor;
+        }
+    }
 
-    m_bo->invalidateData().setSubData(0, std::as_bytes(std::span(m_vertices.get(), MaxVertices)));
-    m_ibo->invalidateData().setSubData(0, std::as_bytes(std::span(m_indices.get(), MaxIndices)));
+    int vertexCount = nTailPoints * nTailSlices + (calibrated ? nTailSlices + 1 : 0);
+    int indexCount = count + (calibrated ? 3 * nTailSlices : 0);
+    m_bo->invalidateData().setSubData(0, std::as_bytes(std::span(m_vertices.get(), vertexCount)));
+    m_ibo->invalidateData().setSubData(0, std::as_bytes(std::span(m_indices.get(), indexCount)));
 
     glDisable(GL_CULL_FACE);
-    int count = IndexListCapacity(nTailSlices, nTailPoints);
     m_vo.draw(count);
+    if (calibrated)
+        m_vo.draw(gl::VertexObject::Primitive::Triangles, 3 * nTailSlices, count);
     glEnable(GL_CULL_FACE);
 }
 

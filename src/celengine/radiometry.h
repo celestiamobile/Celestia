@@ -13,6 +13,8 @@
 #include <array>
 #include <cmath>
 #include <numbers>
+#include <limits>
+#include <optional>
 
 #include <celastro/astro.h>
 
@@ -92,6 +94,34 @@ emittedDiscIrradiance(float luminance, float radius, double distance)
 {
     float angularRadius = static_cast<float>(radius / std::max(distance, static_cast<double>(radius)));
     return std::numbers::pi_v<float> * emittedRadiance(luminance, angularRadius);
+}
+
+inline float
+dustScatteringPhase(float cosScatteringAngle, float asymmetry)
+{
+    float denominator = 1.0f + asymmetry * asymmetry -
+                        2.0f * asymmetry * std::clamp(cosScatteringAngle, -1.0f, 1.0f);
+    return (1.0f - asymmetry * asymmetry) /
+           (4.0f * std::numbers::pi_v<float> * denominator * std::sqrt(denominator));
+}
+
+inline double
+cometDustActivity(double distanceAU, float exponent)
+{
+    return std::pow(distanceAU, -exponent);
+}
+
+inline std::optional<float>
+cometDustColumnScale(float crossSection, double distanceAU, float exponent,
+                    float radius, double angularWidth)
+{
+    if (crossSection == 0.0f)
+        return 0.0f;
+    double scale = 36.0 * crossSection * cometDustActivity(distanceAU, exponent) *
+                   angularWidth * angularWidth / (std::numbers::pi * radius * radius);
+    if (!std::isfinite(scale) || scale < 0.0 || scale > std::numeric_limits<float>::max())
+        return std::nullopt;
+    return static_cast<float>(scale);
 }
 
 } // namespace celestia::engine::detail

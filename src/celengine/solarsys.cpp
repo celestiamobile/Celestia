@@ -1289,6 +1289,26 @@ SolarSystemsBuilder::createBody(const std::string& name, //NOSONAR
     if (auto cometTailColor = planetData.getColor("TailColor"); cometTailColor.has_value())
         bodyFeaturesManager->setCometTailColor(body, *cometTailColor);
 
+    auto tail = bodyFeaturesManager->getCometTailProperties(body);
+    bool hasTailProperties = false;
+    auto readTailProperty = [&](std::string_view name, float& destination, float minimum, float maximum)
+    {
+        if (planetData.getValue(name) == nullptr)
+            return;
+        hasTailProperties = true;
+        auto value = planetData.getNumber<float>(name);
+        if (value.has_value() && std::isfinite(*value) && *value >= minimum && *value <= maximum)
+            destination = *value;
+        else
+            GetLogger()->error("Invalid {}: expected a finite value in [{}, {}]\n", name, minimum, maximum);
+    };
+    readTailProperty("TailDustCrossSection", tail.dustCrossSection, 0.0f, 1.0e12f);
+    readTailProperty("TailDustAlbedo", tail.albedo, 0.0f, 1.0f);
+    readTailProperty("TailDustAsymmetry", tail.asymmetry, -0.95f, 0.95f);
+    readTailProperty("TailActivityExponent", tail.activityExponent, 0.0f, 8.0f);
+    if (hasTailProperties)
+        bodyFeaturesManager->setCometTailProperties(body, tail);
+
     if (auto clickable = planetData.getBoolean("Clickable"); clickable.has_value())
         body->setClickable(*clickable);
 

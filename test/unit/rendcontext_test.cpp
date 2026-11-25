@@ -133,6 +133,7 @@ TEST_CASE("Emission integrates to the same visual magnitude as stellar irradianc
         CHECK(detail::emittedRadiance(2.0f * luminance, pixelAngle) ==
               doctest::Approx(2.0f * detail::emittedRadiance(luminance, pixelAngle)));
     }
+
     CHECK(detail::emittedRadiance(luminance, 0.0002f) ==
           doctest::Approx(4.0f * detail::emittedRadiance(luminance, 0.0001f)));
     CHECK(detail::emittedDiscIrradiance(luminance, 1.0f, 10000.0) ==
@@ -140,4 +141,28 @@ TEST_CASE("Emission integrates to the same visual magnitude as stellar irradianc
                           detail::emittedRadiance(luminance, 0.0001f)));
     CHECK(detail::emittedDiscIrradiance(luminance, 1.0f, 10000.0) ==
           doctest::Approx(4.0f * detail::emittedDiscIrradiance(luminance, 1.0f, 20000.0)));
+}
+
+TEST_CASE("Dust scattering conserves its phase integral and separates activity from illumination")
+{
+    namespace detail = celestia::engine::detail;
+    constexpr int samples = 10000;
+    for (float asymmetry : { -0.6f, 0.0f, 0.6f })
+    {
+        double integral = 0.0;
+        for (int i = 0; i < samples; ++i)
+            integral += detail::dustScatteringPhase(-1.0f + (2.0f * i + 1.0f) / samples, asymmetry);
+        integral *= 4.0 * std::numbers::pi / samples;
+        CHECK(integral == doctest::Approx(1.0).epsilon(0.0001));
+    }
+    CHECK(detail::dustScatteringPhase(1.0f, 0.6f) >
+          detail::dustScatteringPhase(0.0f, 0.6f));
+    CHECK(detail::dustScatteringPhase(0.0f, 0.6f) >
+          detail::dustScatteringPhase(-1.0f, 0.6f));
+    CHECK(detail::cometDustActivity(2.0f, 0.0f) == 1.0f);
+    CHECK(detail::cometDustActivity(2.0f, 2.0f) == doctest::Approx(0.25f));
+    CHECK(detail::cometDustActivity(0.5f, 2.0f) == doctest::Approx(4.0f));
+    CHECK(std::isfinite(detail::cometDustActivity(1000.0 / 149597870.7, 8.0f)));
+    CHECK(detail::cometDustColumnScale(0, 1000.0 / 149597870.7, 8, 1e7f, 0.001) == 0.0f);
+    CHECK_FALSE(detail::cometDustColumnScale(1e12f, 10.0 / 149597870.7, 8, 1e7f, 0.001).has_value());
 }

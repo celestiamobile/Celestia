@@ -141,10 +141,16 @@ TEST_CASE("Surface luminances load and modify without accepting invalid emission
 "Lamp" "EmissionTestSun" {
     Radius 1 FixedPosition [ 0 0 2 ]
     NightLuminance 2.5 EmissiveLuminance 12
+    TailDustCrossSection 10000 TailDustAlbedo 0.2
+    TailDustAsymmetry 0.4 TailActivityExponent 3
 }
-Modify "Lamp" "EmissionTestSun" { NightLuminance 0 }
+Modify "Lamp" "EmissionTestSun" { NightLuminance 0 TailDustAsymmetry 0 }
 Modify "Lamp" "EmissionTestSun" { NightLuminance -1 EmissiveLuminance "invalid" }
 Modify "Lamp" "EmissionTestSun" { EmissiveLuminance 1e100 }
+Modify "Lamp" "EmissionTestSun" {
+    TailDustCrossSection -1 TailDustAlbedo 2
+    TailDustAsymmetry 1 TailActivityExponent "invalid"
+}
 AltSurface "TestEmission" "EmissionTestSun/Lamp" {
     NightLuminance 3 EmissiveLuminance 6
 }
@@ -172,6 +178,11 @@ AltSurface "TestEmission" "EmissionTestSun/Lamp" {
     REQUIRE(alternate != nullptr);
     CHECK(alternate->nightLuminance == 3.0f);
     CHECK(alternate->emissiveLuminance == 6.0f);
+    auto tail = GetBodyFeaturesManager()->getCometTailProperties(lamp.body());
+    CHECK(tail.dustCrossSection == 10000.0f);
+    CHECK(tail.albedo == 0.2f);
+    CHECK(tail.asymmetry == 0.0f);
+    CHECK(tail.activityExponent == 3.0f);
 }
 
 TEST_CASE("DDS loader rejects truncated pixel data")
