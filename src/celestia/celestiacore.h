@@ -342,6 +342,7 @@ public:
         virtual ~CursorHandler() {};
         virtual void setCursorShape(CursorShape) = 0;
         virtual CursorShape getCursorShape() const = 0;
+        virtual bool warpsCursor() const = 0;
     };
 
     void setCursorHandler(CursorHandler*);
