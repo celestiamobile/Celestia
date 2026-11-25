@@ -120,6 +120,7 @@ public:
 
     void makeCurrent(const cmod::Material&) override;
     void setLunarLambert(float);
+    void setEmissiveScale(float scale) { emissiveScale = scale; }
     void setAtmosphere(const Atmosphere*);
     void setShadowMap(GLuint, GLuint, const Eigen::Matrix4f*);
 
@@ -135,6 +136,7 @@ private:
 
     // extended material properties
     float lunarLambert{ 0.0f };
+    float emissiveScale{ 1.0f };
 
     ShaderProperties shaderProps;
     const Eigen::Matrix4f *modelViewMatrix;

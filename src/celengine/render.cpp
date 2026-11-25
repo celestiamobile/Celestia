@@ -1745,7 +1745,8 @@ Renderer::calculatePointSize(float irradiance,
 }
 
 void Renderer::addLegacyPointHalo(const Vector3f& position, const Color& color,
-                                  float irradiance, float discSizeInPixels, float pointFraction)
+                                  float irradiance, float discSizeInPixels, float pointFraction,
+                                  bool referenceEmission)
 {
     if (starStyle == StarStyle::PointSpreadFunction || !(irradiance > 0.0f))
         return;
@@ -1753,7 +1754,7 @@ void Renderer::addLegacyPointHalo(const Vector3f& position, const Color& color,
     float scale = static_cast<float>(screenDpi) / 96.0f;
     float exposure = getEffectiveCameraExposure() * starAtmosphereBrightness;
     float greenScale = 1.0f;
-    Color linearColor = psfGreenNormalization(color, 0.1f, greenScale);
+    Color linearColor = psfGreenNormalization(color, 0.1f, greenScale, referenceEmission);
     float peak = engine::detail::calibratedStarPeakRadiance(starStyle, irradiance, scale)
                  * exposure * greenScale * linearColor.toVector3().maxCoeff();
     float onset = engine::detail::calibratedPointHaloOpacity(peak, pointFraction);
@@ -1816,11 +1817,12 @@ void Renderer::renderObjectAsPoint(const PointObjectInfo& info,
         setPipelineState(ps);
         auto frontPos = calculateQuadCenter(getCameraOrientationf(), position, radius);
         if (useHalos)
-            addLegacyPointHalo(frontPos, color, irradiance, discSizeInPixels, emissive ? 1.0f : fade);
+            addLegacyPointHalo(frontPos, color, irradiance, discSizeInPixels,
+                               emissive ? 1.0f : fade, info.referenceEmission);
         if (fade <= 0.0f)
             return;
         float greenScale = 1.0f;
-        Color linearColor = psfGreenNormalization(color, 0.1f, greenScale);
+        Color linearColor = psfGreenNormalization(color, 0.1f, greenScale, info.referenceEmission);
         float size = engine::detail::calibratedStarSize(starStyle, irradiance, scale);
         pointStarVertexBuffer->addStar(frontPos, linearColor, size,
                                       irradiance * greenScale * starAtmosphereBrightness * fade);
@@ -1947,7 +1949,7 @@ void Renderer::addStarAsPsfPoint(const PointObjectInfo &info,
         return;
 
     float greenScale = 1.0f;
-    Color linearStarColor = psfGreenNormalization(color, 0.1f, greenScale);
+    Color linearStarColor = psfGreenNormalization(color, 0.1f, greenScale, info.referenceEmission);
     peaks *= greenScale;
     float peakRadCol = peaks.x();
 
@@ -2050,6 +2052,8 @@ static void renderSphereUnlit(const RenderInfo& ri,
     if (ri.nightTex != nullptr)
     {
         shadprop.texUsage |= TexUsage::NightTexture;
+        if (gl::sRGBRendering)
+            shadprop.effects = LightingEffects::SurfaceEmission;
         textures.push_back(ri.nightTex);
     }
     if (ri.overlayTex != nullptr)
@@ -2076,6 +2080,8 @@ static void renderSphereUnlit(const RenderInfo& ri,
             emission[channel] *= engine::detail::limbDarkeningNormalization(engine::detail::StarLimbDarkening[channel]);
     }
     prog->ambientColor = emission;
+    prog->nightEmissiveScale = ri.nightEmissiveScale;
+    prog->materialEmission = Eigen::Vector3f::Zero();
     prog->surfaceDimming  = 1.0f;
     prog->emissionDimming = ri.emissionDimming;
     prog->opacity = 1.0f;
@@ -2583,6 +2589,14 @@ void Renderer::renderObject(const Vector3f& pos,
     }
 
     ri.emissiveScale = obj.emissiveScale;
+    if (gl::sRGBRendering)
+    {
+        float angularWidth = getLogicalPixelAngularWidth();
+        ri.nightEmissiveScale = engine::detail::emittedRadiance(obj.surface->nightLuminance, angularWidth);
+        ri.materialEmissiveScale = engine::detail::emittedRadiance(obj.surface->emissiveLuminance, angularWidth);
+        if (!obj.isStar && util::is_set(obj.surface->appearanceFlags, Surface::Flags::Emissive))
+            ri.emissiveScale = ri.materialEmissiveScale * obj.emissiveScale;
+    }
     ri.emissionDimming = obj.emissionDimming;
     ri.ambientColor = ambientColor;
     ri.specularColor = obj.surface->specularColor.linearize(gl::sRGBRendering);
@@ -3371,6 +3385,15 @@ void Renderer::renderPlanet(Body& body,
 
     float maxDiscSize = !gl::sRGBRendering && starStyle == StarStyle::ScaledDiscStars
         ? MaxScaledDiscStarSize : 1.0f;
+    const Surface* pointSurface = &body.getSurface();
+    if (gl::sRGBRendering && !displayedSurface.empty())
+    {
+        if (auto* alternate = GetBodyFeaturesManager()->getAlternateSurface(&body, displayedSurface);
+            alternate != nullptr)
+            pointSurface = alternate;
+    }
+    bool emissive = gl::sRGBRendering &&
+        util::is_set(pointSurface->appearanceFlags, Surface::Flags::Emissive);
     if (discSizeInPixels >= maxDiscSize && body.hasVisibleGeometry())
     {
         auto bodyFeaturesManager = GetBodyFeaturesManager();
@@ -3394,12 +3417,21 @@ void Renderer::renderPlanet(Body& body,
                 *= starAtmosphereBrightness
                    * (1.0f
                       - engine::detail::psfPointFade(discSizeInPixels, pointRadius, pointScale));
+            if (emissive)
+            {
+                rp.emissiveScale = 1.0f - engine::detail::psfPointFade(
+                    discSizeInPixels, pointRadius, pointScale);
+                rp.emissionDimming = dimming;
+            }
         }
         else if (gl::sRGBRendering && body.isVisibleAsPoint())
         {
             float scale = static_cast<float>(screenDpi) / 96.0f;
             lights.surfaceReflectanceScale *= starAtmosphereBrightness *
                 (1.0f - engine::detail::calibratedStarPointFade(starStyle, irradiance, discSizeInPixels, scale));
+            if (emissive)
+                rp.emissiveScale = 1.0f - engine::detail::calibratedStarPointFade(
+                    starStyle, irradiance, discSizeInPixels, scale);
         }
 
         // Cache this lighting so the atmosphere entry can reuse it this frame;
@@ -3443,10 +3475,13 @@ void Renderer::renderPlanet(Body& body,
 
     if (body.isVisibleAsPoint())
     {
-        const auto surfaceColor = body.getSurface().color.linearize(gl::sRGBRendering);
+        auto surfaceColor = pointSurface->color.linearize(gl::sRGBRendering);
+        if (emissive && pointSurface->baseTexture != util::TextureHandle::Invalid &&
+            !util::is_set(pointSurface->appearanceFlags, Surface::Flags::BlendTexture))
+            surfaceColor = Color::White;
         if (float maxCoeff = surfaceColor.toVector3().maxCoeff(); maxCoeff > 0.0f) // ignore [ 0 0 0 ]; used by old addons to make objects not get rendered as point
         {
-            renderObjectAsPoint(PointObjectInfo{pos, static_cast<float>(distance), body.getRadius()},
+            renderObjectAsPoint(PointObjectInfo{pos, static_cast<float>(distance), body.getRadius(), emissive},
                                 irradiance,
                                 discSizeInPixels,
                                 surfaceColor * (1.0f / maxCoeff), // normalize point color; 'darkness' is handled by size of point determined by GeomAlbedo.
@@ -4093,10 +4128,28 @@ void Renderer::buildRenderLists(const Vector3d& astrocentricObserverPos,
 
             // Reflected light from independent sources is additive.
             float irradiance = 0.0f;
-            for (const auto &lightSource : lightSourceList)
+            const Surface* surface = &body->getSurface();
+            if (!displayedSurface.empty())
             {
-                Eigen::Vector3d sunPos = pos_v - lightSource.position;
-                irradiance += body->getApparentIrradiance(lightSource.luminosity, sunPos, pos_v);
+                if (auto* alternate = GetBodyFeaturesManager()->getAlternateSurface(body, displayedSurface);
+                    alternate != nullptr)
+                    surface = alternate;
+            }
+            if (gl::sRGBRendering && util::is_set(surface->appearanceFlags, Surface::Flags::Emissive))
+            {
+                float modulation = surface->baseTexture != util::TextureHandle::Invalid &&
+                    !util::is_set(surface->appearanceFlags, Surface::Flags::BlendTexture)
+                    ? 1.0f : surface->color.linearize().toVector3().maxCoeff();
+                irradiance = engine::detail::emittedDiscIrradiance(
+                    surface->emissiveLuminance, body->getRadius(), dist_v) * modulation;
+            }
+            else
+            {
+                for (const auto &lightSource : lightSourceList)
+                {
+                    Eigen::Vector3d sunPos = pos_v - lightSource.position;
+                    irradiance += body->getApparentIrradiance(lightSource.luminosity, sunPos, pos_v);
+                }
             }
 
             bool visibleAsPoint = irradiance > minimumPlanetIrradiance && body->isVisibleAsPoint();

@@ -11,6 +11,7 @@
 // of the License, or (at your option) any later version.
 
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <istream>
@@ -1381,6 +1382,19 @@ SolarSystemsBuilder::fillInSurface(const AssociativeArray& surfaceData,
 
     if (auto emissive = surfaceData.getBoolean("Emissive"); emissive.has_value())
         util::set_or_unset(surface.appearanceFlags, Surface::Flags::Emissive, *emissive);
+
+    for (const auto& [name, destination] : {
+             std::pair{ "NightLuminance"sv, &surface.nightLuminance },
+             std::pair{ "EmissiveLuminance"sv, &surface.emissiveLuminance } })
+    {
+        if (surfaceData.getValue(name) == nullptr)
+            continue;
+        auto value = surfaceData.getNumber<float>(name);
+        if (value.has_value() && std::isfinite(*value) && *value >= 0.0f)
+            *destination = *value;
+        else
+            GetLogger()->error("Invalid {}: expected a finite nonnegative luminance in cd/m^2\n", name);
+    }
 
     constexpr auto baseFlags = engine::TextureFlags::WrapTexture;
     constexpr auto bumpFlags = engine::TextureFlags::WrapTexture | engine::TextureFlags::LinearColorspace;

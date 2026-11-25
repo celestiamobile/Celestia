@@ -20,8 +20,10 @@
 #include "atmosphere.h"
 #include "body.h"
 #include "lightenv.h"
+#include "radiometry.h"
 #include "rendcontext.h"
 #include "render.h"
+#include "surface.h"
 #include "texmanager.h"
 #include "texture.h"
 
@@ -264,6 +266,7 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
     Texture* emissiveTex = nullptr;
 
     shaderProps.texUsage = TexUsage::None;
+    shaderProps.effects = LightingEffects::None;
     shaderProps.separateRayleighMieScaleHeights = false;
 
     if (useNormals)
@@ -339,6 +342,10 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
             textures[nTextures++] = emissiveTex;
         }
     }
+
+    if (gl::sRGBRendering &&
+        (emissiveTex != nullptr || m.emissive != cmod::Color(0.0f, 0.0f, 0.0f)))
+        shaderProps.effects = LightingEffects::SurfaceEmission;
 
     if (lightingState.shadowingRingSystem)
     {
@@ -436,14 +443,17 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
 
     const auto diffuse = convertMaterialColor(m.diffuse);
     const auto specular = convertMaterialColor(m.specular);
-    const auto emissive = convertMaterialColor(m.emissive);
+    auto emissive = convertMaterialColor(m.emissive).toVector3();
+    if (gl::sRGBRendering)
+        emissive *= emissiveScale;
+    prog->materialEmissiveScale = emissiveScale;
 
     if (gl::sRGBRendering)
     {
         prog->setLightParameters(lightingState,
                                  diffuse.toVector3(),
                                  specular.toVector3(),
-                                 emissive.toVector3(),
+                                 emissive,
                                  m.opacity);
     }
     else
@@ -452,13 +462,12 @@ GLSL_RenderContext::makeCurrent(const cmod::Material& m)
         prog->setLightParameters(lightingState,
                                  Color(diffuse.red(), diffuse.green(), diffuse.blue(), m.opacity),
                                  Color(specular.toVector3()),
-                                 Color(emissive.toVector3()));
+                                 Color(emissive));
     }
 
     if (shaderProps.hasEclipseShadows() != 0)
         prog->setEclipseShadowParameters(lightingState, objScale, objOrientation);
 
-    // TODO: handle emissive color
     prog->shininess = m.specularPower;
     if (shaderProps.lightModel == LightingModel::LunarLambertModel)
     {
@@ -568,6 +577,9 @@ GLSLUnlit_RenderContext::GLSLUnlit_RenderContext(Renderer* renderer,
     modelViewMatrix(_modelViewMatrix),
     projectionMatrix(_projectionMatrix)
 {
+    if (gl::sRGBRendering)
+        emissiveScale = engine::detail::emittedRadiance(
+            Surface::DefaultEmissiveLuminance, renderer->getLogicalPixelAngularWidth());
     initLightingEnvironment();
 }
 
@@ -599,9 +611,9 @@ GLSLUnlit_RenderContext::makeCurrent(const cmod::Material& m)
     Texture* baseTex = nullptr;
 
     shaderProps.lightModel = LightingModel::EmissiveModel;
-    shaderProps.effects = emissiveScale == 1.0f
-        ? LightingEffects::None
-        : LightingEffects::CalibratedEmission;
+    shaderProps.effects = gl::sRGBRendering || emissiveScale != 1.0f
+        ? LightingEffects::CalibratedEmission
+        : LightingEffects::None;
     shaderProps.texUsage = TexUsage::None;
 
     if (util::TextureHandle diffuseMap = m.getMap(cmod::TextureSemantic::DiffuseMap);
@@ -618,6 +630,20 @@ GLSLUnlit_RenderContext::makeCurrent(const cmod::Material& m)
         {
             shaderProps.texUsage |= TexUsage::DiffuseTexture;
             textures[nTextures++] = baseTex;
+        }
+    }
+
+    if (gl::sRGBRendering && (useTexCoords || usePointSize))
+    {
+        if (auto emissiveMap = m.getMap(cmod::TextureSemantic::EmissiveMap);
+            emissiveMap != util::TextureHandle::Invalid)
+        {
+            if (auto* texture = renderer->getTextureManager()->find(emissiveMap);
+                texture != nullptr)
+            {
+                shaderProps.texUsage |= TexUsage::EmissiveTexture;
+                textures[nTextures++] = texture;
+            }
         }
     }
 
@@ -646,6 +672,7 @@ GLSLUnlit_RenderContext::makeCurrent(const cmod::Material& m)
 
     prog->lights.diffuse[0] = convertMaterialColor(m.diffuse).toVector3();
     prog->emissiveScale = emissiveScale;
+    prog->materialEmission = convertMaterialColor(m.emissive).toVector3();
     prog->emissionDimming   = emissionDimming;
     prog->opacity = m.opacity;
 

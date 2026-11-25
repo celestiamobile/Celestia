@@ -16,12 +16,43 @@
 
 #include <celastro/astro.h>
 #include <celengine/pointstarrenderer.h>
+#include <celengine/psfstarvertexbuffer.h>
+#include <celengine/radiometry.h>
 
 using celestia::engine::detail::psfGlowOnset;
 using celestia::engine::detail::psfPointFade;
 using celestia::engine::detail::psfReflectiveGlowOnset;
 
 TEST_SUITE_BEGIN("PSF");
+
+TEST_CASE("Emissive points preserve per-channel reference flux without stellar desaturation")
+{
+    namespace detail = celestia::engine::detail;
+    using celestia::render::psfGreenNormalization;
+    for (const auto& color : { Color(1.0f, 0.0f, 0.0f), Color(0.0f, 1.0f, 0.0f),
+                              Color(0.0f, 0.0f, 1.0f), Color::White,
+                              Color::Black, Color(0.5f, 0.5f, 0.5f), Color(1.0f, 0.4f, 0.2f) })
+    {
+        const auto linear = color.linearize();
+        float modulation = linear.toVector3().maxCoeff();
+        auto tint = modulation > 0.0f ? linear * (1.0f / modulation) : linear;
+        float scale = 0.0f;
+        auto pointColor = psfGreenNormalization(tint, 0.1f, scale, true);
+        for (double distance : { 10000.0, 3000000.0 })
+        {
+            float referenceFlux = detail::emittedDiscIrradiance(100.0f, 1000.0f, distance);
+            Eigen::Vector3f pointFlux = pointColor.toVector3() * (referenceFlux * modulation * scale);
+            Eigen::Vector3f discFlux = linear.toVector3() * referenceFlux;
+            for (int channel = 0; channel < 3; ++channel)
+                CHECK(pointFlux[channel] == doctest::Approx(discFlux[channel]));
+        }
+    }
+
+    float stellarScale = 0.0f;
+    auto stellarColor = psfGreenNormalization(Color(1.0f, 0.0f, 0.0f), 0.1f, stellarScale);
+    CHECK(stellarScale == doctest::Approx(10.0f));
+    CHECK(stellarColor == Color(1.0f, 0.1f, 0.1f));
+}
 
 TEST_CASE("PSF soft clipping preserves its curve without overflowing finite peaks")
 {

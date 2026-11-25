@@ -31,8 +31,15 @@ namespace celestia::render
 {
 
 Color
-psfGreenNormalization(const Color &c, float saturationLimit, float &greenScale)
+psfGreenNormalization(const Color &c, float saturationLimit, float &greenScale,
+                      bool referenceEmission)
 {
+    if (referenceEmission)
+    {
+        greenScale = 1.0f;
+        return c;
+    }
+
     float r = c.red();
     float g = c.green();
     float b = c.blue();

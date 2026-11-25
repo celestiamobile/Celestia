@@ -137,6 +137,7 @@ enum class LightingEffects : std::uint16_t
     AtmosphereTransmission    = 0x0010,
     AtmosphereDualSource      = 0x0020,
     CalibratedEmission        = 0x0040,
+    SurfaceEmission           = 0x0080,
 };
 
 enum class FisheyeOverrideMode : int
@@ -299,6 +300,9 @@ public:
     Vec3ShaderParameter ambientColor;
     FloatShaderParameter opacity;
     FloatShaderParameter emissiveScale;
+    FloatShaderParameter nightEmissiveScale;
+    FloatShaderParameter materialEmissiveScale;
+    Vec3ShaderParameter materialEmission;
     FloatShaderParameter   surfaceDimming;
     FloatShaderParameter   emissionDimming;
 

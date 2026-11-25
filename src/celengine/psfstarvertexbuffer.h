@@ -101,6 +101,8 @@ private:
 // Normalises linear RGB using green as a V-band proxy, following CSR.py.
 // Desaturates toward `saturationLimit` and returns a max-channel-normalized tint.
 // Multiply peak radiance by `greenScale` to recover green normalization.
-Color psfGreenNormalization(const Color &c, float saturationLimit, float &greenScale);
+// Reference surface emission instead preserves authored RGB and peak-channel flux.
+Color psfGreenNormalization(const Color &c, float saturationLimit, float &greenScale,
+                           bool referenceEmission = false);
 
 } // namespace celestia::render

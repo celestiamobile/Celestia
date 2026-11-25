@@ -14,7 +14,9 @@
 #include <celengine/autoexposure.h>
 #include <celengine/framebuffer.h>
 #include <celengine/glsupport.h>
+#include <celengine/lightenv.h>
 #include <celengine/pointstarvertexbuffer.h>
+#include <celengine/rendcontext.h>
 #include <celengine/render.h>
 #include <celengine/shadermanager.h>
 #include <celrender/gl/buffer.h>
@@ -101,6 +103,211 @@ constexpr auto Attachments =
 } // namespace
 
 TEST_SUITE_BEGIN("Automatic exposure GPU");
+
+TEST_CASE("Night and material emission bypass reflected albedo and preserve physical metering")
+{
+    MeterFixture fixture(true);
+    FramebufferObject source(32, 32, Attachments, 1, true);
+    REQUIRE(source.isValid());
+    fixture.renderer.setViewport(0, 0, 32, 32);
+    auto& manager = fixture.renderer.getShaderManager();
+    constexpr std::array vertices{ -1.0f, -1.0f, 0.0f, 3.0f, -1.0f, 0.0f,
+                                  -1.0f, 3.0f, 0.0f };
+    celestia::gl::VertexObject triangle(celestia::gl::VertexObject::Primitive::Triangles);
+    auto buffer = celestia::gl::Buffer::create(
+        celestia::gl::Buffer::TargetHint::Array, std::as_bytes(std::span{ vertices }),
+        celestia::gl::Buffer::BufferUsage::StaticDraw);
+    triangle.setCount(3);
+    triangle.addVertexBuffer(buffer, CelestiaGLProgram::VertexCoordAttributeIndex, 3,
+                            celestia::gl::VertexObject::DataType::Float, false,
+                            3 * sizeof(float), 0);
+    glVertexAttrib3f(CelestiaGLProgram::NormalAttributeIndex, 0, 0, 1);
+    glVertexAttrib2f(CelestiaGLProgram::TextureCoord0AttributeIndex, 0.5f, 0.5f);
+
+    std::array<GLuint, 3> textures{};
+    glGenTextures(3, textures.data());
+    const std::array texels{
+        std::array{ 0.0f, 0.0f, 0.0f, 1.0f },
+        std::array{ 0.5f, 0.25f, 0.125f, 1.0f },
+        std::array{ 0.125f, 0.25f, 0.5f, 1.0f },
+    };
+    for (unsigned int index = 0; index < textures.size(); ++index)
+    {
+        glActiveTexture(GL_TEXTURE0 + index);
+        glBindTexture(GL_TEXTURE_2D, textures[index]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 1, 1, 0, GL_RGBA, GL_FLOAT,
+                     texels[index].data());
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    }
+    const Eigen::Vector3f emission(0.25f, 0.125f, 0.5f);
+    for (auto model : { LightingModel::DiffuseModel, LightingModel::LunarLambertModel,
+                        LightingModel::PerPixelSpecularModel })
+        for (unsigned int lights : { 0U, 1U, 2U })
+            for (float exposure : { 0.25f, 4.0f })
+                for (float reflectance : { 0.0f, 1.0f })
+                    for (bool day : { false, true })
+                {
+                    CAPTURE(model);
+                    CAPTURE(lights);
+                    CAPTURE(exposure);
+                    CAPTURE(reflectance);
+                    CAPTURE(day);
+                    ShaderProperties properties;
+                    properties.lightModel = model;
+                    properties.nLights = lights;
+                    properties.texUsage = TexUsage::DiffuseTexture | TexUsage::NightTexture |
+                                          TexUsage::EmissiveTexture;
+                    properties.effects = LightingEffects::SurfaceEmission;
+                    auto* shader = manager.getShader(properties);
+                    REQUIRE(shader != nullptr);
+                    manager.setCameraExposure(exposure);
+                    manager.setPhysicalLightScale(0.5f / exposure);
+                    REQUIRE(source.bind());
+                    fixture.renderer.setPipelineState({});
+                    shader->use();
+                    shader->setMVPMatrices(Eigen::Matrix4f::Identity());
+                    LightingState lighting;
+                    lighting.nLights = lights;
+                    lighting.radianceScale = 100.0f;
+                    lighting.surfaceReflectanceScale = reflectance;
+                    lighting.surfaceDimming = 0.25f;
+                    for (unsigned int index = 0; index < lights; ++index)
+                    {
+                        lighting.lights[index].color = Color::White;
+                        lighting.lights[index].irradiance = 10.0f;
+                        lighting.lights[index].direction_obj =
+                            Eigen::Vector3f(0.0f, 0.0f, day ? 1.0f : -1.0f);
+                    }
+                    shader->setLightParameters(lighting, Eigen::Vector3f::Zero(),
+                                                Eigen::Vector3f::Zero(), emission, 0.37f);
+                    shader->nightEmissiveScale = 2.0f;
+                    shader->materialEmissiveScale = 3.0f;
+                    shader->emissionDimming = 0.25f;
+                    shader->lunarLambert = 0.5f;
+                    shader->shininess = 4.0f;
+                    triangle.draw();
+                    std::array<float, 4> color{}, meter{};
+                    glReadBuffer(GL_COLOR_ATTACHMENT0);
+                    glReadPixels(16, 16, 1, 1, GL_RGBA, GL_FLOAT, color.data());
+                    glReadBuffer(GL_COLOR_ATTACHMENT1);
+                    glReadPixels(16, 16, 1, 1, GL_RGBA, GL_FLOAT, meter.data());
+                    for (std::size_t channel = 0; channel < 3; ++channel)
+                    {
+                        float nightScale = day && lights > 0 ? 0.0f : 2.0f;
+                        float expected = emission[channel] + texels[1][channel] * nightScale +
+                                         texels[2][channel] * 3.0f;
+                        CHECK(color[channel] ==
+                              doctest::Approx(expected * exposure * 0.25f).epsilon(0.002));
+                        CHECK(meter[channel] ==
+                              doctest::Approx(expected * 0.5f).epsilon(0.002));
+                    }
+                    CHECK(color[3] == doctest::Approx(0.37f).epsilon(0.002));
+                    CHECK(meter[3] == doctest::Approx(0.37f).epsilon(0.002));
+                    CHECK(glGetError() == GL_NO_ERROR);
+                }
+    ShaderProperties unlitProperties;
+    unlitProperties.lightModel = LightingModel::EmissiveModel;
+    unlitProperties.effects = LightingEffects::CalibratedEmission;
+    unlitProperties.texUsage = TexUsage::DiffuseTexture | TexUsage::EmissiveTexture;
+    auto* unlit = manager.getShader(unlitProperties);
+    REQUIRE(unlit != nullptr);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, textures[2]);
+    for (float scale : { 0.0f, 3.0f })
+    {
+        CAPTURE(scale);
+        manager.setCameraExposure(2.0f);
+        manager.setPhysicalLightScale(0.25f);
+        fixture.renderer.setPipelineState({});
+        unlit->use();
+        unlit->setMVPMatrices(Eigen::Matrix4f::Identity());
+        unlit->lights.diffuse[0] = Eigen::Vector3f::Zero();
+        unlit->materialEmission = emission;
+        unlit->emissiveScale = scale;
+        unlit->opacity = 0.37f;
+        unlit->emissionDimming = 1.0f;
+        triangle.draw();
+        std::array<float, 4> color{}, meter{};
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glReadPixels(16, 16, 1, 1, GL_RGBA, GL_FLOAT, color.data());
+        glReadBuffer(GL_COLOR_ATTACHMENT1);
+        glReadPixels(16, 16, 1, 1, GL_RGBA, GL_FLOAT, meter.data());
+        for (std::size_t channel = 0; channel < 3; ++channel)
+        {
+            float expected = (emission[channel] + texels[2][channel]) * scale;
+            CHECK(color[channel] == doctest::Approx(expected * 2.0f).epsilon(0.002));
+            CHECK(meter[channel] == doctest::Approx(expected * 0.5f).epsilon(0.002));
+        }
+        CHECK(color[3] == doctest::Approx(0.37f).epsilon(0.002));
+        CHECK(glGetError() == GL_NO_ERROR);
+    }
+    glDeleteTextures(3, textures.data());
+}
+
+TEST_CASE("Lit and unlit CMOD emission decode once without tinting by diffuse color")
+{
+    for (bool linear : { false, true })
+    {
+        MeterFixture fixture(linear);
+        FramebufferObject source(32, 32, Attachments, 1, true);
+        REQUIRE(source.isValid());
+        REQUIRE(source.bind());
+        fixture.renderer.setViewport(0, 0, 32, 32);
+        fixture.renderer.getShaderManager().setCameraExposure(2.0f);
+        fixture.renderer.getShaderManager().setPhysicalLightScale(0.25f);
+        constexpr std::array vertices{ -1.0f, -1.0f, 0.0f, 3.0f, -1.0f, 0.0f,
+                                      -1.0f, 3.0f, 0.0f };
+        celestia::gl::VertexObject triangle(celestia::gl::VertexObject::Primitive::Triangles);
+        auto buffer = celestia::gl::Buffer::create(
+            celestia::gl::Buffer::TargetHint::Array, std::as_bytes(std::span{ vertices }),
+            celestia::gl::Buffer::BufferUsage::StaticDraw);
+        triangle.setCount(3);
+        triangle.addVertexBuffer(buffer, CelestiaGLProgram::VertexCoordAttributeIndex, 3,
+                                celestia::gl::VertexObject::DataType::Float, false,
+                                3 * sizeof(float), 0);
+        glVertexAttrib3f(CelestiaGLProgram::NormalAttributeIndex, 0, 0, 1);
+        const Eigen::Matrix4f identity = Eigen::Matrix4f::Identity();
+        LightingState lighting;
+        GLSL_RenderContext lit(&fixture.renderer, lighting, 1.0f,
+                               Eigen::Quaternionf::Identity(), &identity, &identity);
+        GLSLUnlit_RenderContext unlit(&fixture.renderer, &identity, &identity);
+        lit.setEmissiveScale(3.0f);
+        unlit.setEmissiveScale(linear ? 3.0f : 1.0f);
+        cmod::Material material;
+        material.diffuse = cmod::Color(0.0f, 0.0f, 0.0f);
+        material.emissive = cmod::Color(0.5f, 0.25f, 0.125f);
+        material.opacity = 0.37f;
+        for (RenderContext* context : { static_cast<RenderContext*>(&lit),
+                                        static_cast<RenderContext*>(&unlit) })
+        {
+            CAPTURE(linear);
+            CAPTURE(context == &unlit);
+            context->setMaterial(&material, RenderContext::MaterialColorSpace::sRGB);
+            fixture.renderer.setPipelineState({});
+            triangle.draw();
+            std::array<float, 4> color{}, meter{};
+            glReadBuffer(GL_COLOR_ATTACHMENT0);
+            glReadPixels(16, 16, 1, 1, GL_RGBA, GL_FLOAT, color.data());
+            glReadBuffer(GL_COLOR_ATTACHMENT1);
+            glReadPixels(16, 16, 1, 1, GL_RGBA, GL_FLOAT, meter.data());
+            Eigen::Vector3f expected = material.emissive.linearize(linear).toVector3();
+            if (linear)
+                expected *= 3.0f;
+            else if (context == &unlit)
+                expected.setZero();
+            else
+                expected = Color(material.emissive.toVector3()).toVector3();
+            for (std::size_t channel = 0; channel < 3; ++channel)
+            {
+                CHECK(color[channel] == doctest::Approx(expected[channel] * 2.0f).epsilon(0.002));
+                CHECK(meter[channel] == doctest::Approx(expected[channel] * 0.5f).epsilon(0.002));
+            }
+            CHECK(color[3] == doctest::Approx(0.37f).epsilon(0.002));
+            CHECK(glGetError() == GL_NO_ERROR);
+        }
+    }
+}
 
 TEST_CASE("Atmospheric transmission attenuates visual and physical light equally")
 {

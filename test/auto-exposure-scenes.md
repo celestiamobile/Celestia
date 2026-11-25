@@ -42,6 +42,54 @@ pixel-identical output.
 
 ## Production-shader GPU tests
 
+### Authored surface emission
+
+SSC bodies and alternate surfaces accept `NightLuminance` and
+`EmissiveLuminance`, finite nonnegative values in cd/m^2. These specify the
+reference luminance of a **linear white** texel/material; RGB colors modulate
+that reference, rather than being normalized to constant luminance.
+Zero disables the corresponding emission.
+
+In sRGB rendering, the reference defaults are 1 cd/m^2 for night maps and
+100 cd/m^2 for emissive surfaces and CMOD materials. These are authoring
+defaults, **not measured luminances for Earth or arbitrary add-ons**. Override
+them when calibrated asset measurements are available:
+
+```text
+Modify "Earth" "Sol"
+{
+    NightLuminance 1
+}
+```
+
+`EmissiveLuminance` scales both constant CMOD emissive colors and emissive maps,
+independently of diffuse color, albedo, incident illumination and the
+display-only surface dimming. With `Emissive true`, it also scales the body's
+unlit diffuse surface. Generic unlit nebula models use the same default
+reference; this does not normalize them to their catalog magnitudes.
+Stellar surfaces keep their magnitude-derived normalization.
+Emissive bodies' point representations use the same reference-disc luminance,
+not reflected sunlight, and crossfade with the resolved surface. Their points
+preserve authored linear RGB rather than applying stellar green-channel
+normalization or desaturation. As with the
+existing stellar/reflected reference surfaces, textures and irregular geometry
+are not automatically integrated or average-normalized; sparse night maps and
+individual lit-mesh materials do not supply a catalog-level total flux.
+
+The conversion is `L * logicalPixelAngularWidth^2 / 2.54e-6`, where the
+denominator is the conventional zero-magnitude illuminance in lux. This is a
+photopic approximation to V-band Vega units, not a spectral renderer: exact
+cd/m^2-to-V-band conversion depends on the source spectrum. Emission is added
+before atmospheric transmission and camera exposure, enters the physical meter,
+and never changes surface opacity. Night maps retain their existing
+directional day/night switch; it controls where lights are on, not their output.
+Legacy non-sRGB rendering retains its old brightness and material behavior.
+
+The GPU tests cover night/emissive textures over a black diffuse texture,
+constant CMOD emission, zero/multiple lights, albedo, opacity and independent
+visual/physical exposure. The unit test checks integrated emission against
+stellar flux as logical pixel size changes.
+
 The optional macOS desktop-OpenGL `autoexposure_gpu` target exercises the actual
 meter shaders in an offscreen CGL context: isolated pixels and NPOT edges,
 percentile-boundary continuity, clipped HDR recovery and independent display

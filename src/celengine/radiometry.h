@@ -77,4 +77,21 @@ reflectedRadianceScale(float logicalPixelAngularWidth)
     return solarIrradiance * logicalPixelAngularWidth * logicalPixelAngularWidth / std::numbers::pi_v<float>;
 }
 
+// Conventional photopic approximation to the V-band Vega zero point.
+// Exact conversion depends on the source spectrum, which RGB assets do not encode.
+inline float
+emittedRadiance(float luminance, float logicalPixelAngularWidth)
+{
+    constexpr double zeroMagnitudeIlluminance = 2.54e-6; // lux
+    double angle = logicalPixelAngularWidth;
+    return static_cast<float>(luminance * angle * angle / zeroMagnitudeIlluminance);
+}
+
+inline float
+emittedDiscIrradiance(float luminance, float radius, double distance)
+{
+    float angularRadius = static_cast<float>(radius / std::max(distance, static_cast<double>(radius)));
+    return std::numbers::pi_v<float> * emittedRadiance(luminance, angularRadius);
+}
+
 } // namespace celestia::engine::detail

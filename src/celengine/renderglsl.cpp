@@ -273,6 +273,8 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
     if (ri.nightTex != nullptr)
     {
         shadprop.texUsage |= TexUsage::NightTexture;
+        if (gl::sRGBRendering)
+            shadprop.effects = LightingEffects::SurfaceEmission;
         textures.push_back(ri.nightTex);
     }
 
@@ -361,6 +363,7 @@ void renderEllipsoid_GLSL(const RenderInfo& ri,
     prog->setMVPMatrices(*m.projection, *m.modelview);
 
     prog->setLightParameters(ls, ri.color, ri.specularColor, Color::Black);
+    prog->nightEmissiveScale = ri.nightEmissiveScale;
 
     prog->eyePosition = ls.eyePos_obj;
     prog->shininess = ri.specularPower;
@@ -510,6 +513,7 @@ void renderGeometry_GLSL(RenderGeometry* geometry,
 
     // Handle extended material attributes (per model only, not per submesh)
     rc.setLunarLambert(ri.lunarLambert);
+    rc.setEmissiveScale(ri.materialEmissiveScale);
 
     Renderer::PipelineState ps;
     ps.depthMask = true;

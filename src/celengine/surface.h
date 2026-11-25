@@ -46,6 +46,11 @@ struct Surface
     celestia::util::TextureHandle specularTexture{ celestia::util::TextureHandle::Invalid };// specular mask
     celestia::util::TextureHandle overlayTexture{ celestia::util::TextureHandle::Invalid }; // overlay texture, applied last
     float lunarLambert{ 0.0f };     // mix between Lambertian and Lommel-Seeliger (lunar-like) photometric functions
+    // Reference luminances of linear white texels, in cd/m^2; not measured asset values.
+    static constexpr float DefaultNightLuminance = 1.0f;
+    static constexpr float DefaultEmissiveLuminance = 100.0f;
+    float nightLuminance{ DefaultNightLuminance };
+    float emissiveLuminance{ DefaultEmissiveLuminance };
 };
 
 ENUM_CLASS_BITWISE_OPS(Surface::Flags);

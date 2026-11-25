@@ -203,6 +203,10 @@ class Renderer
     void setTextScaleFactor(float);
 
     float getScaleFactor() const;
+    float getLogicalPixelAngularWidth() const
+    {
+        return pixelSize * static_cast<float>(screenDpi) / 96.0f;
+    }
     float getPointWidth() const;
     float getPointHeight() const;
 
@@ -607,7 +611,7 @@ class Renderer
 
     void addLegacyPointHalo(const Eigen::Vector3f& position, const Color& color,
                             float irradiance, float discSizeInPixels = 0.0f,
-                            float pointFraction = 1.0f);
+                            float pointFraction = 1.0f, bool referenceEmission = false);
 
     // Geometric description of a renderable point-like body shared by
     // renderObjectAsPoint / addStarAsPsfPoint, so we can thread the
@@ -617,6 +621,7 @@ class Renderer
         Eigen::Vector3f position;
         float           distance;
         float           radius;
+        bool referenceEmission{ false };
     };
 
     void renderObjectAsPoint(const PointObjectInfo& info,

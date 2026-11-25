@@ -21,6 +21,10 @@
 
 #include <doctest.h>
 
+#include <celengine/body.h>
+#include <celengine/selection.h>
+#include <celengine/simulation.h>
+#include <celengine/surface.h>
 #include <celengine/texmanager.h>
 #include <celengine/texture.h>
 #include <celengine/virtualtex.h>
@@ -118,6 +122,57 @@ writeDDS(const std::filesystem::path& path,
 } // namespace
 
 TEST_SUITE_BEGIN("Loader validation");
+
+TEST_CASE("Surface luminances load and modify without accepting invalid emission")
+{
+    TemporaryDirectory directory;
+    const auto stars = directory.getPath("stars.stc");
+    const auto bodies = directory.getPath("bodies.ssc");
+    const auto config = directory.getPath("celestia.cfg");
+    {
+        std::ofstream out(stars);
+        out << "Star 0 \"EmissionTestSun\" { RA 0 Dec 0 Distance 0 AbsMag 4.81 SpectralType \"G2V\" }";
+        REQUIRE(out.good());
+    }
+    {
+        std::ofstream out(bodies);
+        out << R"ssc(
+"Defaults" "EmissionTestSun" { Radius 1 FixedPosition [ 0 0 1 ] }
+"Lamp" "EmissionTestSun" {
+    Radius 1 FixedPosition [ 0 0 2 ]
+    NightLuminance 2.5 EmissiveLuminance 12
+}
+Modify "Lamp" "EmissionTestSun" { NightLuminance 0 }
+Modify "Lamp" "EmissionTestSun" { NightLuminance -1 EmissiveLuminance "invalid" }
+Modify "Lamp" "EmissionTestSun" { EmissiveLuminance 1e100 }
+AltSurface "TestEmission" "EmissionTestSun/Lamp" {
+    NightLuminance 3 EmissiveLuminance 6
+}
+)ssc";
+        REQUIRE(out.good());
+    }
+    {
+        std::ofstream out(config);
+        out << "Configuration { StarCatalogs [ \"" << stars.generic_string()
+            << "\" ] SolarSystemCatalogs [ \"" << bodies.generic_string()
+            << "\" ] ExtrasDirectories [] }";
+        REQUIRE(out.good());
+    }
+    CelestiaCore core;
+    REQUIRE(core.initSimulation(config));
+    auto defaults = core.getSimulation()->findObjectFromPath("EmissionTestSun/Defaults");
+    auto lamp = core.getSimulation()->findObjectFromPath("EmissionTestSun/Lamp");
+    REQUIRE(defaults.body() != nullptr);
+    REQUIRE(lamp.body() != nullptr);
+    CHECK(defaults.body()->getSurface().nightLuminance == 1.0f);
+    CHECK(defaults.body()->getSurface().emissiveLuminance == 100.0f);
+    CHECK(lamp.body()->getSurface().nightLuminance == 0.0f);
+    CHECK(lamp.body()->getSurface().emissiveLuminance == 12.0f);
+    auto* alternate = GetBodyFeaturesManager()->getAlternateSurface(lamp.body(), "TestEmission");
+    REQUIRE(alternate != nullptr);
+    CHECK(alternate->nightLuminance == 3.0f);
+    CHECK(alternate->emissiveLuminance == 6.0f);
+}
 
 TEST_CASE("DDS loader rejects truncated pixel data")
 {

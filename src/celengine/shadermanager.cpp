@@ -1592,6 +1592,12 @@ buildFragmentShader(const ShaderProperties& props)
     source += FragmentHeader;
     if (props.effects == LightingEffects::CalibratedEmission)
         source += DeclareUniform("emissiveScale", Shader_Float);
+    if (props.effects == LightingEffects::SurfaceEmission)
+    {
+        source += DeclareUniform("nightEmissiveScale", Shader_Float);
+        source += DeclareUniform("materialEmissiveScale", Shader_Float);
+        source += DeclareUniform("materialEmission", Shader_Vector3);
+    }
 
     std::string diffTexCoord("diffTexCoord");
     std::string specTexCoord;
@@ -1948,7 +1954,7 @@ buildFragmentShader(const ShaderProperties& props)
 
     if (util::is_set(props.texUsage, TexUsage::NightTexture))
     {
-        if (useSeparateDiffuse)
+        if (useSeparateDiffuse && props.nLights > 0)
         {
             for (int k = 0; k < props.nLights - 1; k++)
                 source += SeparateDiffuse(k) + " + ";
@@ -1956,14 +1962,21 @@ buildFragmentShader(const ShaderProperties& props)
         }
 
         source += NightTextureBlend();
-        source += "fragColor += texture(nightTex, " + nightTexCoord + ".st) * totalLight;\n";
+        if (props.effects == LightingEffects::SurfaceEmission)
+            source += "fragColor.rgb += texture(nightTex, " + nightTexCoord + ".st).rgb * (totalLight * nightEmissiveScale);\n";
+        else
+            source += "fragColor += texture(nightTex, " + nightTexCoord + ".st) * totalLight;\n";
     }
 
-    // Add in the emissive color
-    // TODO: support a constant emissive color, not just an emissive texture
+    if (props.effects == LightingEffects::SurfaceEmission)
+        source += "fragColor.rgb += materialEmission;\n";
+
     if (util::is_set(props.texUsage, TexUsage::EmissiveTexture))
     {
-        source += "fragColor += texture(emissiveTex, " + emissiveTexCoord + ".st);\n";
+        if (props.effects == LightingEffects::SurfaceEmission)
+            source += "fragColor.rgb += texture(emissiveTex, " + emissiveTexCoord + ".st).rgb * materialEmissiveScale;\n";
+        else
+            source += "fragColor += texture(emissiveTex, " + emissiveTexCoord + ".st);\n";
     }
 
     // Include the effect of atmospheric scattering.
@@ -2370,7 +2383,8 @@ buildEmissiveVertexShader(const ShaderProperties& props, bool fisheyeEnabled)
 
     // Optional texture coordinates (generated automatically for point
     // sprites.)
-    if (util::is_set(props.texUsage, TexUsage::DiffuseTexture) && !props.usePointSize())
+    if ((util::is_set(props.texUsage, TexUsage::DiffuseTexture) ||
+         util::is_set(props.texUsage, TexUsage::EmissiveTexture)) && !props.usePointSize())
         source += "    v_TexCoord0.st = " + TexCoord2D(0, props.hasTextureCoordTransform()) + ";\n";
 
     // Set the color.
@@ -2408,10 +2422,15 @@ buildEmissiveFragmentShader(const ShaderProperties& props)
     source += CameraExposureDefine;
     source += FragmentHeader;
     if (props.effects == LightingEffects::CalibratedEmission)
+    {
         source += DeclareUniform("emissiveScale", Shader_Float);
+        source += DeclareUniform("materialEmission", Shader_Vector3);
+    }
 
     if (util::is_set(props.texUsage, TexUsage::DiffuseTexture))
         source += DeclareUniform("diffTex", Shader_Sampler2D);
+    if (util::is_set(props.texUsage, TexUsage::EmissiveTexture))
+        source += DeclareUniform("emissiveTex", Shader_Sampler2D);
 
     if (props.usePointSize())
         source += DeclareInput("pointFade", Shader_Float);
@@ -2445,7 +2464,14 @@ buildEmissiveFragmentShader(const ShaderProperties& props)
     }
 
     if (props.effects == LightingEffects::CalibratedEmission)
+    {
+        source += "    fragColor.rgb += materialEmission;\n";
+        if (util::is_set(props.texUsage, TexUsage::EmissiveTexture))
+            source += props.usePointSize()
+                ? "    fragColor.rgb += texture(emissiveTex, gl_PointCoord).rgb;\n"
+                : "    fragColor.rgb += texture(emissiveTex, v_TexCoord0.st).rgb;\n";
         source += "    fragColor.rgb *= emissiveScale;\n";
+    }
     source += CameraExposureOutput;
     source += "}\n";
     // End of main()
@@ -3030,6 +3056,17 @@ CelestiaGLProgram::CelestiaGLProgram(GLProgram&& _program,
     {
         emissiveScale = floatParam("emissiveScale");
         emissiveScale = 1.0f;
+        materialEmission = vec3Param("materialEmission");
+        materialEmission = Eigen::Vector3f::Zero();
+    }
+    if (props.effects == LightingEffects::SurfaceEmission)
+    {
+        nightEmissiveScale = floatParam("nightEmissiveScale");
+        nightEmissiveScale = 1.0f;
+        materialEmissiveScale = floatParam("materialEmissiveScale");
+        materialEmissiveScale = 1.0f;
+        materialEmission = vec3Param("materialEmission");
+        materialEmission = Eigen::Vector3f::Zero();
     }
 }
 
@@ -3372,7 +3409,15 @@ CelestiaGLProgram::setLightParameters(const LightingState& ls,
     }
 
     eyePosition = ls.eyePos_obj;
-    ambientColor = ls.ambientColor.cwiseProduct(materialDiffuse) + materialEmissive;
+    if (props.effects == LightingEffects::SurfaceEmission)
+    {
+        ambientColor = ls.ambientColor.cwiseProduct(materialDiffuse);
+        materialEmission = materialEmissive;
+    }
+    else
+    {
+        ambientColor = ls.ambientColor.cwiseProduct(materialDiffuse) + materialEmissive;
+    }
     opacity = materialOpacity;
 }
 
